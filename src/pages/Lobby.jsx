@@ -41,6 +41,7 @@ export default function Lobby({ goMatch, back }) {
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
+  const [activeMatch, setActiveMatch] = useState(null);
 
   // =========================
   // INIT
@@ -54,6 +55,7 @@ export default function Lobby({ goMatch, back }) {
       const u = await account.get();
       setUser(u);
 
+      // wallet
       const w = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -64,14 +66,50 @@ export default function Lobby({ goMatch, back }) {
         setWallet(w.documents[0]);
       }
 
+      // 🔥 CHECK ACTIVE MATCH FIRST
+      await checkActiveMatch(u.$id);
+
+      // load open matches
       await loadMatches();
+
     } catch (err) {
       console.error("INIT ERROR:", err);
     }
   }
 
   // =========================
-  // LOAD MATCHES
+  // CHECK ACTIVE MATCH
+  // =========================
+  async function checkActiveMatch(userId) {
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [
+          Query.or([
+            Query.equal("hostId", userId),
+            Query.equal("opponentId", userId)
+          ]),
+          Query.notEqual("status", "finished")
+        ]
+      );
+
+      if (res.documents.length) {
+        const m = res.documents[0];
+
+        setActiveMatch(m);
+
+        // 🔥 AUTO CONTINUE GAME
+        goMatch(m.$id, m.stake);
+      }
+
+    } catch (err) {
+      console.error("ACTIVE MATCH ERROR:", err);
+    }
+  }
+
+  // =========================
+  // LOAD WAITING MATCHES
   // =========================
   async function loadMatches() {
     try {
@@ -85,6 +123,7 @@ export default function Lobby({ goMatch, back }) {
       );
 
       setMatches(res.documents);
+
     } catch (err) {
       console.error("LOAD MATCHES ERROR:", err);
     }
@@ -112,7 +151,6 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔄 REFRESH MATCH (ANTI-RACE)
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -124,10 +162,9 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔒 LOCK FUNDS
+      // lock
       await lockFunds(user.$id, fresh.stake);
 
-      // ✅ UPDATE MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -142,14 +179,11 @@ export default function Lobby({ goMatch, back }) {
       goMatch(fresh.$id, fresh.stake);
 
     } catch (err) {
-      showError(err, "JOIN MATCH FAILED");
+      showError(err, "JOIN FAILED");
 
-      // 🔁 REFUND
       try {
         await unlockFunds(user.$id, Number(match?.stake || 0));
-      } catch (e) {
-        console.warn("Unlock failed:", e);
-      }
+      } catch {}
     }
   }
 
@@ -159,39 +193,22 @@ export default function Lobby({ goMatch, back }) {
   async function createMatch() {
     const amount = Number(stake);
 
-    if (!amount || amount <= 0) {
-      alert("Enter valid stake");
-      return;
-    }
-
-    if (amount < 50) {
-      alert("Minimum stake is ₦50");
-      return;
-    }
-
-    if ((wallet?.balance || 0) < amount) {
-      alert("Insufficient balance");
-      return;
-    }
-
-    if (!user) {
-      alert("User not loaded");
-      return;
-    }
+    if (!amount || amount <= 0) return alert("Enter valid stake");
+    if (amount < 50) return alert("Minimum stake is ₦50");
+    if ((wallet?.balance || 0) < amount)
+      return alert("Insufficient balance");
 
     let match = null;
 
     try {
-      // =========================
-      // STEP 1: CREATE MATCH
-      // =========================
+      // create first
       match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
         {
           hostId: user.$id,
-          opponentId: "", // ✅ IMPORTANT FIX
+          opponentId: "",
           stake: amount,
           pot: amount,
           status: "waiting",
@@ -199,30 +216,20 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
-      // =========================
-      // STEP 2: LOCK FUNDS
-      // =========================
+      // lock
       await lockFunds(user.$id, amount);
 
-      // =========================
-      // SUCCESS
-      // =========================
       goMatch(match.$id, amount);
 
     } catch (err) {
-      showError(err, "CREATE MATCH FAILED");
+      showError(err, "CREATE FAILED");
 
-      // 🔁 ROLLBACK MATCH
       if (match?.$id) {
-        try {
-          await databases.deleteDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            match.$id
-          );
-        } catch (e) {
-          console.warn("Rollback delete failed:", e);
-        }
+        await databases.deleteDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          match.$id
+        );
       }
     }
   }
@@ -232,15 +239,31 @@ export default function Lobby({ goMatch, back }) {
   // =========================
   return (
     <div style={styles.container}>
-      <h2>🎮 Active Matches</h2>
+      <h2>🎮 Lobby</h2>
+
+      {/* 🔥 ACTIVE MATCH */}
+      {activeMatch && (
+        <div style={styles.activeBox}>
+          <p>⚡ You have an ongoing match</p>
+          <button
+            style={styles.btn}
+            onClick={() =>
+              goMatch(activeMatch.$id, activeMatch.stake)
+            }
+          >
+            Resume Game
+          </button>
+        </div>
+      )}
+
+      <h3>Available Matches</h3>
 
       {matches.length === 0 && <p>No active matches</p>}
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-
-          <button style={styles.btn} onClick={() => joinMatch(m)}>
+          <button onClick={() => joinMatch(m)} style={styles.btn}>
             Join
           </button>
         </div>
@@ -273,9 +296,15 @@ export default function Lobby({ goMatch, back }) {
 const styles = {
   container: {
     padding: 20,
-    color: "white",
     background: "#0f172a",
+    color: "white",
     minHeight: "100vh"
+  },
+  activeBox: {
+    background: "#1e293b",
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20
   },
   card: {
     background: "#111827",
@@ -288,22 +317,19 @@ const styles = {
     background: "gold",
     border: "none",
     borderRadius: 6,
-    marginTop: 5,
     cursor: "pointer"
   },
   input: {
     width: "100%",
     padding: 10,
     marginTop: 10,
-    borderRadius: 6,
-    border: "none"
+    borderRadius: 6
   },
   back: {
     marginTop: 20,
-    background: "gray",
     padding: 10,
+    background: "gray",
     border: "none",
-    borderRadius: 6,
-    cursor: "pointer"
+    borderRadius: 6
   }
 };
