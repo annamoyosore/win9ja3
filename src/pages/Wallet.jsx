@@ -1,75 +1,115 @@
 // =========================
 // IMPORTS
 // =========================
-import { databases, DATABASE_ID, WALLET_COLLECTION } from "./appwrite";
-import { Query } from "appwrite";
+import { useEffect, useState } from "react";
+import { account } from "../lib/appwrite";
+import { getWallet } from "../lib/wallet";
 
 // =========================
-// GET WALLET
+// COMPONENT
 // =========================
-export async function getWallet(userId) {
-  const res = await databases.listDocuments(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    [Query.equal("userId", userId)]
-  );
+export default function Wallet({ back }) {
+  const [wallet, setWallet] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  return res.documents[0];
-}
+  // =========================
+  // LOAD WALLET
+  // =========================
+  useEffect(() => {
+    load();
+  }, []);
 
-// =========================
-// LOCK FUNDS
-// =========================
-export async function lockFunds(userId, amount) {
-  const wallet = await getWallet(userId);
-
-  if (!wallet) throw new Error("Wallet not found");
-
-  if (wallet.balance < amount) {
-    throw new Error("Insufficient balance");
+  async function load() {
+    try {
+      const user = await account.get();
+      const w = await getWallet(user.$id);
+      setWallet(w);
+    } catch (err) {
+      console.error("Wallet load error:", err);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  return databases.updateDocument(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    wallet.$id,
-    {
-      balance: wallet.balance - amount,
-      locked: (wallet.locked || 0) + amount
-    }
+  // =========================
+  // LOADING UI
+  // =========================
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <h2>💳 Wallet</h2>
+        <p>Loading wallet...</p>
+      </div>
+    );
+  }
+
+  // =========================
+  // UI
+  // =========================
+  return (
+    <div style={styles.container}>
+      <h1>💳 Wallet</h1>
+
+      <div style={styles.card}>
+        <p>
+          💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
+        </p>
+
+        <p>
+          🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}
+        </p>
+      </div>
+
+      {/* ACTIONS */}
+      <button style={styles.btn}>➕ Deposit (coming soon)</button>
+      <button style={styles.btn}>➖ Withdraw (coming soon)</button>
+
+      {/* BACK */}
+      <button style={styles.back} onClick={back}>
+        ⬅ Back
+      </button>
+    </div>
   );
 }
 
 // =========================
-// RELEASE FUNDS (REFUND)
+// STYLES
 // =========================
-export async function releaseFunds(userId, amount) {
-  const wallet = await getWallet(userId);
+const styles = {
+  container: {
+    textAlign: "center",
+    padding: 20,
+    background: "#0f172a",
+    color: "white",
+    minHeight: "100vh"
+  },
 
-  return databases.updateDocument(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    wallet.$id,
-    {
-      balance: wallet.balance + amount,
-      locked: (wallet.locked || 0) - amount
-    }
-  );
-}
+  card: {
+    padding: 20,
+    background: "#111827",
+    borderRadius: 10,
+    marginBottom: 20,
+    fontSize: 18
+  },
 
-// =========================
-// PAYOUT WINNER
-// =========================
-export async function payoutWinner(userId, amount) {
-  const wallet = await getWallet(userId);
+  btn: {
+    display: "block",
+    width: "100%",
+    padding: 12,
+    marginTop: 10,
+    background: "gold",
+    border: "none",
+    borderRadius: 8,
+    fontWeight: "bold",
+    cursor: "pointer"
+  },
 
-  return databases.updateDocument(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    wallet.$id,
-    {
-      balance: wallet.balance + amount,
-      locked: (wallet.locked || 0) - amount / 2 // remove their own stake
-    }
-  );
-}
+  back: {
+    marginTop: 20,
+    padding: 10,
+    background: "gray",
+    border: "none",
+    borderRadius: 8,
+    cursor: "pointer"
+  }
+};
