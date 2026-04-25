@@ -1,11 +1,65 @@
 import { useEffect, useState } from "react";
-import { databases, DATABASE_ID, MATCH_COLLECTION } from "../lib/appwrite";
+import {
+  databases,
+  DATABASE_ID,
+  MATCH_COLLECTION
+} from "../lib/appwrite";
+
+const GAME_COLLECTION = "games";
 
 // =========================
-// MATCH WAITING PAGE
+// CREATE GAME FUNCTION
+// =========================
+function createDeck() {
+  const shapes = ["circle", "triangle", "square", "star", "cross"];
+  const deck = [];
+
+  for (const shape of shapes) {
+    for (let i = 1; i <= 13; i++) {
+      if (i === 6 || i === 9) continue;
+      deck.push({ shape, number: i });
+    }
+    deck.push({ shape, number: 14 });
+  }
+
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+async function createGame(match) {
+  const deck = createDeck();
+
+  return databases.createDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    match.$id, // 🔥 SAME ID AS MATCH
+    {
+      players: [match.hostId, match.opponentId],
+
+      hands: JSON.stringify([
+        deck.splice(0, 6),
+        deck.splice(0, 6)
+      ]),
+
+      deck: JSON.stringify(deck),
+      discard: JSON.stringify([deck.pop()]),
+
+      scores: JSON.stringify({ p1: 0, p2: 0 }),
+      round: 1,
+
+      turn: match.hostId,
+      status: "running",
+      winnerId: "",
+      turnStartTime: new Date().toISOString()
+    }
+  );
+}
+
+// =========================
+// MATCH PAGE
 // =========================
 export default function Match({ matchId, stake, startGame, cancel }) {
   const [status, setStatus] = useState("waiting");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (!matchId) return;
@@ -20,21 +74,38 @@ export default function Match({ matchId, stake, startGame, cancel }) {
 
         setStatus(match.status);
 
-        // 🎮 When opponent joins → start game
-        if (match.status === "matched") {
+        // =========================
+        // 🔥 MATCH FOUND → CREATE GAME
+        // =========================
+        if (match.status === "matched" && !creating) {
+          setCreating(true);
+
+          try {
+            // 🔥 TRY CREATE GAME (only first user succeeds)
+            await createGame(match);
+
+            console.log("Game created");
+
+          } catch (err) {
+            // ⚠️ This will fail for second player (already created)
+            console.warn("Game already exists or creation failed:", err.message);
+          }
+
           clearInterval(interval);
 
+          // small delay for DB sync
           setTimeout(() => {
             startGame();
-          }, 1000);
+          }, 800);
         }
+
       } catch (err) {
         console.error("Match error:", err);
       }
-    }, 2000);
+    }, 1500);
 
     return () => clearInterval(interval);
-  }, [matchId]);
+  }, [matchId, creating]);
 
   // =========================
   // UI
@@ -43,7 +114,6 @@ export default function Match({ matchId, stake, startGame, cancel }) {
     <div style={styles.container}>
       <h2>🔎 Searching for opponent...</h2>
 
-      {/* ✅ NAIRA FORMAT */}
       <h3>💰 Stake: ₦{Number(stake).toLocaleString()}</h3>
 
       <p>Status: {status}</p>
@@ -51,10 +121,9 @@ export default function Match({ matchId, stake, startGame, cancel }) {
       <div style={styles.loader}></div>
 
       <p style={{ marginTop: 20 }}>
-        Please wait while we find a player with the same stake...
+        Please wait while we find a player...
       </p>
 
-      {/* ✅ CANCEL BUTTON */}
       <button style={styles.cancelBtn} onClick={cancel}>
         ❌ Cancel
       </button>
