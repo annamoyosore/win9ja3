@@ -8,7 +8,7 @@ import {
 } from "./appwrite";
 
 import { ID, Query } from "appwrite";
-import { lockFunds } from "../utils/wallet"; // ✅ IMPORTANT
+import { lockFunds, unlockFunds } from "../utils/wallet"; // ✅ include unlock
 
 // =========================
 // FIND OR CREATE MATCH
@@ -16,7 +16,18 @@ import { lockFunds } from "../utils/wallet"; // ✅ IMPORTANT
 export async function findMatch(userId, stake) {
   try {
     // =========================
-    // FIND AVAILABLE MATCH
+    // VALIDATION
+    // =========================
+    if (!userId) throw new Error("User not authenticated");
+
+    stake = Number(stake);
+
+    if (!stake || stake <= 0) {
+      throw new Error("Invalid stake amount");
+    }
+
+    // =========================
+    // FIND AVAILABLE MATCHES
     // =========================
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -24,71 +35,89 @@ export async function findMatch(userId, stake) {
       [
         Query.equal("stake", stake),
         Query.equal("status", "waiting"),
-        Query.limit(5) // reduce race issues
+        Query.limit(5)
       ]
     );
 
+    // =========================
+    // TRY JOIN EXISTING MATCH
+    // =========================
     for (const match of res.documents) {
-      // ❌ skip own match
-      if (match.hostId === userId) continue;
+      try {
+        // ❌ skip own match
+        if (match.hostId === userId) continue;
 
-      // =========================
-      // RE-FETCH (ANTI-RACE)
-      // =========================
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        match.$id
-      );
+        // 🔄 re-fetch (anti-race)
+        const fresh = await databases.getDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          match.$id
+        );
 
-      if (fresh.opponentId) continue;
+        // ❌ already taken
+        if (fresh.opponentId) continue;
 
-      // =========================
-      // LOCK FUNDS FIRST
-      // =========================
-      await lockFunds(userId, fresh.stake);
+        // =========================
+        // LOCK FUNDS
+        // =========================
+        await lockFunds(userId, fresh.stake);
 
-      // =========================
-      // JOIN MATCH
-      // =========================
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        fresh.$id,
-        {
-          opponentId: userId,
-          status: "matched",
-          pot: fresh.stake * 2
-        }
-      );
+        // =========================
+        // JOIN MATCH
+        // =========================
+        await databases.updateDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          fresh.$id,
+          {
+            opponentId: userId,
+            status: "matched",
+            pot: fresh.stake * 2
+          }
+        );
 
-      return fresh.$id;
+        return fresh.$id;
+
+      } catch (joinErr) {
+        console.warn("Join attempt failed, trying next match...", joinErr);
+        continue; // try next available match
+      }
     }
 
     // =========================
-    // NO MATCH → CREATE ONE
+    // CREATE NEW MATCH
     // =========================
-    await lockFunds(userId, stake);
+    try {
+      await lockFunds(userId, stake);
 
-    const newMatch = await databases.createDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      ID.unique(),
-      {
-        hostId: userId,
-        opponentId: null, // ✅ FIXED
-        stake,
-        pot: stake,
-        status: "waiting",
-        winner: null,
-        createdAt: new Date().toISOString()
-      }
-    );
+      const newMatch = await databases.createDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        ID.unique(),
+        {
+          hostId: userId,
+          opponentId: null,
+          stake,
+          pot: stake,
+          status: "waiting",
+          winner: null,
+          createdAt: new Date().toISOString()
+        }
+      );
 
-    return newMatch.$id;
+      return newMatch.$id;
+
+    } catch (createErr) {
+      console.error("Create match failed:", createErr);
+
+      // 🔁 refund if lock happened but creation failed
+      await unlockFunds(userId, stake);
+
+      throw createErr;
+    }
 
   } catch (err) {
     console.error("Matchmaking error:", err);
-    throw new Error("Matchmaking failed");
+    throw new Error(err.message || "Matchmaking failed");
   }
 }
