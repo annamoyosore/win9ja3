@@ -1,48 +1,106 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import {
   account,
   databases,
   DATABASE_ID,
   MATCH_COLLECTION,
+  WALLET_COLLECTION,
   ID,
   Query
 } from "../lib/appwrite";
 
+// =========================
+// COMPONENT
+// =========================
 export default function Lobby({ goMatch, back }) {
   const [matches, setMatches] = useState([]);
   const [stake, setStake] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [wallet, setWallet] = useState(null);
 
+  // =========================
+  // LOAD DATA
+  // =========================
   useEffect(() => {
-    loadMatches();
+    init();
   }, []);
 
-  async function loadMatches() {
+  async function init() {
     try {
-      const res = await databases.listDocuments(
+      const u = await account.get();
+      setUser(u);
+
+      const w = await databases.listDocuments(
         DATABASE_ID,
-        MATCH_COLLECTION,
-        [
-          Query.equal("status", "waiting"),
-          Query.orderDesc("$createdAt")
-        ]
+        WALLET_COLLECTION,
+        [Query.equal("userId", u.$id)]
       );
 
-      setMatches(res.documents);
+      if (w.documents.length) setWallet(w.documents[0]);
+
+      loadMatches();
     } catch (err) {
       console.error(err);
-    } finally {
-      setLoading(false);
     }
   }
 
   // =========================
-  // JOIN MATCH
+  // LOAD MATCHES
+  // =========================
+  async function loadMatches() {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [
+        Query.equal("status", "waiting"),
+        Query.orderDesc("$createdAt")
+      ]
+    );
+
+    setMatches(res.documents);
+  }
+
+  // =========================
+  // JOIN MATCH (SECURE)
   // =========================
   async function joinMatch(match) {
     try {
-      const user = await account.get();
+      if (!user) return;
 
+      // ❌ Prevent self join
+      if (match.player1 === user.$id) {
+        alert("You cannot join your own match");
+        return;
+      }
+
+      // ❌ Prevent full match
+      if (match.player2) {
+        alert("Match already full");
+        return;
+      }
+
+      // ❌ Check balance
+      if ((wallet?.balance || 0) < match.stake) {
+        alert("Insufficient balance");
+        return;
+      }
+
+      // 🔒 RE-FETCH (ANTI RACE CONDITION)
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        match.$id
+      );
+
+      if (fresh.player2) {
+        alert("Someone just joined this match");
+        return;
+      }
+
+      // ✅ SAFE UPDATE
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -54,14 +112,15 @@ export default function Lobby({ goMatch, back }) {
       );
 
       goMatch(match.$id, match.stake);
+
     } catch (err) {
       console.error(err);
-      alert("Failed to join match");
+      alert("Join failed");
     }
   }
 
   // =========================
-  // CREATE MATCH
+  // CREATE MATCH (SECURE)
   // =========================
   async function createMatch() {
     const amount = Number(stake);
@@ -71,9 +130,17 @@ export default function Lobby({ goMatch, back }) {
       return;
     }
 
-    try {
-      const user = await account.get();
+    if (amount < 50) {
+      alert("Minimum stake is ₦50");
+      return;
+    }
 
+    if ((wallet?.balance || 0) < amount) {
+      alert("Insufficient balance");
+      return;
+    }
+
+    try {
       const match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -88,17 +155,16 @@ export default function Lobby({ goMatch, back }) {
       );
 
       goMatch(match.$id, amount);
+
     } catch (err) {
       console.error(err);
-      alert("Failed to create match");
+      alert("Create failed");
     }
   }
 
   // =========================
   // UI
   // =========================
-  if (loading) return <p>Loading lobby...</p>;
-
   return (
     <div style={styles.container}>
       <h2>🎮 Active Matches</h2>
@@ -110,7 +176,10 @@ export default function Lobby({ goMatch, back }) {
         <div key={m.$id} style={styles.card}>
           <p>💰 ₦{m.stake.toLocaleString()}</p>
 
-          <button onClick={() => joinMatch(m)} style={styles.btn}>
+          <button
+            style={styles.btn}
+            onClick={() => joinMatch(m)}
+          >
             Join
           </button>
         </div>
@@ -138,6 +207,9 @@ export default function Lobby({ goMatch, back }) {
   );
 }
 
+// =========================
+// STYLES
+// =========================
 const styles = {
   container: {
     padding: 20,
