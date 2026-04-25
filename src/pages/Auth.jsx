@@ -9,10 +9,19 @@ import {
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
-  const [name, setName] = useState(""); // ✅ NEW
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  async function ensureNoSession() {
+    try {
+      const sessions = await account.listSessions();
+      for (const s of sessions.sessions) {
+        await account.deleteSession(s.$id);
+      }
+    } catch {}
+  }
 
   async function handle() {
     if (!email || !password || (!isLogin && !name)) {
@@ -24,21 +33,24 @@ export default function Auth({ onLogin }) {
       setLoading(true);
 
       if (isLogin) {
-        // ✅ LOGIN
-        await account.createEmailPasswordSession(email, password);
+        // ✅ LOGIN (MATCHES YOUR WORKING PROJECT)
+        await account.createEmailSession(email, password);
       } else {
-        // ✅ REGISTER WITH NAME
-        await account.create(
+        // 🔥 CLEAN OLD SESSION
+        await ensureNoSession();
+
+        // ✅ REGISTER
+        const user = await account.create(
           ID.unique(),
           email,
           password,
-          name // 👈 THIS SAVES USERNAME
+          name
         );
 
-        // login after register
-        await account.createEmailPasswordSession(email, password);
+        // ✅ LOGIN AFTER REGISTER
+        await account.createEmailSession(email, password);
 
-        const user = await account.get();
+        const currentUser = await account.get();
 
         // ✅ CREATE WALLET
         await databases.createDocument(
@@ -46,15 +58,16 @@ export default function Auth({ onLogin }) {
           WALLET_COLLECTION,
           ID.unique(),
           {
-            userId: user.$id,
+            userId: currentUser.$id,
             balance: 0
           }
         );
       }
 
       onLogin();
+
     } catch (e) {
-      console.error("Auth error:", e);
+      console.error(e);
       alert(e.message || "Something went wrong");
     } finally {
       setLoading(false);
@@ -64,12 +77,10 @@ export default function Auth({ onLogin }) {
   return (
     <div style={styles.container}>
       <div style={styles.box}>
-        {/* 🔥 SITE NAME */}
         <h1 style={styles.logo}>🎮 Win9ja</h1>
 
         <h2>{isLogin ? "Login" : "Register"}</h2>
 
-        {/* ✅ SHOW NAME ONLY ON REGISTER */}
         {!isLogin && (
           <input
             style={styles.input}
@@ -83,7 +94,7 @@ export default function Auth({ onLogin }) {
           style={styles.input}
           placeholder="Email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => setEmail(e.target.value.trim())}
         />
 
         <input
@@ -94,16 +105,8 @@ export default function Auth({ onLogin }) {
           onChange={(e) => setPassword(e.target.value)}
         />
 
-        <button
-          style={styles.button}
-          onClick={handle}
-          disabled={loading}
-        >
-          {loading
-            ? "Please wait..."
-            : isLogin
-            ? "Login"
-            : "Register"}
+        <button style={styles.button} onClick={handle} disabled={loading}>
+          {loading ? "Please wait..." : isLogin ? "Login" : "Register"}
         </button>
 
         <p style={styles.switch} onClick={() => setIsLogin(!isLogin)}>
@@ -114,9 +117,6 @@ export default function Auth({ onLogin }) {
   );
 }
 
-// =========================
-// STYLES
-// =========================
 const styles = {
   container: {
     minHeight: "100vh",
@@ -134,8 +134,8 @@ const styles = {
     textAlign: "center"
   },
   logo: {
-    marginBottom: 10,
-    color: "gold"
+    color: "gold",
+    marginBottom: 10
   },
   input: {
     width: "100%",
@@ -150,8 +150,7 @@ const styles = {
     background: "gold",
     border: "none",
     borderRadius: 8,
-    fontWeight: "bold",
-    cursor: "pointer"
+    fontWeight: "bold"
   },
   switch: {
     marginTop: 10,
