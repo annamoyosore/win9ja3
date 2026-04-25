@@ -8,12 +8,14 @@ import {
 } from "./appwrite";
 
 import { ID, Query } from "appwrite";
-import { lockFunds, unlockFunds } from "../utils/wallet"; // ✅ include unlock
+import { lockFunds, releaseFunds } from "./wallet"; // ✅ FIXED PATH + NAME
 
 // =========================
 // FIND OR CREATE MATCH
 // =========================
 export async function findMatch(userId, stake) {
+  let locked = false;
+
   try {
     // =========================
     // VALIDATION
@@ -47,7 +49,7 @@ export async function findMatch(userId, stake) {
         // ❌ skip own match
         if (match.hostId === userId) continue;
 
-        // 🔄 re-fetch (anti-race)
+        // 🔄 RE-FETCH (ANTI-RACE)
         const fresh = await databases.getDocument(
           DATABASE_ID,
           MATCH_COLLECTION,
@@ -61,6 +63,7 @@ export async function findMatch(userId, stake) {
         // LOCK FUNDS
         // =========================
         await lockFunds(userId, fresh.stake);
+        locked = true;
 
         // =========================
         // JOIN MATCH
@@ -79,17 +82,25 @@ export async function findMatch(userId, stake) {
         return fresh.$id;
 
       } catch (joinErr) {
-        console.warn("Join attempt failed, trying next match...", joinErr);
-        continue; // try next available match
+        console.warn("Join failed:", joinErr);
+
+        // 🔁 rollback lock if failed
+        if (locked) {
+          await releaseFunds(userId, stake);
+          locked = false;
+        }
+
+        continue;
       }
     }
 
     // =========================
     // CREATE NEW MATCH
     // =========================
-    try {
-      await lockFunds(userId, stake);
+    await lockFunds(userId, stake);
+    locked = true;
 
+    try {
       const newMatch = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -108,10 +119,12 @@ export async function findMatch(userId, stake) {
       return newMatch.$id;
 
     } catch (createErr) {
-      console.error("Create match failed:", createErr);
+      console.error("Create failed:", createErr);
 
-      // 🔁 refund if lock happened but creation failed
-      await unlockFunds(userId, stake);
+      // 🔁 rollback lock
+      if (locked) {
+        await releaseFunds(userId, stake);
+      }
 
       throw createErr;
     }
