@@ -1,64 +1,75 @@
 // =========================
 // IMPORTS
 // =========================
-import { useEffect, useState } from "react";
-import {
-  account,
-  databases,
-  DATABASE_ID,
-  WALLET_COLLECTION,
-  Query
-} from "../lib/appwrite";
+import { databases, DATABASE_ID, WALLET_COLLECTION } from "./appwrite";
+import { Query } from "appwrite";
 
 // =========================
-// COMPONENT
+// GET WALLET
 // =========================
-export default function Wallet({ back }) {
-  const [wallet, setWallet] = useState(null);
+export async function getWallet(userId) {
+  const res = await databases.listDocuments(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    [Query.equal("userId", userId)]
+  );
 
-  // =========================
-  // LOAD WALLET
-  // =========================
-  useEffect(() => {
-    load();
-  }, []);
+  return res.documents[0];
+}
 
-  async function load() {
-    try {
-      const user = await account.get();
+// =========================
+// LOCK FUNDS
+// =========================
+export async function lockFunds(userId, amount) {
+  const wallet = await getWallet(userId);
 
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", user.$id)]
-      );
+  if (!wallet) throw new Error("Wallet not found");
 
-      if (res.documents.length) {
-        setWallet(res.documents[0]);
-      }
-    } catch (err) {
-      console.error("Wallet load error:", err);
-    }
+  if (wallet.balance < amount) {
+    throw new Error("Insufficient balance");
   }
 
-  // =========================
-  // UI
-  // =========================
-  return (
-    <div style={styles.container}>
-      <h1>💳 Wallet</h1>
+  return databases.updateDocument(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    wallet.$id,
+    {
+      balance: wallet.balance - amount,
+      locked: (wallet.locked || 0) + amount
+    }
+  );
+}
 
-      <div style={styles.card}>
-        💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
-      </div>
+// =========================
+// RELEASE FUNDS (REFUND)
+// =========================
+export async function releaseFunds(userId, amount) {
+  const wallet = await getWallet(userId);
 
-      <button style={styles.btn}>➕ Deposit (coming)</button>
-      <button style={styles.btn}>➖ Withdraw (coming)</button>
+  return databases.updateDocument(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    wallet.$id,
+    {
+      balance: wallet.balance + amount,
+      locked: (wallet.locked || 0) - amount
+    }
+  );
+}
 
-      {/* ✅ FIXED */}
-      <button style={styles.back} onClick={back}>
-        ⬅ Back
-      </button>
-    </div>
+// =========================
+// PAYOUT WINNER
+// =========================
+export async function payoutWinner(userId, amount) {
+  const wallet = await getWallet(userId);
+
+  return databases.updateDocument(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    wallet.$id,
+    {
+      balance: wallet.balance + amount,
+      locked: (wallet.locked || 0) - amount / 2 // remove their own stake
+    }
   );
 }
