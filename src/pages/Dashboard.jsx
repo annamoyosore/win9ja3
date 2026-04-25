@@ -10,6 +10,7 @@ import {
 export default function Dashboard({ goMatch, goWallet, logout }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
+  const [stakeInput, setStakeInput] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -61,10 +62,33 @@ export default function Dashboard({ goMatch, goWallet, logout }) {
         💳 Wallet
       </button>
 
+      {/* STAKE INPUT */}
+      <input
+        type="number"
+        placeholder="Enter stake amount"
+        value={stakeInput}
+        onChange={(e) => setStakeInput(e.target.value)}
+        style={styles.input}
+      />
+
       {/* PLAY WHOT */}
       <button
         style={styles.btn}
-        onClick={() => goMatch("quick_match", 0)}
+        onClick={() => {
+          const stake = Number(stakeInput);
+
+          if (!stake || stake <= 0) {
+            alert("Enter a valid stake");
+            return;
+          }
+
+          if (stake > (wallet?.balance || 0)) {
+            alert("Insufficient balance");
+            return;
+          }
+
+          goMatch("quick_match", stake);
+        }}
       >
         🎲 Play WHOT
       </button>
@@ -106,6 +130,13 @@ const styles = {
     margin: "15px 0",
     borderRadius: 10,
     fontSize: 18
+  },
+  input: {
+    width: "100%",
+    padding: 12,
+    marginTop: 10,
+    borderRadius: 8,
+    border: "none"
   },
   btn: {
     display: "block",
