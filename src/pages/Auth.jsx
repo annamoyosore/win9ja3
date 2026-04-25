@@ -9,13 +9,14 @@ import {
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
+  const [name, setName] = useState(""); // ✅ NEW
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handle() {
-    if (!email || !password) {
-      alert("Enter email and password");
+    if (!email || !password || (!isLogin && !name)) {
+      alert("Fill all fields");
       return;
     }
 
@@ -23,14 +24,19 @@ export default function Auth({ onLogin }) {
       setLoading(true);
 
       if (isLogin) {
-        // ✅ LOGIN (compatible with all SDK versions)
-        await account.createSession(email, password);
+        // ✅ LOGIN
+        await account.createEmailPasswordSession(email, password);
       } else {
-        // ✅ REGISTER
-        await account.create(ID.unique(), email, password);
+        // ✅ REGISTER WITH NAME
+        await account.create(
+          ID.unique(),
+          email,
+          password,
+          name // 👈 THIS SAVES USERNAME
+        );
 
-        // ✅ LOGIN AFTER REGISTER
-        await account.createSession(email, password);
+        // login after register
+        await account.createEmailPasswordSession(email, password);
 
         const user = await account.get();
 
@@ -58,7 +64,20 @@ export default function Auth({ onLogin }) {
   return (
     <div style={styles.container}>
       <div style={styles.box}>
+        {/* 🔥 SITE NAME */}
+        <h1 style={styles.logo}>🎮 Win9ja</h1>
+
         <h2>{isLogin ? "Login" : "Register"}</h2>
+
+        {/* ✅ SHOW NAME ONLY ON REGISTER */}
+        {!isLogin && (
+          <input
+            style={styles.input}
+            placeholder="Username"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        )}
 
         <input
           style={styles.input}
@@ -113,6 +132,10 @@ const styles = {
     borderRadius: 10,
     width: 300,
     textAlign: "center"
+  },
+  logo: {
+    marginBottom: 10,
+    color: "gold"
   },
   input: {
     width: "100%",
