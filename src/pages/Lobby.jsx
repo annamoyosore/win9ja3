@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import {
   account,
@@ -14,28 +11,6 @@ import {
 
 import { lockFunds, unlockFunds } from "../lib/wallet";
 
-// =========================
-// DEBUG HELPER
-// =========================
-function showError(err, label = "ERROR") {
-  console.error(label, err);
-
-  const message =
-    err?.message ||
-    err?.response?.message ||
-    JSON.stringify(err);
-
-  const code =
-    err?.code ||
-    err?.response?.code ||
-    "NO_CODE";
-
-  alert(`${label}\n\nCode: ${code}\nMessage: ${message}`);
-}
-
-// =========================
-// COMPONENT
-// =========================
 export default function Lobby({ goMatch, back }) {
   const [matches, setMatches] = useState([]);
   const [stake, setStake] = useState("");
@@ -43,9 +18,6 @@ export default function Lobby({ goMatch, back }) {
   const [wallet, setWallet] = useState(null);
   const [activeMatch, setActiveMatch] = useState(null);
 
-  // =========================
-  // INIT
-  // =========================
   useEffect(() => {
     init();
   }, []);
@@ -55,9 +27,7 @@ export default function Lobby({ goMatch, back }) {
       const u = await account.get();
       setUser(u);
 
-      // =========================
-      // LOAD WALLET
-      // =========================
+      // wallet
       const w = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -68,14 +38,7 @@ export default function Lobby({ goMatch, back }) {
         setWallet(w.documents[0]);
       }
 
-      // =========================
-      // CHECK ACTIVE MATCH
-      // =========================
       await checkActiveMatch(u.$id);
-
-      // =========================
-      // LOAD OPEN MATCHES
-      // =========================
       await loadMatches();
 
     } catch (err) {
@@ -83,28 +46,27 @@ export default function Lobby({ goMatch, back }) {
     }
   }
 
-  // =========================
-  // CHECK ACTIVE MATCH
-  // =========================
+  // ✅ FIXED ACTIVE MATCH CHECK
   async function checkActiveMatch(userId) {
     try {
       const res = await databases.listDocuments(
         DATABASE_ID,
         MATCH_COLLECTION,
         [
-          Query.or([
-            Query.equal("hostId", userId),
-            Query.equal("opponentId", userId)
-          ]),
-          Query.or([
-            Query.equal("status", "matched"),
-            Query.equal("status", "running")
-          ])
+          Query.limit(20),
+          Query.orderDesc("$createdAt")
         ]
       );
 
-      if (res.documents.length) {
-        setActiveMatch(res.documents[0]); // ✅ NO AUTO REDIRECT
+      // ✅ FILTER MANUALLY (VERY IMPORTANT)
+      const active = res.documents.find(
+        (m) =>
+          (m.hostId === userId || m.opponentId === userId) &&
+          m.status !== "finished"
+      );
+
+      if (active) {
+        setActiveMatch(active);
       }
 
     } catch (err) {
@@ -112,9 +74,6 @@ export default function Lobby({ goMatch, back }) {
     }
   }
 
-  // =========================
-  // LOAD WAITING MATCHES
-  // =========================
   async function loadMatches() {
     try {
       const res = await databases.listDocuments(
@@ -127,15 +86,11 @@ export default function Lobby({ goMatch, back }) {
       );
 
       setMatches(res.documents);
-
     } catch (err) {
       console.error("LOAD MATCHES ERROR:", err);
     }
   }
 
-  // =========================
-  // JOIN MATCH
-  // =========================
   async function joinMatch(match) {
     try {
       if (!user) return;
@@ -166,10 +121,8 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔒 LOCK FUNDS
       await lockFunds(user.$id, fresh.stake);
 
-      // ✅ UPDATE MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -184,18 +137,14 @@ export default function Lobby({ goMatch, back }) {
       goMatch(fresh.$id, fresh.stake);
 
     } catch (err) {
-      showError(err, "JOIN FAILED");
+      console.error(err);
 
-      // 🔁 REFUND SAFELY
       try {
         await unlockFunds(user.$id, Number(match?.stake || 0));
       } catch {}
     }
   }
 
-  // =========================
-  // CREATE MATCH
-  // =========================
   async function createMatch() {
     const amount = Number(stake);
 
@@ -204,21 +153,16 @@ export default function Lobby({ goMatch, back }) {
     if ((wallet?.balance || 0) < amount)
       return alert("Insufficient balance");
 
-    if (!user) return alert("User not loaded");
-
     let match = null;
 
     try {
-      // =========================
-      // CREATE MATCH FIRST
-      // =========================
       match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
         {
           hostId: user.$id,
-          opponentId: null, // ✅ FIXED
+          opponentId: "",
           stake: amount,
           pot: amount,
           status: "waiting",
@@ -226,47 +170,38 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
-      // =========================
-      // LOCK FUNDS
-      // =========================
       await lockFunds(user.$id, amount);
 
       goMatch(match.$id, amount);
 
     } catch (err) {
-      showError(err, "CREATE FAILED");
+      console.error(err);
 
-      // 🔁 ROLLBACK MATCH
       if (match?.$id) {
-        try {
-          await databases.deleteDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            match.$id
-          );
-        } catch {}
+        await databases.deleteDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          match.$id
+        );
       }
     }
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={styles.container}>
       <h2>🎮 Lobby</h2>
 
-      {/* ✅ ACTIVE MATCH */}
+      {/* ✅ SHOW RESUME BUTTON */}
       {activeMatch && (
         <div style={styles.activeBox}>
-          <p>⚡ You have an ongoing match</p>
+          <p>⚡ Ongoing Match Found</p>
           <button
             style={styles.btn}
             onClick={() =>
               goMatch(activeMatch.$id, activeMatch.stake)
             }
           >
-            Resume Game
+            ▶ Resume Game
           </button>
         </div>
       )}
@@ -278,7 +213,6 @@ export default function Lobby({ goMatch, back }) {
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-
           <button onClick={() => joinMatch(m)} style={styles.btn}>
             Join
           </button>
@@ -306,9 +240,6 @@ export default function Lobby({ goMatch, back }) {
   );
 }
 
-// =========================
-// STYLES
-// =========================
 const styles = {
   container: {
     padding: 20,
