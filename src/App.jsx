@@ -30,12 +30,18 @@ export default function App() {
     } catch (e) {
       console.warn("Logout error:", e);
     }
+
+    // ✅ reset state
+    setMatchId(null);
+    setStake(0);
     setPage("auth");
   }
 
   // =========================
   // ROUTES
   // =========================
+
+  // 🔄 Loading
   if (page === "loading") {
     return (
       <div style={styles.loading}>
@@ -45,10 +51,12 @@ export default function App() {
     );
   }
 
+  // 🔐 Auth
   if (page === "auth") {
     return <Auth onLogin={() => setPage("dashboard")} />;
   }
 
+  // 🏠 Dashboard
   if (page === "dashboard") {
     return (
       <Dashboard
@@ -63,25 +71,43 @@ export default function App() {
     );
   }
 
+  // 💳 Wallet
   if (page === "wallet") {
     return <Wallet back={() => setPage("dashboard")} />;
   }
 
+  // 🎯 Match
   if (page === "match") {
+    // ✅ safety check
+    if (!matchId) {
+      setPage("dashboard");
+      return null;
+    }
+
     return (
       <Match
         matchId={matchId}
+        stake={stake} // ✅ FIXED
         startGame={() => setPage("game")}
-        cancel={() => setPage("dashboard")} // ✅ NEW
+        cancel={() => {
+          setMatchId(null); // ✅ reset
+          setStake(0);      // ✅ reset
+          setPage("dashboard");
+        }}
       />
     );
   }
 
+  // 🎮 Game
   if (page === "game") {
     return (
       <WhotGame
         stake={stake}
-        goHome={() => setPage("dashboard")} // ✅ IMPORTANT
+        goHome={() => {
+          setMatchId(null); // ✅ reset
+          setStake(0);      // ✅ reset
+          setPage("dashboard");
+        }}
       />
     );
   }
