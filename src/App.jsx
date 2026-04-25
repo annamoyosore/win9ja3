@@ -9,26 +9,33 @@ import Match from "./pages/Match";
 import WhotGame from "./WhotGame";
 
 export default function App() {
-  // ✅ LOAD FROM STORAGE
+  // =========================
+  // STATE (PERSISTED)
+  // =========================
   const [page, setPage] = useState(
     localStorage.getItem("page") || "loading"
   );
+
   const [matchId, setMatchId] = useState(
     localStorage.getItem("matchId")
   );
+
+  const [gameId, setGameId] = useState(
+    localStorage.getItem("gameId")
+  );
+
   const [stake, setStake] = useState(
     Number(localStorage.getItem("stake") || 0)
   );
 
   // =========================
-  // SESSION CHECK (FIXED)
+  // SESSION CHECK
   // =========================
   useEffect(() => {
     account.get()
       .then(() => {
         const savedPage = localStorage.getItem("page");
 
-        // ✅ DO NOT OVERRIDE USER PAGE
         if (!savedPage || savedPage === "loading") {
           setPage("dashboard");
         }
@@ -39,7 +46,7 @@ export default function App() {
   }, []);
 
   // =========================
-  // SAVE STATE (IMPORTANT)
+  // SAVE STATE
   // =========================
   useEffect(() => {
     if (page !== "loading") {
@@ -56,17 +63,29 @@ export default function App() {
   }, [matchId]);
 
   useEffect(() => {
+    if (gameId) {
+      localStorage.setItem("gameId", gameId);
+    } else {
+      localStorage.removeItem("gameId");
+    }
+  }, [gameId]);
+
+  useEffect(() => {
     localStorage.setItem("stake", stake);
   }, [stake]);
 
   // =========================
-  // SAFETY FIX
+  // SAFETY
   // =========================
   useEffect(() => {
-    if ((page === "match" || page === "game") && !matchId) {
+    if (page === "match" && !matchId) {
       setPage("dashboard");
     }
-  }, [page, matchId]);
+
+    if (page === "game" && !gameId) {
+      setPage("dashboard");
+    }
+  }, [page, matchId, gameId]);
 
   // =========================
   // LOGOUT
@@ -78,10 +97,10 @@ export default function App() {
       console.warn(e);
     }
 
-    // ✅ CLEAR STORAGE
     localStorage.clear();
 
     setMatchId(null);
+    setGameId(null);
     setStake(0);
     setPage("auth");
   }
@@ -122,6 +141,7 @@ export default function App() {
       <Lobby
         goMatch={(id, s) => {
           setMatchId(id);
+          setGameId(null); // reset game
           setStake(s);
           setPage("match");
         }}
@@ -135,9 +155,16 @@ export default function App() {
       <Match
         matchId={matchId}
         stake={stake}
-        startGame={() => setPage("game")}
+
+        // ✅🔥 CRITICAL FIX HERE
+        startGame={(newGameId) => {
+          setGameId(newGameId);   // store REAL game id
+          setPage("game");
+        }}
+
         cancel={() => {
           setMatchId(null);
+          setGameId(null);
           setStake(0);
           setPage("dashboard");
         }}
@@ -148,10 +175,11 @@ export default function App() {
   if (page === "game") {
     return (
       <WhotGame
-        gameId={matchId}
+        gameId={gameId}   // ✅ USE REAL GAME ID
         stake={stake}
         goHome={() => {
           setMatchId(null);
+          setGameId(null);
           setStake(0);
           setPage("dashboard");
         }}
