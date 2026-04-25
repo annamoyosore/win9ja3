@@ -4,13 +4,12 @@ import { databases, DATABASE_ID, MATCH_COLLECTION } from "../lib/appwrite";
 // =========================
 // MATCH WAITING PAGE
 // =========================
-export default function Match({ matchId, startGame }) {
+export default function Match({ matchId, stake, startGame, cancel }) {
   const [status, setStatus] = useState("waiting");
 
   useEffect(() => {
     if (!matchId) return;
 
-    // ⏱️ Poll every 2 seconds
     const interval = setInterval(async () => {
       try {
         const match = await databases.getDocument(
@@ -25,9 +24,8 @@ export default function Match({ matchId, startGame }) {
         if (match.status === "matched") {
           clearInterval(interval);
 
-          // small delay for UX
           setTimeout(() => {
-            startGame(matchId);
+            startGame(); // ✅ FIXED (no param)
           }, 1000);
         }
       } catch (err) {
@@ -45,6 +43,9 @@ export default function Match({ matchId, startGame }) {
     <div style={styles.container}>
       <h2>🔎 Searching for opponent...</h2>
 
+      {/* ✅ SHOW STAKE */}
+      <h3>💰 Stake: ${stake}</h3>
+
       <p>Status: {status}</p>
 
       <div style={styles.loader}></div>
@@ -52,6 +53,11 @@ export default function Match({ matchId, startGame }) {
       <p style={{ marginTop: 20 }}>
         Please wait while we find a player with the same stake...
       </p>
+
+      {/* ✅ CANCEL BUTTON */}
+      <button style={styles.cancelBtn} onClick={cancel}>
+        ❌ Cancel
+      </button>
     </div>
   );
 }
@@ -67,7 +73,8 @@ const styles = {
     justifyContent: "center",
     alignItems: "center",
     background: "#0f172a",
-    color: "#fff"
+    color: "#fff",
+    textAlign: "center"
   },
 
   loader: {
@@ -78,5 +85,16 @@ const styles = {
     borderTop: "5px solid gold",
     borderRadius: "50%",
     animation: "spin 1s linear infinite"
+  },
+
+  cancelBtn: {
+    marginTop: 25,
+    padding: 12,
+    background: "red",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff",
+    fontWeight: "bold",
+    cursor: "pointer"
   }
 };
