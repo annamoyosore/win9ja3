@@ -12,7 +12,7 @@ import {
   Query
 } from "../lib/appwrite";
 
-import { lockFunds } from "../lib/wallet"; // ✅ LOCK SYSTEM
+import { lockFunds } from "../lib/wallet";
 
 // =========================
 // COMPONENT
@@ -22,6 +22,7 @@ export default function Lobby({ goMatch, back }) {
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   // =========================
   // INIT
@@ -35,17 +36,25 @@ export default function Lobby({ goMatch, back }) {
       const u = await account.get();
       setUser(u);
 
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
-
-      if (w.documents.length) setWallet(w.documents[0]);
-
-      loadMatches();
+      await loadWallet(u.$id);
+      await loadMatches();
     } catch (err) {
-      console.error(err);
+      console.error("INIT ERROR:", err);
+    }
+  }
+
+  // =========================
+  // LOAD WALLET
+  // =========================
+  async function loadWallet(userId) {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", userId)]
+    );
+
+    if (res.documents.length) {
+      setWallet(res.documents[0]);
     }
   }
 
@@ -66,9 +75,12 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // JOIN MATCH (LOCK + SAFE)
-// =========================
+  // JOIN MATCH
+  // =========================
   async function joinMatch(match) {
+    if (loading) return;
+    setLoading(true);
+
     try {
       if (!user) return;
 
@@ -87,7 +99,6 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔄 REFRESH MATCH
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -99,10 +110,9 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔒 LOCK MONEY FIRST
+      // 🔒 LOCK AFTER VALIDATION
       await lockFunds(user.$id, fresh.stake);
 
-      // ✅ UPDATE MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -114,39 +124,43 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
+      await loadWallet(user.$id); // ✅ refresh balance
       goMatch(fresh.$id, fresh.stake);
 
     } catch (err) {
-      console.error(err);
-      alert("Join failed");
+      console.error("JOIN ERROR:", err);
+      alert(err.message || "Join failed");
+    } finally {
+      setLoading(false);
     }
   }
 
   // =========================
-  // CREATE MATCH (LOCK)
-// =========================
+  // CREATE MATCH
+  // =========================
   async function createMatch() {
+    if (loading) return;
+    setLoading(true);
+
     const amount = Number(stake);
 
-    if (!amount || amount <= 0) {
-      alert("Enter valid stake");
-      return;
-    }
-
-    if (amount < 50) {
-      alert("Minimum stake is ₦50");
-      return;
-    }
-
-    if ((wallet?.balance || 0) < amount) {
-      alert("Insufficient balance");
-      return;
-    }
-
     try {
-      // 🔒 LOCK HOST FUNDS
-      await lockFunds(user.$id, amount);
+      if (!amount || amount <= 0) {
+        alert("Enter valid stake");
+        return;
+      }
 
+      if (amount < 50) {
+        alert("Minimum stake is ₦50");
+        return;
+      }
+
+      if ((wallet?.balance || 0) < amount) {
+        alert("Insufficient balance");
+        return;
+      }
+
+      // ✅ CREATE FIRST (IMPORTANT)
       const match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -161,11 +175,19 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
+      // 🔒 THEN LOCK (SAFE)
+      await lockFunds(user.$id, amount);
+
+      await loadWallet(user.$id); // refresh wallet
+      await loadMatches();        // refresh lobby
+
       goMatch(match.$id, amount);
 
     } catch (err) {
-      console.error(err);
-      alert("Create failed");
+      console.error("CREATE ERROR:", err);
+      alert(err.message || "Create failed");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -182,7 +204,11 @@ export default function Lobby({ goMatch, back }) {
         <div key={m.$id} style={styles.card}>
           <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
 
-          <button style={styles.btn} onClick={() => joinMatch(m)}>
+          <button
+            style={styles.btn}
+            onClick={() => joinMatch(m)}
+            disabled={loading}
+          >
             Join
           </button>
         </div>
@@ -198,8 +224,12 @@ export default function Lobby({ goMatch, back }) {
         style={styles.input}
       />
 
-      <button onClick={createMatch} style={styles.btn}>
-        Create Match
+      <button
+        onClick={createMatch}
+        style={styles.btn}
+        disabled={loading}
+      >
+        {loading ? "Processing..." : "Create Match"}
       </button>
 
       <button onClick={back} style={styles.back}>
@@ -208,41 +238,3 @@ export default function Lobby({ goMatch, back }) {
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  container: {
-    padding: 20,
-    color: "white",
-    background: "#0f172a",
-    minHeight: "100vh"
-  },
-  card: {
-    background: "#111827",
-    padding: 15,
-    margin: "10px 0",
-    borderRadius: 10
-  },
-  btn: {
-    padding: 10,
-    background: "gold",
-    border: "none",
-    borderRadius: 6,
-    marginTop: 5
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    marginTop: 10,
-    borderRadius: 6
-  },
-  back: {
-    marginTop: 20,
-    background: "gray",
-    padding: 10,
-    border: "none",
-    borderRadius: 6
-  }
-};
