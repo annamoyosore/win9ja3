@@ -20,7 +20,7 @@ export const databases = new Databases(client);
 // =========================
 export const DATABASE_ID = "69cb505d0015fbe8a669";
 
-// ⚠️ Make sure these EXACTLY match your Appwrite collection IDs
+// ⚠️ MUST match EXACT IDs in Appwrite dashboard
 export const WALLET_COLLECTION = "wallets";
 export const MATCH_COLLECTION = "matches";
 export const GAME_COLLECTION = "games";
