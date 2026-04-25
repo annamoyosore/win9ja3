@@ -30,6 +30,7 @@ export async function getWallet(userId) {
 // =========================
 export async function lockFunds(userId, amount) {
   const wallet = await getWallet(userId);
+  amount = Number(amount);
 
   if (wallet.balance < amount) {
     throw new Error("Insufficient balance");
@@ -51,6 +52,7 @@ export async function lockFunds(userId, amount) {
 // =========================
 export async function unlockFunds(userId, amount) {
   const wallet = await getWallet(userId);
+  amount = Number(amount);
 
   return databases.updateDocument(
     DATABASE_ID,
@@ -64,18 +66,22 @@ export async function unlockFunds(userId, amount) {
 }
 
 // =========================
-// PAY WINNER
+// PAY WINNER (CORRECTED)
 // =========================
 export async function payWinner(userId, amount) {
   const wallet = await getWallet(userId);
+  amount = Number(amount);
 
   return databases.updateDocument(
     DATABASE_ID,
     WALLET_COLLECTION,
     wallet.$id,
     {
+      // winner receives full pot
       balance: wallet.balance + amount,
-      locked: Math.max(0, (wallet.locked || 0) - amount)
+
+      // remove ONLY their locked stake (half the pot)
+      locked: Math.max(0, (wallet.locked || 0) - amount / 2)
     }
   );
 }
