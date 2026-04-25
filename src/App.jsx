@@ -1,3 +1,6 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import { account } from "./lib/appwrite";
 
@@ -23,33 +26,37 @@ export default function App() {
   // SESSION CHECK
   // =========================
   useEffect(() => {
-    account
-      .get()
+    account.get()
       .then(() => setPage("dashboard"))
       .catch(() => setPage("auth"));
   }, []);
 
   // =========================
-  // LOGOUT FUNCTION
+  // SAFETY FIX (IMPORTANT)
+  // =========================
+  useEffect(() => {
+    if (page === "match" && !matchId) {
+      setPage("dashboard");
+    }
+  }, [page, matchId]);
+
+  // =========================
+  // LOGOUT
   // =========================
   async function logout() {
     try {
       await account.deleteSession("current");
-    } catch (e) {
-      console.warn("Logout error:", e);
-    }
+    } catch {}
 
-    // reset app state
     setMatchId(null);
     setStake(0);
     setPage("auth");
   }
 
   // =========================
-  // ROUTING SYSTEM
+  // ROUTES
   // =========================
 
-  // 🔄 LOADING PAGE
   if (page === "loading") {
     return (
       <div style={styles.loading}>
@@ -59,26 +66,24 @@ export default function App() {
     );
   }
 
-  // 🔐 AUTH PAGE
   if (page === "auth") {
     return <Auth onLogin={() => setPage("dashboard")} />;
   }
 
-  // 🏠 DASHBOARD
   if (page === "dashboard") {
     return (
       <Dashboard
-        goLobby={(stakeAmount) => {
-          setStake(stakeAmount);
-          setPage("lobby");
-        }}
+        goLobby={() => setPage("lobby")}   // ✅ FIXED
         goWallet={() => setPage("wallet")}
         logout={logout}
       />
     );
   }
 
-  // 🎮 LOBBY PAGE
+  if (page === "wallet") {
+    return <Wallet back={() => setPage("dashboard")} />;
+  }
+
   if (page === "lobby") {
     return (
       <Lobby
@@ -92,13 +97,7 @@ export default function App() {
     );
   }
 
-  // 🎯 MATCH PAGE
   if (page === "match") {
-    if (!matchId) {
-      setPage("dashboard");
-      return null;
-    }
-
     return (
       <Match
         matchId={matchId}
@@ -113,7 +112,6 @@ export default function App() {
     );
   }
 
-  // 🎮 GAME PAGE
   if (page === "game") {
     return (
       <WhotGame
@@ -137,10 +135,10 @@ const styles = {
   loading: {
     minHeight: "100vh",
     display: "flex",
-    flexDirection: "column",
     justifyContent: "center",
     alignItems: "center",
+    flexDirection: "column",
     background: "#0f172a",
-    color: "white"
+    color: "#fff"
   }
 };
