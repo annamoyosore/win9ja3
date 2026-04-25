@@ -1,12 +1,6 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import { account } from "./lib/appwrite";
 
-// =========================
-// PAGES
-// =========================
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
@@ -14,28 +8,62 @@ import Lobby from "./pages/Lobby";
 import Match from "./pages/Match";
 import WhotGame from "./WhotGame";
 
-// =========================
-// MAIN APP
-// =========================
 export default function App() {
-  const [page, setPage] = useState("loading");
-  const [matchId, setMatchId] = useState(null);
-  const [stake, setStake] = useState(0);
+  // ✅ LOAD FROM STORAGE
+  const [page, setPage] = useState(
+    localStorage.getItem("page") || "loading"
+  );
+  const [matchId, setMatchId] = useState(
+    localStorage.getItem("matchId")
+  );
+  const [stake, setStake] = useState(
+    Number(localStorage.getItem("stake") || 0)
+  );
 
   // =========================
-  // SESSION CHECK
+  // SESSION CHECK (FIXED)
   // =========================
   useEffect(() => {
     account.get()
-      .then(() => setPage("dashboard"))
-      .catch(() => setPage("auth"));
+      .then(() => {
+        const savedPage = localStorage.getItem("page");
+
+        // ✅ DO NOT OVERRIDE USER PAGE
+        if (!savedPage || savedPage === "loading") {
+          setPage("dashboard");
+        }
+      })
+      .catch(() => {
+        setPage("auth");
+      });
   }, []);
+
+  // =========================
+  // SAVE STATE (IMPORTANT)
+  // =========================
+  useEffect(() => {
+    if (page !== "loading") {
+      localStorage.setItem("page", page);
+    }
+  }, [page]);
+
+  useEffect(() => {
+    if (matchId) {
+      localStorage.setItem("matchId", matchId);
+    } else {
+      localStorage.removeItem("matchId");
+    }
+  }, [matchId]);
+
+  useEffect(() => {
+    localStorage.setItem("stake", stake);
+  }, [stake]);
 
   // =========================
   // SAFETY FIX
   // =========================
   useEffect(() => {
-    if (page === "match" && !matchId) {
+    if ((page === "match" || page === "game") && !matchId) {
       setPage("dashboard");
     }
   }, [page, matchId]);
@@ -50,6 +78,9 @@ export default function App() {
       console.warn(e);
     }
 
+    // ✅ CLEAR STORAGE
+    localStorage.clear();
+
     setMatchId(null);
     setStake(0);
     setPage("auth");
@@ -59,7 +90,6 @@ export default function App() {
   // ROUTES
   // =========================
 
-  // 🔄 LOADING
   if (page === "loading") {
     return (
       <div style={styles.loading}>
@@ -69,12 +99,10 @@ export default function App() {
     );
   }
 
-  // 🔐 AUTH
   if (page === "auth") {
     return <Auth onLogin={() => setPage("dashboard")} />;
   }
 
-  // 🏠 DASHBOARD
   if (page === "dashboard") {
     return (
       <Dashboard
@@ -85,16 +113,10 @@ export default function App() {
     );
   }
 
-  // 💳 WALLET (✅ FIXED PROP)
   if (page === "wallet") {
-    return (
-      <Wallet
-        goTo={(p) => setPage(p)}   // ✅ FIXED
-      />
-    );
+    return <Wallet goTo={(p) => setPage(p)} />;
   }
 
-  // 🎮 LOBBY
   if (page === "lobby") {
     return (
       <Lobby
@@ -108,7 +130,6 @@ export default function App() {
     );
   }
 
-  // 🎯 MATCH WAITING
   if (page === "match") {
     return (
       <Match
@@ -124,11 +145,10 @@ export default function App() {
     );
   }
 
-  // 🎮 GAME (✅ FIXED gameId)
   if (page === "game") {
     return (
       <WhotGame
-        gameId={matchId}   // ✅ CRITICAL FIX
+        gameId={matchId}
         stake={stake}
         goHome={() => {
           setMatchId(null);
@@ -142,9 +162,6 @@ export default function App() {
   return null;
 }
 
-// =========================
-// STYLES
-// =========================
 const styles = {
   loading: {
     minHeight: "100vh",
