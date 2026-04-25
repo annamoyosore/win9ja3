@@ -8,7 +8,7 @@ import {
 const GAME_COLLECTION = "games";
 
 // =========================
-// CREATE GAME FUNCTION
+// CREATE DECK
 // =========================
 function createDeck() {
   const shapes = ["circle", "triangle", "square", "star", "cross"];
@@ -25,13 +25,16 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
+// =========================
+// CREATE GAME
+// =========================
 async function createGame(match) {
   const deck = createDeck();
 
   return databases.createDocument(
     DATABASE_ID,
     GAME_COLLECTION,
-    match.$id, // 🔥 SAME ID AS MATCH
+    match.$id, // ✅ SAME ID
     {
       players: [match.hostId, match.opponentId],
 
@@ -55,7 +58,7 @@ async function createGame(match) {
 }
 
 // =========================
-// MATCH PAGE
+// COMPONENT
 // =========================
 export default function Match({ matchId, stake, startGame, cancel }) {
   const [status, setStatus] = useState("waiting");
@@ -75,27 +78,28 @@ export default function Match({ matchId, stake, startGame, cancel }) {
         setStatus(match.status);
 
         // =========================
-        // 🔥 MATCH FOUND → CREATE GAME
+        // MATCH READY → CREATE / LOAD GAME
         // =========================
         if (match.status === "matched" && !creating) {
           setCreating(true);
 
           try {
-            // 🔥 TRY CREATE GAME (only first user succeeds)
+            // 🔥 Try to create game
             await createGame(match);
-
             console.log("Game created");
 
           } catch (err) {
-            // ⚠️ This will fail for second player (already created)
-            console.warn("Game already exists or creation failed:", err.message);
+            // ✅ Already exists (second player)
+            console.warn("Game already exists:", err.message);
           }
 
           clearInterval(interval);
 
-          // small delay for DB sync
+          // =========================
+          // 🔥 ALWAYS PASS GAME ID
+          // =========================
           setTimeout(() => {
-            startGame();
+            startGame(match.$id); // ✅ CRITICAL FIX
           }, 800);
         }
 
