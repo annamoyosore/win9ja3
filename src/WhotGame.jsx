@@ -3,7 +3,7 @@
 // =========================
 import { useEffect, useState } from "react";
 import { databases, account, DATABASE_ID } from "./lib/appwrite";
-import { payWinner } from "./lib/wallet"; // ✅ FIXED
+import { payWinner } from "./lib/wallet";
 
 const GAME_COLLECTION = "games";
 const TURN_LIMIT = 24 * 60 * 60 * 1000;
@@ -38,57 +38,55 @@ export default function WhotGame({ gameId, stake = 0 }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
 
+  // =========================
   // LOAD USER
+  // =========================
   useEffect(() => {
     account.get().then((u) => setUserId(u.$id));
   }, []);
 
+  // =========================
   // LOAD GAME
+  // =========================
   useEffect(() => {
     if (!gameId) return;
 
     async function loadGame() {
-      const g = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
+      try {
+        const g = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId
+        );
 
-      setGame({
-        ...g,
-        deck: JSON.parse(g.deck),
-        discard: JSON.parse(g.discard),
-        hands: JSON.parse(g.hands),
-        scores: JSON.parse(g.scores)
-      });
+        setGame(parseGame(g));
+      } catch (err) {
+        console.error("LOAD GAME ERROR:", err);
+      }
     }
 
     loadGame();
   }, [gameId]);
 
-  // REALTIME
+  // =========================
+  // REALTIME SUBSCRIBE
+  // =========================
   useEffect(() => {
     if (!gameId) return;
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
       (res) => {
-        const g = res.payload;
-
-        setGame({
-          ...g,
-          deck: JSON.parse(g.deck),
-          discard: JSON.parse(g.discard),
-          hands: JSON.parse(g.hands),
-          scores: JSON.parse(g.scores)
-        });
+        setGame(parseGame(res.payload));
       }
     );
 
     return () => unsub();
   }, [gameId]);
 
-  // TIMEOUT
+  // =========================
+  // TIMEOUT CHECK
+  // =========================
   useEffect(() => {
     if (!game || !userId) return;
 
@@ -106,34 +104,57 @@ export default function WhotGame({ gameId, stake = 0 }) {
   }, [game, userId]);
 
   // =========================
+  // PARSE GAME SAFELY
+  // =========================
+  function parseGame(g) {
+    try {
+      return {
+        ...g,
+        deck: JSON.parse(g.deck || "[]"),
+        discard: JSON.parse(g.discard || "[]"),
+        hands: JSON.parse(g.hands || "[[],[]]"),
+        scores: JSON.parse(g.scores || '{"p1":0,"p2":0}')
+      };
+    } catch {
+      return g;
+    }
+  }
+
+  // =========================
   // TIMEOUT HANDLER
   // =========================
   async function handleTimeout(g) {
-    const hands = g.hands;
-    if (!hands || hands.length < 2) return;
+    try {
+      const hands = g.hands;
+      if (!hands || hands.length < 2) return;
 
-    const p1 = hands[0].length;
-    const p2 = hands[1].length;
+      const p1 = hands[0].length;
+      const p2 = hands[1].length;
 
-    let winnerId = null;
+      let winnerId = null;
 
-    if (p1 < p2) winnerId = g.players[0];
-    else if (p2 < p1) winnerId = g.players[1];
+      if (p1 < p2) winnerId = g.players[0];
+      else if (p2 < p1) winnerId = g.players[1];
 
-    // ✅ FIXED payout
-    if (winnerId === userId) {
-      await payWinner(userId, stake * 2);
-    }
+      // 💰 PAY WINNER ONCE
+      if (winnerId && g.status !== "finished") {
+        if (winnerId === userId) {
+          await payWinner(userId, stake * 2);
+        }
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      g.$id,
-      {
-        status: "finished",
-        winnerId: winnerId || ""
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          g.$id,
+          {
+            status: "finished",
+            winnerId
+          }
+        );
       }
-    );
+    } catch (err) {
+      console.error("TIMEOUT ERROR:", err);
+    }
   }
 
   // =========================
@@ -156,6 +177,7 @@ export default function WhotGame({ gameId, stake = 0 }) {
     copy.hands[playerIndex].splice(cardIndex, 1);
     copy.discard.push(card);
 
+    // 🏆 WIN CONDITION
     if (copy.hands[playerIndex].length === 0) {
       await handleRoundWin(playerIndex, copy);
       return;
@@ -210,55 +232,63 @@ export default function WhotGame({ gameId, stake = 0 }) {
   // ROUND WIN
   // =========================
   async function handleRoundWin(playerIndex, copy) {
-    const scores = copy.scores;
+    try {
+      const scores = copy.scores;
 
-    if (playerIndex === 0) scores.p1++;
-    else scores.p2++;
+      if (playerIndex === 0) scores.p1++;
+      else scores.p2++;
 
-    if (scores.p1 === 2 || scores.p2 === 2) {
-      const winnerId =
-        scores.p1 > scores.p2
-          ? copy.players[0]
-          : copy.players[1];
+      // 🏆 MATCH WIN
+      if (scores.p1 === 2 || scores.p2 === 2) {
+        const winnerId =
+          scores.p1 > scores.p2
+            ? copy.players[0]
+            : copy.players[1];
 
-      // ✅ FIXED payout
-      if (winnerId === userId) {
-        await payWinner(userId, stake * 2);
+        // 💰 PAY ONCE ONLY
+        if (winnerId && copy.status !== "finished") {
+          if (winnerId === userId) {
+            await payWinner(userId, stake * 2);
+          }
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            GAME_COLLECTION,
+            gameId,
+            {
+              status: "finished",
+              scores: JSON.stringify(scores),
+              winnerId
+            }
+          );
+        }
+
+        return;
       }
+
+      // 🔄 NEXT ROUND
+      const deck = createDeck();
 
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId,
         {
-          status: "finished",
+          deck: JSON.stringify(deck),
+          discard: JSON.stringify([deck.pop()]),
+          hands: JSON.stringify([
+            deck.splice(0, 6),
+            deck.splice(0, 6)
+          ]),
           scores: JSON.stringify(scores),
-          winnerId
+          round: copy.round + 1,
+          turn: copy.players[0],
+          turnStartTime: new Date().toISOString()
         }
       );
-
-      return;
+    } catch (err) {
+      console.error("ROUND WIN ERROR:", err);
     }
-
-    const deck = createDeck();
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        deck: JSON.stringify(deck),
-        discard: JSON.stringify([deck.pop()]),
-        hands: JSON.stringify([
-          deck.splice(0, 6),
-          deck.splice(0, 6)
-        ]),
-        scores: JSON.stringify(scores),
-        round: copy.round + 1,
-        turn: copy.players[0],
-        turnStartTime: new Date().toISOString()
-      }
-    );
   }
 
   // =========================
@@ -266,7 +296,7 @@ export default function WhotGame({ gameId, stake = 0 }) {
   // =========================
   if (!game) return <p>Loading game...</p>;
 
-  const playerIndex = game.players.indexOf(userId);
+  const playerIndex = game.players?.indexOf(userId);
   const hand = game.hands?.[playerIndex] || [];
 
   return (
@@ -274,14 +304,14 @@ export default function WhotGame({ gameId, stake = 0 }) {
       <h2>🎮 Multiplayer WHOT</h2>
 
       <p>Round: {game.round}</p>
-      <p>Score: {game.scores.p1} - {game.scores.p2}</p>
+      <p>Score: {game.scores?.p1} - {game.scores?.p2}</p>
 
       <p>
         Turn: {game.turn === userId ? "YOUR TURN" : "Opponent"}
       </p>
 
       <h3>Top Card</h3>
-      <pre>{JSON.stringify(game.discard.at(-1))}</pre>
+      <pre>{JSON.stringify(game.discard?.at(-1))}</pre>
 
       <h3>Your Cards</h3>
       {hand.map((c, i) => (
