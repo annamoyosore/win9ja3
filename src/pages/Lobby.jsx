@@ -12,7 +12,7 @@ import {
   Query
 } from "../lib/appwrite";
 
-import { lockFunds, unlockFunds } from "../utils/wallet"; // ✅ KEEP LOCK
+import { lockFunds, unlockFunds } from "../lib/wallet"; // ✅ correct path
 
 // =========================
 // COMPONENT
@@ -70,8 +70,8 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // JOIN MATCH
-  // =========================
+  // JOIN MATCH (SAFE + LOCK)
+// =========================
   async function joinMatch(match) {
     try {
       if (!user) return;
@@ -91,7 +91,7 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔄 REFRESH MATCH
+      // 🔄 REFRESH MATCH (ANTI-RACE)
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -103,7 +103,7 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔒 LOCK FUNDS
+      // 🔒 LOCK FUNDS FIRST
       await lockFunds(user.$id, fresh.stake);
 
       // ✅ UPDATE MATCH
@@ -124,9 +124,9 @@ export default function Lobby({ goMatch, back }) {
       console.error("JOIN ERROR:", err);
       alert(err.message || "Join failed");
 
-      // 🔁 refund if lock happened
+      // 🔁 REFUND SAFELY
       try {
-        await unlockFunds(user.$id, match.stake);
+        await unlockFunds(user.$id, Number(match?.stake || 0));
       } catch (e) {
         console.warn("Unlock failed:", e);
       }
@@ -134,8 +134,8 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // CREATE MATCH
-  // =========================
+  // CREATE MATCH (SAFE FLOW)
+// =========================
   async function createMatch() {
     const amount = Number(stake);
 
@@ -144,4 +144,148 @@ export default function Lobby({ goMatch, back }) {
       return;
     }
 
-    if (amount
+    if (amount < 50) {
+      alert("Minimum stake is ₦50");
+      return;
+    }
+
+    if ((wallet?.balance || 0) < amount) {
+      alert("Insufficient balance");
+      return;
+    }
+
+    if (!user) {
+      alert("User not loaded");
+      return;
+    }
+
+    let match = null;
+
+    try {
+      // =========================
+      // STEP 1: CREATE MATCH
+      // =========================
+      match = await databases.createDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        ID.unique(),
+        {
+          hostId: user.$id,
+          opponentId: null,
+          stake: amount,
+          pot: amount,
+          status: "waiting",
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      // =========================
+      // STEP 2: LOCK FUNDS
+      // =========================
+      await lockFunds(user.$id, amount);
+
+      // =========================
+      // SUCCESS
+      // =========================
+      goMatch(match.$id, amount);
+
+    } catch (err) {
+      console.error("CREATE ERROR:", err);
+
+      // 🔁 ROLLBACK MATCH
+      if (match?.$id) {
+        try {
+          await databases.deleteDocument(
+            DATABASE_ID,
+            MATCH_COLLECTION,
+            match.$id
+          );
+        } catch (e) {
+          console.warn("Rollback delete failed:", e);
+        }
+      }
+
+      alert(err.message || "Create failed");
+    }
+  }
+
+  // =========================
+  // UI
+  // =========================
+  return (
+    <div style={styles.container}>
+      <h2>🎮 Active Matches</h2>
+
+      {matches.length === 0 && <p>No active matches</p>}
+
+      {matches.map((m) => (
+        <div key={m.$id} style={styles.card}>
+          <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
+
+          <button style={styles.btn} onClick={() => joinMatch(m)}>
+            Join
+          </button>
+        </div>
+      ))}
+
+      <h3>Create Match</h3>
+
+      <input
+        type="number"
+        placeholder="Enter stake ₦"
+        value={stake}
+        onChange={(e) => setStake(e.target.value)}
+        style={styles.input}
+      />
+
+      <button onClick={createMatch} style={styles.btn}>
+        Create Match
+      </button>
+
+      <button onClick={back} style={styles.back}>
+        ← Back
+      </button>
+    </div>
+  );
+}
+
+// =========================
+// STYLES
+// =========================
+const styles = {
+  container: {
+    padding: 20,
+    color: "white",
+    background: "#0f172a",
+    minHeight: "100vh"
+  },
+  card: {
+    background: "#111827",
+    padding: 15,
+    margin: "10px 0",
+    borderRadius: 10
+  },
+  btn: {
+    padding: 10,
+    background: "gold",
+    border: "none",
+    borderRadius: 6,
+    marginTop: 5,
+    cursor: "pointer"
+  },
+  input: {
+    width: "100%",
+    padding: 10,
+    marginTop: 10,
+    borderRadius: 6,
+    border: "none"
+  },
+  back: {
+    marginTop: 20,
+    background: "gray",
+    padding: 10,
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer"
+  }
+};
