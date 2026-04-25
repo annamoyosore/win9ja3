@@ -32,7 +32,7 @@ export default function App() {
   }, []);
 
   // =========================
-  // SAFETY FIX (IMPORTANT)
+  // SAFETY FIX
   // =========================
   useEffect(() => {
     if (page === "match" && !matchId) {
@@ -46,7 +46,9 @@ export default function App() {
   async function logout() {
     try {
       await account.deleteSession("current");
-    } catch {}
+    } catch (e) {
+      console.warn(e);
+    }
 
     setMatchId(null);
     setStake(0);
@@ -57,6 +59,7 @@ export default function App() {
   // ROUTES
   // =========================
 
+  // 🔄 LOADING
   if (page === "loading") {
     return (
       <div style={styles.loading}>
@@ -66,24 +69,32 @@ export default function App() {
     );
   }
 
+  // 🔐 AUTH
   if (page === "auth") {
     return <Auth onLogin={() => setPage("dashboard")} />;
   }
 
+  // 🏠 DASHBOARD
   if (page === "dashboard") {
     return (
       <Dashboard
-        goLobby={() => setPage("lobby")}   // ✅ FIXED
+        goLobby={() => setPage("lobby")}
         goWallet={() => setPage("wallet")}
         logout={logout}
       />
     );
   }
 
+  // 💳 WALLET (✅ FIXED PROP)
   if (page === "wallet") {
-    return <Wallet back={() => setPage("dashboard")} />;
+    return (
+      <Wallet
+        goTo={(p) => setPage(p)}   // ✅ FIXED
+      />
+    );
   }
 
+  // 🎮 LOBBY
   if (page === "lobby") {
     return (
       <Lobby
@@ -97,6 +108,7 @@ export default function App() {
     );
   }
 
+  // 🎯 MATCH WAITING
   if (page === "match") {
     return (
       <Match
@@ -112,9 +124,11 @@ export default function App() {
     );
   }
 
+  // 🎮 GAME (✅ FIXED gameId)
   if (page === "game") {
     return (
       <WhotGame
+        gameId={matchId}   // ✅ CRITICAL FIX
         stake={stake}
         goHome={() => {
           setMatchId(null);
