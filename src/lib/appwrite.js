@@ -1,12 +1,31 @@
-import { Client, Account, Databases } from "appwrite";
+import { Client, Account, Databases, ID, Query } from "appwrite";
 
-const client = new Client()
-  .setEndpoint("https://cloud.appwrite.io/v1")
-  .setProject("YOUR_PROJECT_ID");
+// =========================
+// CLIENT SETUP
+// =========================
+const client = new Client();
 
+client
+  .setEndpoint("https://nyc.cloud.appwrite.io/v1") // your region endpoint
+  .setProject("69cb4e5c001651f6cfab"); // your project ID
+
+// =========================
+// SERVICES
+// =========================
 export const account = new Account(client);
 export const databases = new Databases(client);
 
-export const DATABASE_ID = "gameDB";
+// =========================
+// DATABASE + COLLECTION IDS
+// =========================
+export const DATABASE_ID = "69cb505d0015fbe8a669";
+
+// ⚠️ Make sure these EXACTLY match your Appwrite collection IDs
 export const WALLET_COLLECTION = "wallets";
 export const MATCH_COLLECTION = "matches";
+export const GAME_COLLECTION = "games";
+
+// =========================
+// EXPORT HELPERS
+// =========================
+export { client, ID, Query };
