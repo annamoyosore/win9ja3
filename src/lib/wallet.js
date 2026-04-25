@@ -26,7 +26,7 @@ export async function getWallet(userId) {
 }
 
 // =========================
-// LOCK FUNDS (VERY IMPORTANT)
+// LOCK FUNDS
 // =========================
 export async function lockFunds(userId, amount) {
   const wallet = await getWallet(userId);
@@ -48,7 +48,7 @@ export async function lockFunds(userId, amount) {
 }
 
 // =========================
-// UNLOCK FUNDS (CANCEL MATCH)
+// UNLOCK FUNDS
 // =========================
 export async function unlockFunds(userId, amount) {
   const wallet = await getWallet(userId);
@@ -66,7 +66,7 @@ export async function unlockFunds(userId, amount) {
 }
 
 // =========================
-// PAY WINNER (CORRECTED)
+// PAY WINNER
 // =========================
 export async function payWinner(userId, amount) {
   const wallet = await getWallet(userId);
@@ -77,10 +77,7 @@ export async function payWinner(userId, amount) {
     WALLET_COLLECTION,
     wallet.$id,
     {
-      // winner receives full pot
       balance: wallet.balance + amount,
-
-      // remove ONLY their locked stake (half the pot)
       locked: Math.max(0, (wallet.locked || 0) - amount / 2)
     }
   );
