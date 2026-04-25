@@ -25,7 +25,7 @@ export default function Match({ matchId, stake, startGame, cancel }) {
           clearInterval(interval);
 
           setTimeout(() => {
-            startGame(); // ✅ FIXED (no param)
+            startGame();
           }, 1000);
         }
       } catch (err) {
@@ -43,8 +43,8 @@ export default function Match({ matchId, stake, startGame, cancel }) {
     <div style={styles.container}>
       <h2>🔎 Searching for opponent...</h2>
 
-      {/* ✅ SHOW STAKE */}
-      <h3>💰 Stake: ${stake}</h3>
+      {/* ✅ NAIRA FORMAT */}
+      <h3>💰 Stake: ₦{Number(stake).toLocaleString()}</h3>
 
       <p>Status: {status}</p>
 
