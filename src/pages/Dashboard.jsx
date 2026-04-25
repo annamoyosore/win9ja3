@@ -39,6 +39,7 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
       if (res.documents.length) {
         setWallet(res.documents[0]);
       }
+
     } catch (err) {
       console.error("Dashboard load error:", err);
     } finally {
@@ -47,7 +48,7 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
   }
 
   // =========================
-  // UI LOADING
+  // LOADING STATE
   // =========================
   if (loading) {
     return (
@@ -67,17 +68,30 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
 
       <h2>Welcome, {user?.name || "Player"}</h2>
 
+      {/* WALLET BALANCE */}
       <div style={styles.card}>
         💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
       </div>
 
-      {/* WALLET */}
-      <button style={styles.btn} onClick={goWallet}>
+      {/* WALLET BUTTON */}
+      <button
+        style={styles.btn}
+        onClick={() => {
+          console.log("Go Wallet clicked");
+          goWallet && goWallet();
+        }}
+      >
         💳 Wallet
       </button>
 
-      {/* 🎯 GO TO LOBBY (IMPORTANT FIX) */}
-      <button style={styles.btn} onClick={goLobby}>
+      {/* PLAY WHOT BUTTON */}
+      <button
+        style={styles.btn}
+        onClick={() => {
+          console.log("Go Lobby clicked");
+          goLobby && goLobby();
+        }}
+      >
         🎲 Play WHOT
       </button>
 
@@ -89,6 +103,7 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
         🚪 Logout
       </button>
 
+      {/* FUTURE GAMES */}
       <div style={styles.games}>
         <h3>🚀 Coming Soon</h3>
         <p>Poker • Ludo • Blackjack</p>
