@@ -38,7 +38,7 @@ export default function Wallet({ back }) {
         setWallet(res.documents[0]);
       }
     } catch (err) {
-      console.error("Wallet load error:", err);
+      console.error("Wallet error:", err);
     } finally {
       setLoading(false);
     }
@@ -50,8 +50,7 @@ export default function Wallet({ back }) {
   if (loading) {
     return (
       <div style={styles.container}>
-        <h2>💳 Wallet</h2>
-        <p>Loading...</p>
+        <h2>Loading wallet...</h2>
       </div>
     );
   }
@@ -64,19 +63,12 @@ export default function Wallet({ back }) {
       <h1>💳 Wallet</h1>
 
       <div style={styles.card}>
-        <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>
-        <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
+        💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
       </div>
 
-      <button style={styles.btn}>
-        ➕ Deposit (coming)
-      </button>
+      <button style={styles.btn}>➕ Deposit (coming)</button>
+      <button style={styles.btn}>➖ Withdraw (coming)</button>
 
-      <button style={styles.btn}>
-        ➖ Withdraw (coming)
-      </button>
-
-      {/* ✅ FIXED BACK BUTTON */}
       <button style={styles.back} onClick={back}>
         ⬅ Back
       </button>
@@ -108,15 +100,13 @@ const styles = {
     marginTop: 10,
     background: "gold",
     border: "none",
-    borderRadius: 8,
-    cursor: "pointer"
+    borderRadius: 8
   },
   back: {
     marginTop: 20,
     padding: 10,
     background: "gray",
     border: "none",
-    borderRadius: 8,
-    cursor: "pointer"
+    borderRadius: 8
   }
 };
