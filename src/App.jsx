@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 import { account } from "./lib/appwrite";
 
+// =========================
+// PAGES
+// =========================
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
+import Lobby from "./pages/Lobby";
 import Match from "./pages/Match";
 import WhotGame from "./WhotGame";
 
+// =========================
+// MAIN APP
+// =========================
 export default function App() {
   const [page, setPage] = useState("loading");
   const [matchId, setMatchId] = useState(null);
@@ -16,13 +23,14 @@ export default function App() {
   // SESSION CHECK
   // =========================
   useEffect(() => {
-    account.get()
+    account
+      .get()
       .then(() => setPage("dashboard"))
       .catch(() => setPage("auth"));
   }, []);
 
   // =========================
-  // LOGOUT
+  // LOGOUT FUNCTION
   // =========================
   async function logout() {
     try {
@@ -31,17 +39,17 @@ export default function App() {
       console.warn("Logout error:", e);
     }
 
-    // ✅ reset state
+    // reset app state
     setMatchId(null);
     setStake(0);
     setPage("auth");
   }
 
   // =========================
-  // ROUTES
+  // ROUTING SYSTEM
   // =========================
 
-  // 🔄 Loading
+  // 🔄 LOADING PAGE
   if (page === "loading") {
     return (
       <div style={styles.loading}>
@@ -51,19 +59,18 @@ export default function App() {
     );
   }
 
-  // 🔐 Auth
+  // 🔐 AUTH PAGE
   if (page === "auth") {
     return <Auth onLogin={() => setPage("dashboard")} />;
   }
 
-  // 🏠 Dashboard
+  // 🏠 DASHBOARD
   if (page === "dashboard") {
     return (
       <Dashboard
-        goMatch={(id, s) => {
-          setMatchId(id);
-          setStake(s);
-          setPage("match");
+        goLobby={(stakeAmount) => {
+          setStake(stakeAmount);
+          setPage("lobby");
         }}
         goWallet={() => setPage("wallet")}
         logout={logout}
@@ -71,14 +78,22 @@ export default function App() {
     );
   }
 
-  // 💳 Wallet
-  if (page === "wallet") {
-    return <Wallet back={() => setPage("dashboard")} />;
+  // 🎮 LOBBY PAGE
+  if (page === "lobby") {
+    return (
+      <Lobby
+        goMatch={(id, s) => {
+          setMatchId(id);
+          setStake(s);
+          setPage("match");
+        }}
+        back={() => setPage("dashboard")}
+      />
+    );
   }
 
-  // 🎯 Match
+  // 🎯 MATCH PAGE
   if (page === "match") {
-    // ✅ safety check
     if (!matchId) {
       setPage("dashboard");
       return null;
@@ -87,25 +102,25 @@ export default function App() {
     return (
       <Match
         matchId={matchId}
-        stake={stake} // ✅ FIXED
+        stake={stake}
         startGame={() => setPage("game")}
         cancel={() => {
-          setMatchId(null); // ✅ reset
-          setStake(0);      // ✅ reset
+          setMatchId(null);
+          setStake(0);
           setPage("dashboard");
         }}
       />
     );
   }
 
-  // 🎮 Game
+  // 🎮 GAME PAGE
   if (page === "game") {
     return (
       <WhotGame
         stake={stake}
         goHome={() => {
-          setMatchId(null); // ✅ reset
-          setStake(0);      // ✅ reset
+          setMatchId(null);
+          setStake(0);
           setPage("dashboard");
         }}
       />
