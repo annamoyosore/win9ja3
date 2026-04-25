@@ -3,10 +3,10 @@
 // =========================
 import { useEffect, useState } from "react";
 import { databases, account, DATABASE_ID } from "./lib/appwrite";
-import { getWallet, updateBalance } from "./lib/wallet";
+import { payWinner } from "./lib/wallet"; // ✅ FIXED
 
 const GAME_COLLECTION = "games";
-const TURN_LIMIT = 24 * 60 * 60 * 1000; // 24 hours
+const TURN_LIMIT = 24 * 60 * 60 * 1000;
 
 // =========================
 // HELPERS
@@ -38,45 +38,35 @@ export default function WhotGame({ gameId, stake = 0 }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
 
-  // =========================
   // LOAD USER
-  // =========================
   useEffect(() => {
     account.get().then((u) => setUserId(u.$id));
   }, []);
 
-  // =========================
-  // LOAD GAME (INITIAL FETCH)
-// =========================
+  // LOAD GAME
   useEffect(() => {
     if (!gameId) return;
 
     async function loadGame() {
-      try {
-        const g = await databases.getDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId
-        );
+      const g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-        setGame({
-          ...g,
-          deck: JSON.parse(g.deck),
-          discard: JSON.parse(g.discard),
-          hands: JSON.parse(g.hands),
-          scores: JSON.parse(g.scores)
-        });
-      } catch (err) {
-        console.error("Game load error:", err);
-      }
+      setGame({
+        ...g,
+        deck: JSON.parse(g.deck),
+        discard: JSON.parse(g.discard),
+        hands: JSON.parse(g.hands),
+        scores: JSON.parse(g.scores)
+      });
     }
 
     loadGame();
   }, [gameId]);
 
-  // =========================
-  // REALTIME SUBSCRIBE
-  // =========================
+  // REALTIME
   useEffect(() => {
     if (!gameId) return;
 
@@ -98,9 +88,7 @@ export default function WhotGame({ gameId, stake = 0 }) {
     return () => unsub();
   }, [gameId]);
 
-  // =========================
-  // TIMEOUT CHECK
-  // =========================
+  // TIMEOUT
   useEffect(() => {
     if (!game || !userId) return;
 
@@ -122,7 +110,6 @@ export default function WhotGame({ gameId, stake = 0 }) {
   // =========================
   async function handleTimeout(g) {
     const hands = g.hands;
-
     if (!hands || hands.length < 2) return;
 
     const p1 = hands[0].length;
@@ -133,10 +120,9 @@ export default function WhotGame({ gameId, stake = 0 }) {
     if (p1 < p2) winnerId = g.players[0];
     else if (p2 < p1) winnerId = g.players[1];
 
-    // ⚠️ NOTE: payout should be server-side ideally
+    // ✅ FIXED payout
     if (winnerId === userId) {
-      const wallet = await getWallet(userId);
-      await updateBalance(wallet.$id, wallet.balance + stake * 2);
+      await payWinner(userId, stake * 2);
     }
 
     await databases.updateDocument(
@@ -165,13 +151,11 @@ export default function WhotGame({ gameId, stake = 0 }) {
     const top = copy.discard.at(-1);
 
     if (!card || !top) return;
-
     if (card.number !== top.number && card.shape !== top.shape) return;
 
     copy.hands[playerIndex].splice(cardIndex, 1);
     copy.discard.push(card);
 
-    // WIN CHECK
     if (copy.hands[playerIndex].length === 0) {
       await handleRoundWin(playerIndex, copy);
       return;
@@ -231,16 +215,15 @@ export default function WhotGame({ gameId, stake = 0 }) {
     if (playerIndex === 0) scores.p1++;
     else scores.p2++;
 
-    // FINAL WIN
     if (scores.p1 === 2 || scores.p2 === 2) {
       const winnerId =
         scores.p1 > scores.p2
           ? copy.players[0]
           : copy.players[1];
 
+      // ✅ FIXED payout
       if (winnerId === userId) {
-        const wallet = await getWallet(userId);
-        await updateBalance(wallet.$id, wallet.balance + stake * 2);
+        await payWinner(userId, stake * 2);
       }
 
       await databases.updateDocument(
@@ -257,7 +240,6 @@ export default function WhotGame({ gameId, stake = 0 }) {
       return;
     }
 
-    // NEXT ROUND
     const deck = createDeck();
 
     await databases.updateDocument(
