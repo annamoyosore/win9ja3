@@ -12,7 +12,26 @@ import {
   Query
 } from "../lib/appwrite";
 
-import { lockFunds, unlockFunds } from "../lib/wallet"; // ✅ correct path
+import { lockFunds, unlockFunds } from "../lib/wallet";
+
+// =========================
+// DEBUG HELPER
+// =========================
+function showError(err, label = "ERROR") {
+  console.error(label, err);
+
+  const message =
+    err?.message ||
+    err?.response?.message ||
+    JSON.stringify(err);
+
+  const code =
+    err?.code ||
+    err?.response?.code ||
+    "NO_CODE";
+
+  alert(`${label}\n\nCode: ${code}\nMessage: ${message}`);
+}
 
 // =========================
 // COMPONENT
@@ -41,7 +60,9 @@ export default function Lobby({ goMatch, back }) {
         [Query.equal("userId", u.$id)]
       );
 
-      if (w.documents.length) setWallet(w.documents[0]);
+      if (w.documents.length) {
+        setWallet(w.documents[0]);
+      }
 
       await loadMatches();
     } catch (err) {
@@ -70,8 +91,8 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // JOIN MATCH (SAFE + LOCK)
-// =========================
+  // JOIN MATCH
+  // =========================
   async function joinMatch(match) {
     try {
       if (!user) return;
@@ -103,7 +124,7 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // 🔒 LOCK FUNDS FIRST
+      // 🔒 LOCK FUNDS
       await lockFunds(user.$id, fresh.stake);
 
       // ✅ UPDATE MATCH
@@ -121,10 +142,9 @@ export default function Lobby({ goMatch, back }) {
       goMatch(fresh.$id, fresh.stake);
 
     } catch (err) {
-      console.error("JOIN ERROR:", err);
-      alert(err.message || "Join failed");
+      showError(err, "JOIN MATCH FAILED");
 
-      // 🔁 REFUND SAFELY
+      // 🔁 REFUND
       try {
         await unlockFunds(user.$id, Number(match?.stake || 0));
       } catch (e) {
@@ -134,8 +154,8 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // CREATE MATCH (SAFE FLOW)
-// =========================
+  // CREATE MATCH
+  // =========================
   async function createMatch() {
     const amount = Number(stake);
 
@@ -171,7 +191,7 @@ export default function Lobby({ goMatch, back }) {
         ID.unique(),
         {
           hostId: user.$id,
-          opponentId: null,
+          opponentId: "", // ✅ IMPORTANT FIX
           stake: amount,
           pot: amount,
           status: "waiting",
@@ -190,7 +210,7 @@ export default function Lobby({ goMatch, back }) {
       goMatch(match.$id, amount);
 
     } catch (err) {
-      console.error("CREATE ERROR:", err);
+      showError(err, "CREATE MATCH FAILED");
 
       // 🔁 ROLLBACK MATCH
       if (match?.$id) {
@@ -204,8 +224,6 @@ export default function Lobby({ goMatch, back }) {
           console.warn("Rollback delete failed:", e);
         }
       }
-
-      alert(err.message || "Create failed");
     }
   }
 
