@@ -22,7 +22,7 @@ export default function Lobby({ goMatch, back }) {
   const [wallet, setWallet] = useState(null);
 
   // =========================
-  // LOAD DATA
+  // INIT LOAD
   // =========================
   useEffect(() => {
     init();
@@ -33,17 +33,25 @@ export default function Lobby({ goMatch, back }) {
       const u = await account.get();
       setUser(u);
 
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
-
-      if (w.documents.length) setWallet(w.documents[0]);
-
-      loadMatches();
+      await loadWallet(u.$id);
+      await loadMatches();
     } catch (err) {
-      console.error(err);
+      console.error("Init error:", err);
+    }
+  }
+
+  // =========================
+  // LOAD WALLET
+  // =========================
+  async function loadWallet(userId) {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", userId)]
+    );
+
+    if (res.documents.length) {
+      setWallet(res.documents[0]);
     }
   }
 
@@ -64,31 +72,55 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // JOIN MATCH (SECURE)
+  // LOCK FUNDS
+  // =========================
+  async function lockFunds(amount) {
+    if (!wallet) throw new Error("Wallet not loaded");
+
+    if (wallet.balance < amount) {
+      throw new Error("Insufficient balance");
+    }
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      {
+        balance: wallet.balance - amount,
+        locked: (wallet.locked || 0) + amount
+      }
+    );
+
+    // refresh wallet
+    await loadWallet(user.$id);
+  }
+
+  // =========================
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     try {
-      if (!user) return;
+      if (!user || !wallet) return;
 
-      // ❌ Prevent self join
       if (match.player1 === user.$id) {
         alert("You cannot join your own match");
         return;
       }
 
-      // ❌ Prevent full match
       if (match.player2) {
         alert("Match already full");
         return;
       }
 
-      // ❌ Check balance
-      if ((wallet?.balance || 0) < match.stake) {
+      if (wallet.balance < match.stake) {
         alert("Insufficient balance");
         return;
       }
 
-      // 🔒 RE-FETCH (ANTI RACE CONDITION)
+      // 🔒 lock funds FIRST
+      await lockFunds(match.stake);
+
+      // 🔄 re-fetch to avoid race
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -96,18 +128,19 @@ export default function Lobby({ goMatch, back }) {
       );
 
       if (fresh.player2) {
-        alert("Someone just joined this match");
+        alert("Someone just joined");
         return;
       }
 
-      // ✅ SAFE UPDATE
+      // ✅ update match
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id,
         {
           player2: user.$id,
-          status: "matched"
+          status: "matched",
+          pot: match.stake * 2
         }
       );
 
@@ -115,32 +148,36 @@ export default function Lobby({ goMatch, back }) {
 
     } catch (err) {
       console.error(err);
-      alert("Join failed");
+      alert(err.message || "Join failed");
     }
   }
 
   // =========================
-  // CREATE MATCH (SECURE)
+  // CREATE MATCH
   // =========================
   async function createMatch() {
-    const amount = Number(stake);
-
-    if (!amount || amount <= 0) {
-      alert("Enter valid stake");
-      return;
-    }
-
-    if (amount < 50) {
-      alert("Minimum stake is ₦50");
-      return;
-    }
-
-    if ((wallet?.balance || 0) < amount) {
-      alert("Insufficient balance");
-      return;
-    }
-
     try {
+      const amount = Number(stake);
+
+      if (!amount || amount <= 0) {
+        alert("Enter valid stake");
+        return;
+      }
+
+      if (amount < 50) {
+        alert("Minimum stake is ₦50");
+        return;
+      }
+
+      if ((wallet?.balance || 0) < amount) {
+        alert("Insufficient balance");
+        return;
+      }
+
+      // 🔒 LOCK FUNDS FIRST
+      await lockFunds(amount);
+
+      // ✅ CREATE MATCH
       const match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -149,7 +186,9 @@ export default function Lobby({ goMatch, back }) {
           player1: user.$id,
           player2: null,
           stake: amount,
+          pot: amount,
           status: "waiting",
+          winner: null,
           createdAt: new Date().toISOString()
         }
       );
@@ -158,7 +197,7 @@ export default function Lobby({ goMatch, back }) {
 
     } catch (err) {
       console.error(err);
-      alert("Create failed");
+      alert(err.message || "Create failed");
     }
   }
 
@@ -174,7 +213,7 @@ export default function Lobby({ goMatch, back }) {
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
-          <p>💰 ₦{m.stake.toLocaleString()}</p>
+          <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
 
           <button
             style={styles.btn}
@@ -228,19 +267,22 @@ const styles = {
     background: "gold",
     border: "none",
     borderRadius: 6,
-    marginTop: 5
+    marginTop: 5,
+    cursor: "pointer"
   },
   input: {
     width: "100%",
     padding: 10,
     marginTop: 10,
-    borderRadius: 6
+    borderRadius: 6,
+    border: "none"
   },
   back: {
     marginTop: 20,
     background: "gray",
     padding: 10,
     border: "none",
-    borderRadius: 6
+    borderRadius: 6,
+    cursor: "pointer"
   }
 };
