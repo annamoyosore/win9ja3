@@ -55,7 +55,9 @@ export default function Lobby({ goMatch, back }) {
       const u = await account.get();
       setUser(u);
 
-      // wallet
+      // =========================
+      // LOAD WALLET
+      // =========================
       const w = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -66,10 +68,14 @@ export default function Lobby({ goMatch, back }) {
         setWallet(w.documents[0]);
       }
 
-      // 🔥 CHECK ACTIVE MATCH FIRST
+      // =========================
+      // CHECK ACTIVE MATCH
+      // =========================
       await checkActiveMatch(u.$id);
 
-      // load open matches
+      // =========================
+      // LOAD OPEN MATCHES
+      // =========================
       await loadMatches();
 
     } catch (err) {
@@ -90,17 +96,15 @@ export default function Lobby({ goMatch, back }) {
             Query.equal("hostId", userId),
             Query.equal("opponentId", userId)
           ]),
-          Query.notEqual("status", "finished")
+          Query.or([
+            Query.equal("status", "matched"),
+            Query.equal("status", "running")
+          ])
         ]
       );
 
       if (res.documents.length) {
-        const m = res.documents[0];
-
-        setActiveMatch(m);
-
-        // 🔥 AUTO CONTINUE GAME
-        goMatch(m.$id, m.stake);
+        setActiveMatch(res.documents[0]); // ✅ NO AUTO REDIRECT
       }
 
     } catch (err) {
@@ -162,9 +166,10 @@ export default function Lobby({ goMatch, back }) {
         return;
       }
 
-      // lock
+      // 🔒 LOCK FUNDS
       await lockFunds(user.$id, fresh.stake);
 
+      // ✅ UPDATE MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -181,6 +186,7 @@ export default function Lobby({ goMatch, back }) {
     } catch (err) {
       showError(err, "JOIN FAILED");
 
+      // 🔁 REFUND SAFELY
       try {
         await unlockFunds(user.$id, Number(match?.stake || 0));
       } catch {}
@@ -198,17 +204,21 @@ export default function Lobby({ goMatch, back }) {
     if ((wallet?.balance || 0) < amount)
       return alert("Insufficient balance");
 
+    if (!user) return alert("User not loaded");
+
     let match = null;
 
     try {
-      // create first
+      // =========================
+      // CREATE MATCH FIRST
+      // =========================
       match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
         {
           hostId: user.$id,
-          opponentId: "",
+          opponentId: null, // ✅ FIXED
           stake: amount,
           pot: amount,
           status: "waiting",
@@ -216,7 +226,9 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
-      // lock
+      // =========================
+      // LOCK FUNDS
+      // =========================
       await lockFunds(user.$id, amount);
 
       goMatch(match.$id, amount);
@@ -224,12 +236,15 @@ export default function Lobby({ goMatch, back }) {
     } catch (err) {
       showError(err, "CREATE FAILED");
 
+      // 🔁 ROLLBACK MATCH
       if (match?.$id) {
-        await databases.deleteDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          match.$id
-        );
+        try {
+          await databases.deleteDocument(
+            DATABASE_ID,
+            MATCH_COLLECTION,
+            match.$id
+          );
+        } catch {}
       }
     }
   }
@@ -241,7 +256,7 @@ export default function Lobby({ goMatch, back }) {
     <div style={styles.container}>
       <h2>🎮 Lobby</h2>
 
-      {/* 🔥 ACTIVE MATCH */}
+      {/* ✅ ACTIVE MATCH */}
       {activeMatch && (
         <div style={styles.activeBox}>
           <p>⚡ You have an ongoing match</p>
@@ -263,6 +278,7 @@ export default function Lobby({ goMatch, back }) {
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
+
           <button onClick={() => joinMatch(m)} style={styles.btn}>
             Join
           </button>
