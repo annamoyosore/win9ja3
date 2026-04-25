@@ -12,6 +12,8 @@ import {
   Query
 } from "../lib/appwrite";
 
+import { lockFunds } from "../lib/wallet"; // ✅ LOCK SYSTEM
+
 // =========================
 // COMPONENT
 // =========================
@@ -22,7 +24,7 @@ export default function Lobby({ goMatch, back }) {
   const [wallet, setWallet] = useState(null);
 
   // =========================
-  // INIT LOAD
+  // INIT
   // =========================
   useEffect(() => {
     init();
@@ -33,25 +35,17 @@ export default function Lobby({ goMatch, back }) {
       const u = await account.get();
       setUser(u);
 
-      await loadWallet(u.$id);
-      await loadMatches();
+      const w = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", u.$id)]
+      );
+
+      if (w.documents.length) setWallet(w.documents[0]);
+
+      loadMatches();
     } catch (err) {
-      console.error("Init error:", err);
-    }
-  }
-
-  // =========================
-  // LOAD WALLET
-  // =========================
-  async function loadWallet(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", userId)]
-    );
-
-    if (res.documents.length) {
-      setWallet(res.documents[0]);
+      console.error(err);
     }
   }
 
@@ -72,123 +66,97 @@ export default function Lobby({ goMatch, back }) {
   }
 
   // =========================
-  // LOCK FUNDS
-  // =========================
-  async function lockFunds(amount) {
-    if (!wallet) throw new Error("Wallet not loaded");
-
-    if (wallet.balance < amount) {
-      throw new Error("Insufficient balance");
-    }
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      {
-        balance: wallet.balance - amount,
-        locked: (wallet.locked || 0) + amount
-      }
-    );
-
-    // refresh wallet
-    await loadWallet(user.$id);
-  }
-
-  // =========================
-  // JOIN MATCH
-  // =========================
+  // JOIN MATCH (LOCK + SAFE)
+// =========================
   async function joinMatch(match) {
     try {
-      if (!user || !wallet) return;
+      if (!user) return;
 
-      if (match.player1 === user.$id) {
+      if (match.hostId === user.$id) {
         alert("You cannot join your own match");
         return;
       }
 
-      if (match.player2) {
+      if (match.opponentId) {
         alert("Match already full");
         return;
       }
 
-      if (wallet.balance < match.stake) {
+      if ((wallet?.balance || 0) < match.stake) {
         alert("Insufficient balance");
         return;
       }
 
-      // 🔒 lock funds FIRST
-      await lockFunds(match.stake);
-
-      // 🔄 re-fetch to avoid race
+      // 🔄 REFRESH MATCH
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id
       );
 
-      if (fresh.player2) {
-        alert("Someone just joined");
+      if (fresh.opponentId) {
+        alert("Someone already joined");
         return;
       }
 
-      // ✅ update match
+      // 🔒 LOCK MONEY FIRST
+      await lockFunds(user.$id, fresh.stake);
+
+      // ✅ UPDATE MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
-        match.$id,
+        fresh.$id,
         {
-          player2: user.$id,
+          opponentId: user.$id,
           status: "matched",
-          pot: match.stake * 2
+          pot: fresh.stake * 2
         }
       );
 
-      goMatch(match.$id, match.stake);
+      goMatch(fresh.$id, fresh.stake);
 
     } catch (err) {
       console.error(err);
-      alert(err.message || "Join failed");
+      alert("Join failed");
     }
   }
 
   // =========================
-  // CREATE MATCH
-  // =========================
+  // CREATE MATCH (LOCK)
+// =========================
   async function createMatch() {
+    const amount = Number(stake);
+
+    if (!amount || amount <= 0) {
+      alert("Enter valid stake");
+      return;
+    }
+
+    if (amount < 50) {
+      alert("Minimum stake is ₦50");
+      return;
+    }
+
+    if ((wallet?.balance || 0) < amount) {
+      alert("Insufficient balance");
+      return;
+    }
+
     try {
-      const amount = Number(stake);
+      // 🔒 LOCK HOST FUNDS
+      await lockFunds(user.$id, amount);
 
-      if (!amount || amount <= 0) {
-        alert("Enter valid stake");
-        return;
-      }
-
-      if (amount < 50) {
-        alert("Minimum stake is ₦50");
-        return;
-      }
-
-      if ((wallet?.balance || 0) < amount) {
-        alert("Insufficient balance");
-        return;
-      }
-
-      // 🔒 LOCK FUNDS FIRST
-      await lockFunds(amount);
-
-      // ✅ CREATE MATCH
       const match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
         {
-          player1: user.$id,
-          player2: null,
+          hostId: user.$id,
+          opponentId: null,
           stake: amount,
           pot: amount,
           status: "waiting",
-          winner: null,
           createdAt: new Date().toISOString()
         }
       );
@@ -197,7 +165,7 @@ export default function Lobby({ goMatch, back }) {
 
     } catch (err) {
       console.error(err);
-      alert(err.message || "Create failed");
+      alert("Create failed");
     }
   }
 
@@ -208,23 +176,18 @@ export default function Lobby({ goMatch, back }) {
     <div style={styles.container}>
       <h2>🎮 Active Matches</h2>
 
-      {/* MATCH LIST */}
       {matches.length === 0 && <p>No active matches</p>}
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
 
-          <button
-            style={styles.btn}
-            onClick={() => joinMatch(m)}
-          >
+          <button style={styles.btn} onClick={() => joinMatch(m)}>
             Join
           </button>
         </div>
       ))}
 
-      {/* CREATE */}
       <h3>Create Match</h3>
 
       <input
@@ -267,22 +230,19 @@ const styles = {
     background: "gold",
     border: "none",
     borderRadius: 6,
-    marginTop: 5,
-    cursor: "pointer"
+    marginTop: 5
   },
   input: {
     width: "100%",
     padding: 10,
     marginTop: 10,
-    borderRadius: 6,
-    border: "none"
+    borderRadius: 6
   },
   back: {
     marginTop: 20,
     background: "gray",
     padding: 10,
     border: "none",
-    borderRadius: 6,
-    cursor: "pointer"
+    borderRadius: 6
   }
 };
