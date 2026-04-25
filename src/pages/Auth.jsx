@@ -23,25 +23,18 @@ export default function Auth({ onLogin }) {
       setLoading(true);
 
       if (isLogin) {
-        // =========================
-        // LOGIN
-        // =========================
-        await account.createEmailPasswordSession(email, password);
+        // ✅ LOGIN (compatible with all SDK versions)
+        await account.createSession(email, password);
       } else {
-        // =========================
-        // REGISTER
-        // =========================
+        // ✅ REGISTER
         await account.create(ID.unique(), email, password);
 
-        // login immediately after register
-        await account.createEmailPasswordSession(email, password);
+        // ✅ LOGIN AFTER REGISTER
+        await account.createSession(email, password);
 
-        // get current user safely
         const user = await account.get();
 
-        // =========================
-        // CREATE WALLET
-        // =========================
+        // ✅ CREATE WALLET
         await databases.createDocument(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -95,9 +88,7 @@ export default function Auth({ onLogin }) {
         </button>
 
         <p style={styles.switch} onClick={() => setIsLogin(!isLogin)}>
-          {isLogin
-            ? "Create account"
-            : "Login instead"}
+          {isLogin ? "Create account" : "Login instead"}
         </p>
       </div>
     </div>
