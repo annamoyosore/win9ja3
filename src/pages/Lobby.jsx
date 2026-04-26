@@ -1,7 +1,11 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import {
   account,
   databases,
+  client,
   DATABASE_ID,
   MATCH_COLLECTION,
   WALLET_COLLECTION,
@@ -33,6 +37,8 @@ async function createGame(match, opponentId) {
 
       turn: opponentId,
       status: "running",
+
+      // ✅ MUST BE STRING (Appwrite limit fix)
       round: "1",
 
       winnerId: "",
@@ -64,6 +70,7 @@ export default function Lobby({ goGame, back }) {
       const u = await account.get();
       setUser(u);
 
+      // ✅ SAFE wallet fetch
       try {
         const w = await databases.listDocuments(
           DATABASE_ID,
@@ -71,7 +78,7 @@ export default function Lobby({ goGame, back }) {
           [Query.equal("userId", u.$id)]
         );
 
-        setWallet(w.documents?.[0] || null);
+        setWallet(w?.documents?.length ? w.documents[0] : null);
       } catch {
         setWallet(null);
       }
@@ -84,12 +91,12 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // REALTIME
-  // =========================
+  // REALTIME (FIXED)
+// =========================
   useEffect(() => {
     if (!user) return;
 
-    const unsub = databases.client.subscribe(
+    const unsub = client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
       () => refreshAll(user.$id)
     );
@@ -117,12 +124,11 @@ export default function Lobby({ goGame, back }) {
         DATABASE_ID,
         MATCH_COLLECTION,
         [
-          Query.equal("status", "waiting"),
-          Query.orderDesc("$createdAt")
+          Query.equal("status", "waiting")
         ]
       );
 
-      setMatches(res.documents || []);
+      setMatches(res?.documents || []);
     } catch {
       setMatches([]);
     }
@@ -139,7 +145,7 @@ export default function Lobby({ goGame, back }) {
         [Query.notEqual("status", "finished")]
       );
 
-      const myMatches = (res.documents || []).filter(
+      const myMatches = (res?.documents || []).filter(
         (m) =>
           m.hostId === userId ||
           m.opponentId === userId
@@ -192,6 +198,7 @@ export default function Lobby({ goGame, back }) {
 
       let gameId = updated.gameId;
 
+      // ✅ CREATE GAME
       if (!gameId) {
         const game = await createGame(updated, user.$id);
         gameId = game.$id;
@@ -204,6 +211,7 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
+      // ✅ GO STRAIGHT TO GAME
       goGame(gameId, updated.stake);
 
     } catch (err) {
@@ -221,25 +229,24 @@ export default function Lobby({ goGame, back }) {
   // =========================
   // RESUME MATCH (FIXED)
 // =========================
-async function resumeMatch(m) {
-  try {
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      m.$id
-    );
+  async function resumeMatch(m) {
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        m.$id
+      );
 
-    if (fresh.gameId) {
-      goGame(fresh.gameId, fresh.stake);
-      return;
+      if (fresh.gameId) {
+        goGame(fresh.gameId, fresh.stake);
+      } else {
+        alert("Game still initializing...");
+      }
+
+    } catch (err) {
+      alert(err.message);
     }
-
-    alert("Game still initializing...");
-
-  } catch (err) {
-    alert(err.message);
   }
-}
 
   // =========================
   // CREATE MATCH
@@ -286,7 +293,7 @@ async function resumeMatch(m) {
   // SAFE RENDER
   // =========================
   if (!user) {
-    return <div style={styles.container}>Loading user...</div>;
+    return <div style={styles.container}>Loading Lobby...</div>;
   }
 
   return (
@@ -332,6 +339,7 @@ async function resumeMatch(m) {
           <button
             style={styles.joinBtn}
             onClick={() => joinMatch(m)}
+            disabled={loading}
           >
             Join
           </button>
@@ -351,14 +359,91 @@ async function resumeMatch(m) {
         <button
           style={styles.createBtn}
           onClick={createMatch}
+          disabled={loading}
         >
           Create Match
         </button>
       </div>
 
+      {/* BACK */}
       <button style={styles.back} onClick={back}>
         ← Back
       </button>
     </div>
   );
 }
+
+// =========================
+// STYLES
+// =========================
+const styles = {
+  container: {
+    padding: 20,
+    minHeight: "100vh",
+    background: "linear-gradient(135deg,#020617,#0f172a)",
+    color: "#fff"
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "bold"
+  },
+  section: {
+    marginTop: 25,
+    color: "#facc15"
+  },
+  loading: {
+    color: "#facc15"
+  },
+  card: {
+    background: "#111827",
+    padding: 15,
+    margin: "10px 0",
+    borderRadius: 12,
+    display: "flex",
+    justifyContent: "space-between"
+  },
+  activeCard: {
+    background: "#1e293b",
+    padding: 15,
+    marginBottom: 10,
+    borderRadius: 12,
+    display: "flex",
+    justifyContent: "space-between"
+  },
+  joinBtn: {
+    background: "#facc15",
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "none"
+  },
+  resumeBtn: {
+    background: "#22c55e",
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "none",
+    color: "#fff"
+  },
+  createBox: {
+    marginTop: 25
+  },
+  input: {
+    width: "100%",
+    padding: 12,
+    marginBottom: 10
+  },
+  createBtn: {
+    width: "100%",
+    padding: 12,
+    background: "#3b82f6",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff"
+  },
+  back: {
+    marginTop: 25,
+    padding: 10,
+    background: "#475569",
+    border: "none",
+    borderRadius: 8
+  }
+};
