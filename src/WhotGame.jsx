@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
+const MATCH_COLLECTION = "matches";
 
 // =========================
-// SAFE PARSE
+// PARSE GAME
 // =========================
 function parseGame(g) {
   return {
@@ -21,7 +22,7 @@ function parseGame(g) {
 }
 
 // =========================
-// ENCODE
+// ENCODE GAME
 // =========================
 function encodeGame(g) {
   return {
@@ -46,8 +47,8 @@ function decodeCard(str) {
   };
 
   return {
-    shape: map[str[0]],
-    number: Number(str.slice(1))
+    shape: map[str?.[0]],
+    number: Number(str?.slice(1))
   };
 }
 
@@ -57,6 +58,8 @@ function decodeCard(str) {
 const cache = new Map();
 
 function drawCard(card) {
+  if (!card) return null;
+
   const key = `${card.shape}_${card.number}`;
   if (cache.has(key)) return cache.get(key);
 
@@ -83,9 +86,7 @@ function drawCard(card) {
     ctx.fill();
   }
 
-  if (card.shape === "square") {
-    ctx.fillRect(cx - 12, cy - 12, 24, 24);
-  }
+  if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
 
   if (card.shape === "triangle") {
     ctx.beginPath();
@@ -112,14 +113,17 @@ function drawCard(card) {
 // =========================
 export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
+  const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
 
   const gameRef = useRef(null);
 
+  // LOAD USER
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
+  // LOAD GAME + REALTIME
   useEffect(() => {
     if (!gameId || !userId) return;
 
@@ -148,7 +152,22 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  if (!game || !userId) return <div style={styles.center}>Loading...</div>;
+  // LOAD MATCH (for stake & pot)
+  useEffect(() => {
+    if (!game?.matchId) return;
+
+    databases
+      .getDocument(DATABASE_ID, MATCH_COLLECTION, game.matchId)
+      .then(setMatch)
+      .catch(() => {});
+  }, [game]);
+
+  // =========================
+  // GUARDS
+  // =========================
+  if (!game || !userId) {
+    return <div style={styles.center}>Loading...</div>;
+  }
 
   if (!game.players || game.players.length < 2) {
     return <div style={styles.center}>Waiting for opponent...</div>;
@@ -212,7 +231,7 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW
+  // DRAW CARD
   // =========================
   async function drawCard() {
     const g = parseGame(
@@ -244,7 +263,19 @@ export default function WhotGame({ gameId, goHome }) {
       <div style={styles.box}>
         <h2>WHOT GAME</h2>
 
-        {/* Opponent */}
+        {/* STAKE INFO */}
+        {match && (
+          <div style={styles.infoBox}>
+            💰 Stake: ₦{match.stake} | 🏆 Pot: ₦{match.pot}
+          </div>
+        )}
+
+        {/* TURN */}
+        <p>
+          Turn: {game.turn === userId ? "🟢 You" : "⏳ Opponent"}
+        </p>
+
+        {/* OPPONENT */}
         <div>
           Opponent: {opponentHand.length} cards
           <div style={styles.row}>
@@ -254,24 +285,30 @@ export default function WhotGame({ gameId, goHome }) {
           </div>
         </div>
 
-        {/* Center */}
+        {/* CENTER */}
         <div style={styles.centerRow}>
-          {top && <img src={drawCard(top)} style={{ width: 60 }} />}
+          {top && (
+            <img src={drawCard(top)} alt="" style={{ width: 60 }} />
+          )}
           <button onClick={drawCard}>
             MARKET ({game.deck.length})
           </button>
         </div>
 
-        {/* Player */}
+        {/* PLAYER */}
         <div style={styles.row}>
           {hand.map((c, i) => {
             const d = decodeCard(c);
+            const img = drawCard(d);
+            if (!img) return null;
+
             return (
               <img
                 key={i}
-                src={drawCard(d)}
-                onClick={() => playCard(i)}
+                src={img}
+                alt=""
                 style={{ width: 60 }}
+                onClick={() => playCard(i)}
               />
             );
           })}
@@ -292,12 +329,14 @@ const styles = {
     background: "green",
     display: "flex",
     justifyContent: "center",
-    alignItems: "center"
+    alignItems: "center",
+    padding: 10
   },
   box: {
-    width: 420,
-    padding: 10,
+    width: "100%",
+    maxWidth: 420,
     background: "#00000088",
+    padding: 10,
     color: "#fff"
   },
   row: {
@@ -316,6 +355,12 @@ const styles = {
     justifyContent: "center",
     gap: 10,
     margin: "10px 0"
+  },
+  infoBox: {
+    background: "#111",
+    padding: 8,
+    marginBottom: 10,
+    borderRadius: 6
   },
   center: {
     display: "flex",
