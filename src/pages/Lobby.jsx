@@ -1,3 +1,6 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import {
   account,
@@ -14,7 +17,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
-// CREATE GAME
+// CREATE GAME (FIXED)
 // =========================
 async function createGame(match, opponentId) {
   const game = await databases.createDocument(
@@ -23,13 +26,21 @@ async function createGame(match, opponentId) {
     ID.unique(),
     {
       matchId: match.$id,
-      players: [match.hostId, opponentId],
-      turn: opponentId, // 🔥 opponent starts
+
+      // ✅ FIX: store as STRING not array
+      players: `${match.hostId},${opponentId}`,
+
+      // ✅ opponent starts first
+      turn: opponentId,
+
       status: "running",
       round: 1,
-      discard: "c1", // starter card (safe)
+
+      // lightweight state
+      discard: "c1",
       deck: "",
       hands: "",
+
       winnerId: "",
       turnStartTime: new Date().toISOString()
     }
@@ -68,7 +79,9 @@ export default function Lobby({ goGame, back }) {
           [Query.equal("userId", u.$id)]
         );
 
-        if (w.documents.length) setWallet(w.documents[0]);
+        if (w.documents.length) {
+          setWallet(w.documents[0]);
+        }
       } catch {}
 
       refreshAll(u.$id);
@@ -148,70 +161,74 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN MATCH
-  // =========================
-  async function joinMatch(match) {
-    if (loading) return;
+  // JOIN MATCH (FIXED FLOW)
+// =========================
+async function joinMatch(match) {
+  if (loading) return;
+
+  try {
+    setLoading(true);
+
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      match.$id
+    );
+
+    if (fresh.opponentId) {
+      alert("Match already taken");
+      return;
+    }
+
+    if ((wallet?.balance || 0) < fresh.stake) {
+      alert("Insufficient balance");
+      return;
+    }
+
+    // lock funds
+    await lockFunds(user.$id, fresh.stake);
+
+    // update match
+    const updated = await databases.updateDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      fresh.$id,
+      {
+        opponentId: user.$id,
+        status: "matched",
+        pot: fresh.stake * 2
+      }
+    );
+
+    let gameId = updated.gameId;
+
+    // create game once
+    if (!gameId) {
+      const game = await createGame(updated, user.$id);
+      gameId = game.$id;
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        updated.$id,
+        { gameId }
+      );
+    }
+
+    // ✅ DIRECT NAVIGATION (NO WAIT LOOP)
+    goGame(gameId, updated.stake);
+
+  } catch (err) {
+    alert(err.message);
 
     try {
-      setLoading(true);
+      await unlockFunds(user.$id, match.stake);
+    } catch {}
 
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        match.$id
-      );
-
-      if (fresh.opponentId) {
-        alert("Match already taken");
-        return;
-      }
-
-      if ((wallet?.balance || 0) < fresh.stake) {
-        alert("Insufficient balance");
-        return;
-      }
-
-      await lockFunds(user.$id, fresh.stake);
-
-      const updated = await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        fresh.$id,
-        {
-          opponentId: user.$id,
-          status: "matched",
-          pot: fresh.stake * 2
-        }
-      );
-
-      let gameId = updated.gameId;
-
-      if (!gameId) {
-        const game = await createGame(updated, user.$id);
-        gameId = game.$id;
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          updated.$id,
-          { gameId }
-        );
-      }
-
-      goGame(gameId, updated.stake);
-
-    } catch (err) {
-      alert(err.message);
-
-      try {
-        await unlockFunds(user.$id, match.stake);
-      } catch {}
-
-    } finally {
-      setLoading(false);
-    }
+  } finally {
+    setLoading(false);
   }
+}
 
   // =========================
   // CREATE MATCH
