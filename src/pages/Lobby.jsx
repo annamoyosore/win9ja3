@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import {
   account,
@@ -17,7 +14,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
-// CREATE GAME
+// CREATE GAME (STRING SAFE)
 // =========================
 async function createGame(match, opponentId) {
   return await databases.createDocument(
@@ -27,7 +24,7 @@ async function createGame(match, opponentId) {
     {
       matchId: match.$id,
 
-      // ✅ STRING FORMAT
+      // ✅ STRING (NOT ARRAY)
       players: `${match.hostId},${opponentId}`,
 
       hands: "",
@@ -67,15 +64,20 @@ export default function Lobby({ goGame, back }) {
       const u = await account.get();
       setUser(u);
 
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
+      try {
+        const w = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", u.$id)]
+        );
 
-      if (w.documents.length) setWallet(w.documents[0]);
+        setWallet(w.documents?.[0] || null);
+      } catch {
+        setWallet(null);
+      }
 
-      refreshAll(u.$id);
+      await refreshAll(u.$id);
+
     } catch (err) {
       console.error("INIT ERROR:", err.message);
     }
@@ -96,45 +98,58 @@ export default function Lobby({ goGame, back }) {
   }, [user]);
 
   async function refreshAll(userId) {
-    await Promise.all([
-      loadMatches(),
-      loadActiveMatches(userId)
-    ]);
+    try {
+      await Promise.all([
+        loadMatches(),
+        loadActiveMatches(userId)
+      ]);
+    } catch (err) {
+      console.warn("Refresh error:", err.message);
+    }
   }
 
   // =========================
   // LOAD MATCHES
   // =========================
   async function loadMatches() {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.equal("status", "waiting"),
-        Query.orderDesc("$createdAt")
-      ]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [
+          Query.equal("status", "waiting"),
+          Query.orderDesc("$createdAt")
+        ]
+      );
 
-    setMatches(res.documents);
+      setMatches(res.documents || []);
+    } catch {
+      setMatches([]);
+    }
   }
 
   // =========================
   // ACTIVE MATCHES
   // =========================
   async function loadActiveMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [Query.notEqual("status", "finished")]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [Query.notEqual("status", "finished")]
+      );
 
-    const myMatches = res.documents.filter(
-      (m) =>
-        m.hostId === userId ||
-        m.opponentId === userId
-    );
+      const myMatches = (res.documents || []).filter(
+        (m) =>
+          m.hostId === userId ||
+          m.opponentId === userId
+      );
 
-    setActiveMatches(myMatches);
+      setActiveMatches(myMatches);
+
+    } catch {
+      setActiveMatches([]);
+    }
   }
 
   // =========================
@@ -204,44 +219,27 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // ✅ FIXED RESUME
-  // =========================
-  async function resumeMatch(m) {
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        m.$id
-      );
+  // RESUME MATCH (FIXED)
+// =========================
+async function resumeMatch(m) {
+  try {
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      m.$id
+    );
 
-      // ✅ If game exists → go immediately
-      if (fresh.gameId) {
-        goGame(fresh.gameId, fresh.stake);
-        return;
-      }
-
-      // 🔁 Retry a few times (race condition fix)
-      for (let i = 0; i < 5; i++) {
-        await new Promise((r) => setTimeout(r, 400));
-
-        const retry = await databases.getDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          m.$id
-        );
-
-        if (retry.gameId) {
-          goGame(retry.gameId, retry.stake);
-          return;
-        }
-      }
-
-      alert("Game still initializing... try again");
-
-    } catch (err) {
-      alert(err.message);
+    if (fresh.gameId) {
+      goGame(fresh.gameId, fresh.stake);
+      return;
     }
+
+    alert("Game still initializing...");
+
+  } catch (err) {
+    alert(err.message);
   }
+}
 
   // =========================
   // CREATE MATCH
@@ -285,16 +283,24 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // UI
+  // SAFE RENDER
   // =========================
+  if (!user) {
+    return <div style={styles.container}>Loading user...</div>;
+  }
+
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>🎮 Game Lobby</h1>
 
       {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
-      {/* ACTIVE MATCHES */}
+      {/* ACTIVE */}
       <h2 style={styles.section}>🔥 Your Matches</h2>
+
+      {activeMatches.length === 0 && (
+        <p>No active matches</p>
+      )}
 
       {activeMatches.map((m) => (
         <div key={m.$id} style={styles.activeCard}>
@@ -314,6 +320,10 @@ export default function Lobby({ goGame, back }) {
 
       {/* AVAILABLE */}
       <h2 style={styles.section}>🎯 Available Matches</h2>
+
+      {matches.length === 0 && (
+        <p>No matches available</p>
+      )}
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
