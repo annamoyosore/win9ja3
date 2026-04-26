@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
@@ -9,10 +6,6 @@ const GAME_COLLECTION = "games";
 // =========================
 // CARD ENCODE / DECODE
 // =========================
-function encodeCard(c) {
-  return c.shape[0] + c.number;
-}
-
 function decodeCard(str) {
   if (!str) return null;
 
@@ -31,16 +24,16 @@ function decodeCard(str) {
 }
 
 // =========================
-// PARSE GAME (SAFE)
+// PARSE GAME (FIXED)
 // =========================
 function parseGame(g) {
   return {
     ...g,
 
-    // ✅ STRING → ARRAY
+    // ✅ FIX: JSON string → array
     players:
       typeof g.players === "string"
-        ? g.players.split(",").filter(Boolean)
+        ? JSON.parse(g.players)
         : [],
 
     deck:
@@ -62,7 +55,7 @@ function parseGame(g) {
 }
 
 // =========================
-// ENCODE GAME (🔥 CRITICAL)
+// ENCODE GAME
 // =========================
 function encodeGame(g) {
   return {
@@ -82,16 +75,12 @@ export default function WhotGame({ gameId, goHome }) {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
-  // =========================
   // LOAD USER
-  // =========================
   useEffect(() => {
     account.get().then((u) => setUserId(u.$id));
   }, []);
 
-  // =========================
   // LOAD GAME
-  // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
 
@@ -123,9 +112,7 @@ export default function WhotGame({ gameId, goHome }) {
     return () => clearTimeout(retry);
   }, [gameId, userId]);
 
-  // =========================
   // REALTIME
-  // =========================
   useEffect(() => {
     if (!gameId) return;
 
@@ -139,9 +126,7 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId]);
 
-  // =========================
   // GUARDS
-  // =========================
   if (loading || !game || !userId) {
     return <div style={styles.center}>Loading...</div>;
   }
@@ -167,9 +152,7 @@ export default function WhotGame({ gameId, goHome }) {
   const hand = game.hands[pIndex] || [];
   const top = decodeCard(game.discard);
 
-  // =========================
   // PLAY CARD
-  // =========================
   async function playCard(i) {
     if (processing) return;
     setProcessing(true);
@@ -200,10 +183,8 @@ export default function WhotGame({ gameId, goHome }) {
           current.shape !== topDecoded.shape)
       ) return;
 
-      // remove card
       g.hands[pIndexFresh].splice(i, 1);
 
-      // WIN
       if (g.hands[pIndexFresh].length === 0) {
         await databases.updateDocument(
           DATABASE_ID,
@@ -236,9 +217,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
   }
 
-  // =========================
   // DRAW CARD
-  // =========================
   async function drawCard() {
     if (processing) return;
     setProcessing(true);
@@ -261,11 +240,6 @@ export default function WhotGame({ gameId, goHome }) {
       const card = g.deck.pop();
       g.hands[pIndexFresh].push(card);
 
-      // 🔥 HARD LIMIT (PREVENT SIZE ERROR)
-      if (g.deck.length > 80) {
-        g.deck = g.deck.slice(-80);
-      }
-
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -282,9 +256,6 @@ export default function WhotGame({ gameId, goHome }) {
     }
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={styles.container}>
       <h2>🎮 Whot Game</h2>
@@ -323,9 +294,6 @@ export default function WhotGame({ gameId, goHome }) {
   );
 }
 
-// =========================
-// STYLES
-// =========================
 const styles = {
   container: {
     padding: 20,
