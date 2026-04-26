@@ -2,13 +2,16 @@
 // IMPORTS
 // =========================
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom"; // 🔥 NEW
 import { account } from "../lib/appwrite";
 import { getWallet } from "../lib/wallet";
 
 // =========================
 // COMPONENT
 // =========================
-export default function Wallet({ goTo }) {
+export default function Wallet() {
+  const navigate = useNavigate(); // 🔥 NEW
+
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -71,9 +74,9 @@ export default function Wallet({ goTo }) {
 
       {/* BACK */}
       <button
-        type="button" // 🔥 CRITICAL FIX
+        type="button"
         style={styles.back}
-        onClick={() => goTo("dashboard")}
+        onClick={() => navigate("/dashboard")} // 🔥 FIXED
       >
         ⬅ Back
       </button>
