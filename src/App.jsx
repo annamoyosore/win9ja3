@@ -14,6 +14,7 @@ import WhotGame from "./WhotGame";
 // MAIN APP
 // =========================
 export default function App() {
+
   // =========================
   // STATE (PERSISTED)
   // =========================
@@ -30,14 +31,15 @@ export default function App() {
   );
 
   // =========================
-  // SAFE NAVIGATION FUNCTION 🔥
+  // SAFE NAVIGATION 🔥
   // =========================
   function navigate(nextPage, data = {}) {
     setPage(nextPage);
     localStorage.setItem("page", nextPage);
 
-    if (data.matchId !== undefined) {
+    if ("matchId" in data) {
       setMatchId(data.matchId);
+
       if (data.matchId) {
         localStorage.setItem("matchId", data.matchId);
       } else {
@@ -45,7 +47,7 @@ export default function App() {
       }
     }
 
-    if (data.stake !== undefined) {
+    if ("stake" in data) {
       setStake(data.stake);
       localStorage.setItem("stake", data.stake);
     }
@@ -59,6 +61,7 @@ export default function App() {
       .then(() => {
         const savedPage = localStorage.getItem("page");
 
+        // ✅ DON'T OVERRIDE CURRENT PAGE
         if (!savedPage || savedPage === "loading") {
           navigate("dashboard");
         }
@@ -72,24 +75,27 @@ export default function App() {
   // SAFETY GUARD
   // =========================
   useEffect(() => {
+    // ❌ Prevent broken game page
     if (page === "game" && !matchId) {
       navigate("dashboard");
     }
   }, [page, matchId]);
 
   // =========================
-  // BLOCK APP EXIT (ANDROID FIX)
-// =========================
+  // ANDROID BACK FIX 🔥
+  // =========================
   useEffect(() => {
     const handler = (e) => {
+      if (page === "dashboard") return;
+
       e.preventDefault();
-      e.returnValue = "";
+      navigate("dashboard");
     };
 
-    window.addEventListener("beforeunload", handler);
+    window.addEventListener("popstate", handler);
 
-    return () => window.removeEventListener("beforeunload", handler);
-  }, []);
+    return () => window.removeEventListener("popstate", handler);
+  }, [page]);
 
   // =========================
   // LOGOUT
@@ -138,11 +144,11 @@ export default function App() {
     );
   }
 
-  // 💳 WALLET
+  // 💳 WALLET (✅ FIXED BACK)
   if (page === "wallet") {
     return (
       <Wallet
-        goTo={(p) => navigate(p)}
+        back={() => navigate("dashboard")}   // ✅ FIX
       />
     );
   }
@@ -168,12 +174,12 @@ export default function App() {
       <WhotGame
         gameId={matchId}
         stake={stake}
-        goHome={() => {
+        goHome={() =>
           navigate("dashboard", {
             matchId: null,
             stake: 0
-          });
-        }}
+          })
+        }
       />
     );
   }
