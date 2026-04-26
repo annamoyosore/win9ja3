@@ -35,13 +35,38 @@ function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div style={{ textAlign: "center", marginTop: 50 }}>
+      <div style={{ color: "white", textAlign: "center", marginTop: 50 }}>
         Loading...
       </div>
     );
   }
 
   return authed ? children : <Navigate to="/auth" replace />;
+}
+
+// =========================
+// ROOT REDIRECT (🔥 IMPORTANT)
+// =========================
+function RootRedirect() {
+  const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    account.get()
+      .then(() => setAuthed(true))
+      .catch(() => setAuthed(false))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ color: "white", textAlign: "center", marginTop: 50 }}>
+        Loading...
+      </div>
+    );
+  }
+
+  return <Navigate to={authed ? "/dashboard" : "/auth"} replace />;
 }
 
 // =========================
@@ -61,28 +86,7 @@ function GameWrapper() {
 }
 
 // =========================
-// ROOT DECIDER (🔥 IMPORTANT)
-// =========================
-function RootRedirect() {
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    account.get()
-      .then(() => setAuthed(true))
-      .catch(() => setAuthed(false))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <p style={{ textAlign: "center" }}>Loading...</p>;
-
-  return authed
-    ? <Navigate to="/dashboard" replace />
-    : <Navigate to="/auth" replace />;
-}
-
-// =========================
-// APP ROUTES
+// ROUTES
 // =========================
 function AppRoutes() {
   const navigate = useNavigate();
@@ -90,7 +94,7 @@ function AppRoutes() {
   return (
     <Routes>
 
-      {/* 🔥 ROOT FIX */}
+      {/* ROOT */}
       <Route path="/" element={<RootRedirect />} />
 
       {/* AUTH */}
@@ -153,7 +157,6 @@ function AppRoutes() {
 
       {/* FALLBACK */}
       <Route path="*" element={<Navigate to="/" />} />
-
     </Routes>
   );
 }
