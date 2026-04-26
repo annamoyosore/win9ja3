@@ -1,5 +1,5 @@
 // =========================
-// IMPORTS (🔥 FIXED)
+// IMPORTS
 // =========================
 import { useEffect, useState } from "react";
 import {
@@ -33,7 +33,13 @@ function ProtectedRoute({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", marginTop: 50 }}>
+        Loading...
+      </div>
+    );
+  }
 
   return authed ? children : <Navigate to="/auth" replace />;
 }
@@ -55,6 +61,27 @@ function GameWrapper() {
 }
 
 // =========================
+// ROOT DECIDER (🔥 IMPORTANT)
+// =========================
+function RootRedirect() {
+  const [loading, setLoading] = useState(true);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    account.get()
+      .then(() => setAuthed(true))
+      .catch(() => setAuthed(false))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p style={{ textAlign: "center" }}>Loading...</p>;
+
+  return authed
+    ? <Navigate to="/dashboard" replace />
+    : <Navigate to="/auth" replace />;
+}
+
+// =========================
 // APP ROUTES
 // =========================
 function AppRoutes() {
@@ -62,6 +89,9 @@ function AppRoutes() {
 
   return (
     <Routes>
+
+      {/* 🔥 ROOT FIX */}
+      <Route path="/" element={<RootRedirect />} />
 
       {/* AUTH */}
       <Route
@@ -121,8 +151,9 @@ function AppRoutes() {
         }
       />
 
-      {/* DEFAULT */}
-      <Route path="*" element={<Navigate to="/dashboard" />} />
+      {/* FALLBACK */}
+      <Route path="*" element={<Navigate to="/" />} />
+
     </Routes>
   );
 }
