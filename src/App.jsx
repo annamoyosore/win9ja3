@@ -15,7 +15,7 @@ import WhotGame from "./WhotGame";
 // =========================
 export default function App() {
   // =========================
-  // STATE (PERSIST)
+  // STATE (PERSISTED)
   // =========================
   const [page, setPage] = useState(
     localStorage.getItem("page") || "loading"
@@ -30,6 +30,28 @@ export default function App() {
   );
 
   // =========================
+  // SAFE NAVIGATION FUNCTION 🔥
+  // =========================
+  function navigate(nextPage, data = {}) {
+    setPage(nextPage);
+    localStorage.setItem("page", nextPage);
+
+    if (data.matchId !== undefined) {
+      setMatchId(data.matchId);
+      if (data.matchId) {
+        localStorage.setItem("matchId", data.matchId);
+      } else {
+        localStorage.removeItem("matchId");
+      }
+    }
+
+    if (data.stake !== undefined) {
+      setStake(data.stake);
+      localStorage.setItem("stake", data.stake);
+    }
+  }
+
+  // =========================
   // SESSION CHECK
   // =========================
   useEffect(() => {
@@ -37,45 +59,37 @@ export default function App() {
       .then(() => {
         const savedPage = localStorage.getItem("page");
 
-        // ✅ don't override existing page
         if (!savedPage || savedPage === "loading") {
-          setPage("dashboard");
+          navigate("dashboard");
         }
       })
       .catch(() => {
-        setPage("auth");
+        navigate("auth");
       });
   }, []);
-
-  // =========================
-  // SAVE STATE
-  // =========================
-  useEffect(() => {
-    if (page !== "loading") {
-      localStorage.setItem("page", page);
-    }
-  }, [page]);
-
-  useEffect(() => {
-    if (matchId) {
-      localStorage.setItem("matchId", matchId);
-    } else {
-      localStorage.removeItem("matchId");
-    }
-  }, [matchId]);
-
-  useEffect(() => {
-    localStorage.setItem("stake", stake);
-  }, [stake]);
 
   // =========================
   // SAFETY GUARD
   // =========================
   useEffect(() => {
     if (page === "game" && !matchId) {
-      setPage("dashboard");
+      navigate("dashboard");
     }
   }, [page, matchId]);
+
+  // =========================
+  // BLOCK APP EXIT (ANDROID FIX)
+// =========================
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handler);
+
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
 
   // =========================
   // LOGOUT
@@ -91,7 +105,7 @@ export default function App() {
 
     setMatchId(null);
     setStake(0);
-    setPage("auth");
+    navigate("auth");
   }
 
   // =========================
@@ -110,15 +124,15 @@ export default function App() {
 
   // 🔐 AUTH
   if (page === "auth") {
-    return <Auth onLogin={() => setPage("dashboard")} />;
+    return <Auth onLogin={() => navigate("dashboard")} />;
   }
 
   // 🏠 DASHBOARD
   if (page === "dashboard") {
     return (
       <Dashboard
-        goLobby={() => setPage("lobby")}
-        goWallet={() => setPage("wallet")}
+        goLobby={() => navigate("lobby")}
+        goWallet={() => navigate("wallet")}
         logout={logout}
       />
     );
@@ -126,19 +140,24 @@ export default function App() {
 
   // 💳 WALLET
   if (page === "wallet") {
-    return <Wallet goTo={(p) => setPage(p)} />;
+    return (
+      <Wallet
+        goTo={(p) => navigate(p)}
+      />
+    );
   }
 
-  // 🎮 LOBBY → DIRECT GAME
+  // 🎮 LOBBY
   if (page === "lobby") {
     return (
       <Lobby
         goGame={(id, s) => {
-          setMatchId(id);   // ✅ matchId = gameId
-          setStake(s);
-          setPage("game");  // 🚀 direct entry
+          navigate("game", {
+            matchId: id,
+            stake: s
+          });
         }}
-        back={() => setPage("dashboard")}
+        back={() => navigate("dashboard")}
       />
     );
   }
@@ -147,12 +166,13 @@ export default function App() {
   if (page === "game") {
     return (
       <WhotGame
-        gameId={matchId}   // ✅ same ID
+        gameId={matchId}
         stake={stake}
         goHome={() => {
-          setMatchId(null);
-          setStake(0);
-          setPage("dashboard");
+          navigate("dashboard", {
+            matchId: null,
+            stake: 0
+          });
         }}
       />
     );
