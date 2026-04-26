@@ -1,3 +1,6 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import { account } from "./lib/appwrite";
 
@@ -5,12 +8,14 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
-import Match from "./pages/Match";
 import WhotGame from "./WhotGame";
 
+// =========================
+// MAIN APP
+// =========================
 export default function App() {
   // =========================
-  // STATE (PERSISTED)
+  // STATE (PERSIST)
   // =========================
   const [page, setPage] = useState(
     localStorage.getItem("page") || "loading"
@@ -18,10 +23,6 @@ export default function App() {
 
   const [matchId, setMatchId] = useState(
     localStorage.getItem("matchId")
-  );
-
-  const [gameId, setGameId] = useState(
-    localStorage.getItem("gameId")
   );
 
   const [stake, setStake] = useState(
@@ -36,6 +37,7 @@ export default function App() {
       .then(() => {
         const savedPage = localStorage.getItem("page");
 
+        // ✅ don't override existing page
         if (!savedPage || savedPage === "loading") {
           setPage("dashboard");
         }
@@ -63,29 +65,17 @@ export default function App() {
   }, [matchId]);
 
   useEffect(() => {
-    if (gameId) {
-      localStorage.setItem("gameId", gameId);
-    } else {
-      localStorage.removeItem("gameId");
-    }
-  }, [gameId]);
-
-  useEffect(() => {
     localStorage.setItem("stake", stake);
   }, [stake]);
 
   // =========================
-  // SAFETY
+  // SAFETY GUARD
   // =========================
   useEffect(() => {
-    if (page === "match" && !matchId) {
+    if (page === "game" && !matchId) {
       setPage("dashboard");
     }
-
-    if (page === "game" && !gameId) {
-      setPage("dashboard");
-    }
-  }, [page, matchId, gameId]);
+  }, [page, matchId]);
 
   // =========================
   // LOGOUT
@@ -100,7 +90,6 @@ export default function App() {
     localStorage.clear();
 
     setMatchId(null);
-    setGameId(null);
     setStake(0);
     setPage("auth");
   }
@@ -109,6 +98,7 @@ export default function App() {
   // ROUTES
   // =========================
 
+  // 🔄 LOADING
   if (page === "loading") {
     return (
       <div style={styles.loading}>
@@ -118,10 +108,12 @@ export default function App() {
     );
   }
 
+  // 🔐 AUTH
   if (page === "auth") {
     return <Auth onLogin={() => setPage("dashboard")} />;
   }
 
+  // 🏠 DASHBOARD
   if (page === "dashboard") {
     return (
       <Dashboard
@@ -132,54 +124,33 @@ export default function App() {
     );
   }
 
+  // 💳 WALLET
   if (page === "wallet") {
     return <Wallet goTo={(p) => setPage(p)} />;
   }
 
+  // 🎮 LOBBY → DIRECT GAME
   if (page === "lobby") {
     return (
       <Lobby
-        goMatch={(id, s) => {
-          setMatchId(id);
-          setGameId(null); // reset game
+        goGame={(id, s) => {
+          setMatchId(id);   // ✅ matchId = gameId
           setStake(s);
-          setPage("match");
+          setPage("game");  // 🚀 direct entry
         }}
         back={() => setPage("dashboard")}
       />
     );
   }
 
-  if (page === "match") {
-    return (
-      <Match
-        matchId={matchId}
-        stake={stake}
-
-        // ✅🔥 CRITICAL FIX HERE
-        startGame={(newGameId) => {
-          setGameId(newGameId);   // store REAL game id
-          setPage("game");
-        }}
-
-        cancel={() => {
-          setMatchId(null);
-          setGameId(null);
-          setStake(0);
-          setPage("dashboard");
-        }}
-      />
-    );
-  }
-
+  // 🎯 GAME
   if (page === "game") {
     return (
       <WhotGame
-        gameId={gameId}   // ✅ USE REAL GAME ID
+        gameId={matchId}   // ✅ same ID
         stake={stake}
         goHome={() => {
           setMatchId(null);
-          setGameId(null);
           setStake(0);
           setPage("dashboard");
         }}
@@ -190,6 +161,9 @@ export default function App() {
   return null;
 }
 
+// =========================
+// STYLES
+// =========================
 const styles = {
   loading: {
     minHeight: "100vh",
