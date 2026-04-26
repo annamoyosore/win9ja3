@@ -4,7 +4,7 @@ import { databases, DATABASE_ID, account } from "./lib/appwrite";
 const GAME_COLLECTION = "games";
 
 // =========================
-// CARD ENCODE / DECODE
+// DECODE
 // =========================
 function decodeCard(str) {
   if (!str) return null;
@@ -18,8 +18,8 @@ function decodeCard(str) {
   };
 
   return {
-    shape: map[str[0]] || "circle",
-    number: Number(str.slice(1)) || 0
+    shape: map[str[0]],
+    number: Number(str.slice(1))
   };
 }
 
@@ -29,28 +29,12 @@ function decodeCard(str) {
 function parseGame(g) {
   return {
     ...g,
-
-    // ✅ FIX: JSON string → array
-    players:
-      typeof g.players === "string"
-        ? JSON.parse(g.players)
-        : [],
-
-    deck:
-      typeof g.deck === "string" && g.deck.length
-        ? g.deck.split(",").filter(Boolean)
-        : [],
-
+    players: JSON.parse(g.players || "[]"),
+    deck: g.deck ? g.deck.split(",") : [],
     discard: g.discard || "",
-
-    hands:
-      typeof g.hands === "string" && g.hands.length
-        ? g.hands.split("|").map((p) =>
-            p ? p.split(",").filter(Boolean) : []
-          )
-        : [[], []],
-
-    round: String(g.round || "1")
+    hands: g.hands
+      ? g.hands.split("|").map(p => p.split(","))
+      : [[], []]
   };
 }
 
@@ -59,10 +43,9 @@ function parseGame(g) {
 // =========================
 function encodeGame(g) {
   return {
-    hands: g.hands.map((p) => p.join(",")).join("|"),
+    hands: g.hands.map(p => p.join(",")).join("|"),
     deck: g.deck.join(","),
-    discard: g.discard,
-    round: String(g.round)
+    discard: g.discard
   };
 }
 
@@ -72,255 +55,129 @@ function encodeGame(g) {
 export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
 
-  // LOAD USER
   useEffect(() => {
-    account.get().then((u) => setUserId(u.$id));
+    account.get().then(u => setUserId(u.$id));
   }, []);
 
-  // LOAD GAME
   useEffect(() => {
     if (!gameId || !userId) return;
 
-    let retry;
+    const load = async () => {
+      const g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-    async function load() {
-      try {
-        const g = await databases.getDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId
-        );
-
-        const parsed = parseGame(g);
-
-        if (!parsed.players || parsed.players.length < 2) {
-          retry = setTimeout(load, 500);
-          return;
-        }
-
-        setGame(parsed);
-        setLoading(false);
-      } catch {
-        retry = setTimeout(load, 800);
-      }
-    }
+      setGame(parseGame(g));
+    };
 
     load();
-    return () => clearTimeout(retry);
-  }, [gameId, userId]);
-
-  // REALTIME
-  useEffect(() => {
-    if (!gameId) return;
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        setGame(parseGame(res.payload));
-      }
+      res => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
-  }, [gameId]);
+  }, [gameId, userId]);
 
-  // GUARDS
-  if (loading || !game || !userId) {
-    return <div style={styles.center}>Loading...</div>;
-  }
-
-  if (!game.players.includes(userId)) {
-    return <div style={styles.center}>Not your game</div>;
-  }
-
-  if (game.status === "finished") {
-    return (
-      <div style={styles.center}>
-        🏆 Game Finished <br />
-        Winner: {game.winnerId === userId ? "You 🎉" : "Opponent"}
-        <br /><br />
-        <button onClick={goHome}>Back</button>
-      </div>
-    );
-  }
+  if (!game || !userId) return <div>Loading...</div>;
 
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
 
-  const hand = game.hands[pIndex] || [];
+  const hand = game.hands[pIndex];
   const top = decodeCard(game.discard);
 
-  // PLAY CARD
   async function playCard(i) {
-    if (processing) return;
-    setProcessing(true);
-
-    try {
-      const fresh = await databases.getDocument(
+    const g = parseGame(
+      await databases.getDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId
-      );
+      )
+    );
 
-      let g = parseGame(fresh);
+    if (g.turn !== userId) return;
 
-      if (g.turn !== userId) return;
+    const card = g.hands[pIndex][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
 
-      const pIndexFresh = g.players.indexOf(userId);
-      const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape
+    ) return;
 
-      const card = g.hands[pIndexFresh][i];
-      if (!card) return;
+    g.hands[pIndex].splice(i, 1);
 
-      const current = decodeCard(card);
-      const topDecoded = decodeCard(g.discard);
-
-      if (
-        !topDecoded ||
-        (current.number !== topDecoded.number &&
-          current.shape !== topDecoded.shape)
-      ) return;
-
-      g.hands[pIndexFresh].splice(i, 1);
-
-      if (g.hands[pIndexFresh].length === 0) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            ...encodeGame(g),
-            discard: card,
-            status: "finished",
-            winnerId: userId
-          }
-        );
-        return;
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        discard: card,
+        turn: g.players[oIndex]
       }
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(g),
-          discard: card,
-          turn: g.players[oIndexFresh],
-          turnStartTime: new Date().toISOString()
-        }
-      );
-
-    } finally {
-      setProcessing(false);
-    }
+    );
   }
 
-  // DRAW CARD
   async function drawCard() {
-    if (processing) return;
-    setProcessing(true);
-
-    try {
-      const fresh = await databases.getDocument(
+    const g = parseGame(
+      await databases.getDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId
-      );
+      )
+    );
 
-      let g = parseGame(fresh);
+    if (g.turn !== userId || !g.deck.length) return;
 
-      if (g.turn !== userId) return;
-      if (!g.deck.length) return;
+    const card = g.deck.pop();
+    g.hands[pIndex].push(card);
 
-      const pIndexFresh = g.players.indexOf(userId);
-      const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
-
-      const card = g.deck.pop();
-      g.hands[pIndexFresh].push(card);
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(g),
-          turn: g.players[oIndexFresh],
-          turnStartTime: new Date().toISOString()
-        }
-      );
-
-    } finally {
-      setProcessing(false);
-    }
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.players[oIndex]
+      }
+    );
   }
 
   return (
-    <div style={styles.container}>
-      <h2>🎮 Whot Game</h2>
+    <div>
+      <h2>Whot Game</h2>
 
       <p>
-        Turn: {game.turn === userId ? "🟢 You" : "⏳ Opponent"}
+        Turn: {game.turn === userId ? "You" : "Opponent"}
       </p>
 
       <p>
-        Top Card: {top?.shape} {top?.number}
+        Top: {top?.shape} {top?.number}
       </p>
 
       <button onClick={drawCard}>
         Draw ({game.deck.length})
       </button>
 
-      <div style={{ marginTop: 20 }}>
+      <div>
         {hand.map((c, i) => {
           const d = decodeCard(c);
           return (
-            <button
-              key={i}
-              onClick={() => playCard(i)}
-              style={styles.card}
-            >
+            <button key={i} onClick={() => playCard(i)}>
               {d.shape} {d.number}
             </button>
           );
         })}
       </div>
 
-      <button style={styles.exit} onClick={goHome}>
-        Exit
-      </button>
+      <button onClick={goHome}>Exit</button>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: 20,
-    color: "#fff",
-    background: "#111",
-    minHeight: "100vh",
-    textAlign: "center"
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    height: "100vh",
-    flexDirection: "column"
-  },
-  card: {
-    margin: 5,
-    padding: 10,
-    background: "#222",
-    color: "#fff",
-    border: "1px solid #555",
-    cursor: "pointer"
-  },
-  exit: {
-    marginTop: 20,
-    padding: 10,
-    background: "gray",
-    border: "none"
-  }
-};
