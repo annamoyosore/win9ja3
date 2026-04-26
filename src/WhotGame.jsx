@@ -203,6 +203,41 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   async function playCard(i) {
   if (processing) return;
+
+  const currentGame = gameRef.current;
+  if (!currentGame) return;
+
+  if (currentGame.turn !== userId) {
+    alert("⏳ Not your turn");
+    return;
+  }
+
+  const myIndex = currentGame.players.indexOf(userId);
+  const cardStr = currentGame.hands[myIndex]?.[i];
+
+  if (!cardStr) {
+    alert("Invalid card");
+    return;
+  }
+
+  const current = decodeCard(cardStr);
+  const top = decodeCard(currentGame.discard);
+
+  if (!current || !top) {
+    alert("Game sync error");
+    return;
+  }
+
+  // ❌ INVALID MOVE
+  if (
+    current.number !== top.number &&
+    current.shape !== top.shape &&
+    current.number !== 14
+  ) {
+    alert("❌ Invalid move");
+    return;
+  }
+
   setProcessing(true);
 
   try {
@@ -214,39 +249,35 @@ export default function WhotGame({ gameId, goHome }) {
 
     const g = parseGame(fresh);
 
-    // ✅ ALWAYS recalc index from fresh data
-    const myIndex = g.players.indexOf(userId);
-    const oppIndex = myIndex === 0 ? 1 : 0;
+    const myIdx = g.players.indexOf(userId);
+    const oppIdx = myIdx === 0 ? 1 : 0;
 
-    if (g.turn !== userId) return;
-
-    const card = g.hands[myIndex]?.[i];
+    const card = g.hands[myIdx]?.[i];
     if (!card) return;
 
-    const current = decodeCard(card);
+    const decoded = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    if (!current || !topDecoded) return;
+    if (!decoded || !topDecoded) return;
 
-    // ✅ VALID MOVE CHECK
     if (
-      current.number !== topDecoded.number &&
-      current.shape !== topDecoded.shape &&
-      current.number !== 14
+      decoded.number !== topDecoded.number &&
+      decoded.shape !== topDecoded.shape &&
+      decoded.number !== 14
     ) return;
 
-    // ✅ REMOVE CARD
-    g.hands[myIndex].splice(i, 1);
+    // ✅ PLAY CARD
+    g.hands[myIdx].splice(i, 1);
 
-    let nextTurn = g.players[oppIndex];
+    let nextTurn = g.players[oppIdx];
 
-    // RULES
-    if (current.number === 2) g.pendingPick += 2;
-    else if (current.number === 8 || current.number === 1) nextTurn = userId;
-    else if (current.number === 14) g.pendingPick += 1;
+    if (decoded.number === 2) g.pendingPick += 2;
+    else if (decoded.number === 8 || decoded.number === 1)
+      nextTurn = userId;
+    else if (decoded.number === 14) g.pendingPick += 1;
 
     // WIN
-    if (g.hands[myIndex].length === 0) {
+    if (g.hands[myIdx].length === 0) {
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
