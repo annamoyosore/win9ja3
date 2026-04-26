@@ -20,7 +20,7 @@ import Lobby from "./pages/Lobby";
 import WhotGame from "./WhotGame";
 
 // =========================
-// AUTH CHECK HOOK
+// AUTH CHECK HOOK 🔥
 // =========================
 function useAuth() {
   const [loading, setLoading] = useState(true);
@@ -44,7 +44,7 @@ function ProtectedRoute({ children }) {
 
   if (loading) {
     return (
-      <div style={{ color: "white", textAlign: "center", marginTop: 50 }}>
+      <div style={{ textAlign: "center", marginTop: 50 }}>
         Loading...
       </div>
     );
@@ -54,21 +54,21 @@ function ProtectedRoute({ children }) {
 }
 
 // =========================
-// PUBLIC ROUTE (Auth only)
+// PUBLIC ROUTE (LOGIN PAGE)
 // =========================
 function PublicRoute({ children }) {
   const { loading, authed } = useAuth();
 
   if (loading) {
     return (
-      <div style={{ color: "white", textAlign: "center", marginTop: 50 }}>
+      <div style={{ textAlign: "center", marginTop: 50 }}>
         Loading...
       </div>
     );
   }
 
-  // 🔥 If already logged in → skip auth page
-  return !authed ? children : <Navigate to="/dashboard" replace />;
+  // ✅ If already logged in → skip auth page
+  return authed ? <Navigate to="/dashboard" replace /> : children;
 }
 
 // =========================
@@ -98,7 +98,10 @@ function AppRoutes() {
   return (
     <Routes>
 
-      {/* 🔐 AUTH (ENTRY POINT) */}
+      {/* 🔥 ENTRY POINT */}
+      <Route path="/" element={<Navigate to="/auth" replace />} />
+
+      {/* 🔐 AUTH (LOGIN FIRST) */}
       <Route
         path="/auth"
         element={
@@ -160,10 +163,7 @@ function AppRoutes() {
         }
       />
 
-      {/* 🔥 DEFAULT ROUTE */}
-      <Route path="/" element={<Navigate to="/auth" replace />} />
-
-      {/* 🔥 FALLBACK */}
+      {/* ❌ FALLBACK */}
       <Route path="*" element={<Navigate to="/auth" replace />} />
 
     </Routes>
