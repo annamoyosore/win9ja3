@@ -31,21 +31,45 @@ function decodeCard(str) {
 }
 
 // =========================
-// SAFE PARSER (🔥 FIXED)
+// PARSE GAME (SAFE)
 // =========================
 function parseGame(g) {
   return {
     ...g,
 
-    // ✅ FIX: convert string → array
-    players: g.players ? g.players.split(",") : [],
+    // ✅ STRING → ARRAY
+    players:
+      typeof g.players === "string"
+        ? g.players.split(",").filter(Boolean)
+        : [],
 
-    deck: g.deck ? g.deck.split(",") : [],
+    deck:
+      typeof g.deck === "string" && g.deck.length
+        ? g.deck.split(",").filter(Boolean)
+        : [],
+
     discard: g.discard || "",
 
-    hands: g.hands
-      ? g.hands.split("|").map(p => (p ? p.split(",") : []))
-      : [[], []]
+    hands:
+      typeof g.hands === "string" && g.hands.length
+        ? g.hands.split("|").map((p) =>
+            p ? p.split(",").filter(Boolean) : []
+          )
+        : [[], []],
+
+    round: String(g.round || "1")
+  };
+}
+
+// =========================
+// ENCODE GAME (🔥 CRITICAL)
+// =========================
+function encodeGame(g) {
+  return {
+    hands: g.hands.map((p) => p.join(",")).join("|"),
+    deck: g.deck.join(","),
+    discard: g.discard,
+    round: String(g.round)
   };
 }
 
@@ -62,7 +86,7 @@ export default function WhotGame({ gameId, goHome }) {
   // LOAD USER
   // =========================
   useEffect(() => {
-    account.get().then(u => setUserId(u.$id));
+    account.get().then((u) => setUserId(u.$id));
   }, []);
 
   // =========================
@@ -83,7 +107,6 @@ export default function WhotGame({ gameId, goHome }) {
 
         const parsed = parseGame(g);
 
-        // wait until both players exist
         if (!parsed.players || parsed.players.length < 2) {
           retry = setTimeout(load, 500);
           return;
@@ -91,7 +114,6 @@ export default function WhotGame({ gameId, goHome }) {
 
         setGame(parsed);
         setLoading(false);
-
       } catch {
         retry = setTimeout(load, 800);
       }
@@ -159,7 +181,7 @@ export default function WhotGame({ gameId, goHome }) {
         gameId
       );
 
-      const g = parseGame(fresh);
+      let g = parseGame(fresh);
 
       if (g.turn !== userId) return;
 
@@ -169,16 +191,16 @@ export default function WhotGame({ gameId, goHome }) {
       const card = g.hands[pIndexFresh][i];
       if (!card) return;
 
-      const topDecoded = decodeCard(g.discard);
       const current = decodeCard(card);
-
-      if (!topDecoded) return;
+      const topDecoded = decodeCard(g.discard);
 
       if (
-        current.number !== topDecoded.number &&
-        current.shape !== topDecoded.shape
+        !topDecoded ||
+        (current.number !== topDecoded.number &&
+          current.shape !== topDecoded.shape)
       ) return;
 
+      // remove card
       g.hands[pIndexFresh].splice(i, 1);
 
       // WIN
@@ -188,7 +210,7 @@ export default function WhotGame({ gameId, goHome }) {
           GAME_COLLECTION,
           gameId,
           {
-            hands: g.hands.map(p => p.join(",")).join("|"),
+            ...encodeGame(g),
             discard: card,
             status: "finished",
             winnerId: userId
@@ -202,7 +224,7 @@ export default function WhotGame({ gameId, goHome }) {
         GAME_COLLECTION,
         gameId,
         {
-          hands: g.hands.map(p => p.join(",")).join("|"),
+          ...encodeGame(g),
           discard: card,
           turn: g.players[oIndexFresh],
           turnStartTime: new Date().toISOString()
@@ -228,7 +250,7 @@ export default function WhotGame({ gameId, goHome }) {
         gameId
       );
 
-      const g = parseGame(fresh);
+      let g = parseGame(fresh);
 
       if (g.turn !== userId) return;
       if (!g.deck.length) return;
@@ -239,13 +261,17 @@ export default function WhotGame({ gameId, goHome }) {
       const card = g.deck.pop();
       g.hands[pIndexFresh].push(card);
 
+      // 🔥 HARD LIMIT (PREVENT SIZE ERROR)
+      if (g.deck.length > 80) {
+        g.deck = g.deck.slice(-80);
+      }
+
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId,
         {
-          deck: g.deck.join(","),
-          hands: g.hands.map(p => p.join(",")).join("|"),
+          ...encodeGame(g),
           turn: g.players[oIndexFresh],
           turnStartTime: new Date().toISOString()
         }
