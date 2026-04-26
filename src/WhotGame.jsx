@@ -281,47 +281,47 @@ export default function WhotGame({ gameId, goHome }) {
   // DRAW MARKET (FIXED)
   // =========================
   async function drawMarket() {
-    if (processing) return;
-    setProcessing(true);
+  if (processing) return;
+  setProcessing(true);
 
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
+  try {
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
+    );
 
-      const g = parseGame(fresh);
+    const g = parseGame(fresh);
 
-      const myIndex = g.players.indexOf(userId);
-      const oppIndex = myIndex === 0 ? 1 : 0;
+    // ✅ FIX: recalc index
+    const myIndex = g.players.indexOf(userId);
+    const oppIndex = myIndex === 0 ? 1 : 0;
 
-      if (g.turn !== userId) return;
+    if (g.turn !== userId) return;
 
-      let count = g.pendingPick || 1;
+    let count = g.pendingPick || 1;
 
-      for (let i = 0; i < count; i++) {
-        if (!g.deck.length) break;
-        g.hands[myIndex].push(g.deck.pop());
-      }
-
-      g.pendingPick = 0;
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(g),
-          turn: g.players[oppIndex]
-        }
-      );
-    } catch (err) {
-      console.error(err);
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIndex].push(g.deck.pop());
     }
 
+    g.pendingPick = 0;
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.players[oppIndex]
+      }
+    );
+
+  } finally {
     setProcessing(false);
   }
+}
 
   // =========================
   // UI
