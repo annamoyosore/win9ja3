@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import {
   account,
@@ -16,108 +13,69 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
 
-// =========================
-// CREATE GAME (OPPONENT STARTS)
-// =========================
-async function createGame(match) {
-  const shapes = ["circle", "triangle", "square", "star", "cross"];
-
-  const randomCard =
-    shapes[Math.floor(Math.random() * shapes.length)] +
-    "_" +
-    Math.floor(Math.random() * 13 + 1);
-
-  const game = await databases.createDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    ID.unique(),
-    {
-      matchId: match.$id,
-      players: [match.hostId, match.opponentId],
-
-      handCounts: JSON.stringify([6, 6]),
-      topCard: randomCard,
-
-      // 🔥 opponent starts first
-      turn: match.opponentId,
-
-      status: "running",
-      winnerId: "",
-      round: 1,
-      turnStartTime: new Date().toISOString()
-    }
-  );
-
-  return game;
-}
-
-// =========================
-// WAIT FOR GAME
-// =========================
-async function waitForGame(gameId) {
-  let tries = 0;
-
-  while (tries < 10) {
-    try {
-      return await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
-    } catch {
-      await new Promise((r) => setTimeout(r, 500));
-      tries++;
-    }
-  }
-
-  throw new Error("Game creation timeout");
-}
-
-// =========================
-// COMPONENT
-// =========================
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // =========================
-  // INIT
+  // INIT (SAFE)
   // =========================
   useEffect(() => {
     init();
   }, []);
 
   async function init() {
-    const u = await account.get();
-    setUser(u);
+    try {
+      const u = await account.get();
+      setUser(u);
 
-    const w = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", u.$id)]
-    );
+      try {
+        const w = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", u.$id)]
+        );
 
-    if (w.documents.length) setWallet(w.documents[0]);
+        if (w.documents.length) {
+          setWallet(w.documents[0]);
+        }
+      } catch (err) {
+        console.warn("Wallet load failed:", err.message);
+      }
 
-    refreshAll(u.$id);
+      await refreshAll(u.$id);
+
+    } catch (err) {
+      console.error("AUTH ERROR:", err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // =========================
-  // REALTIME
+  // REALTIME (SAFE)
   // =========================
   useEffect(() => {
     if (!user) return;
 
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      () => refreshAll(user.$id)
-    );
+    let unsub;
 
-    return () => unsub();
+    try {
+      unsub = databases.client.subscribe(
+        `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
+        () => refreshAll(user.$id)
+      );
+    } catch (err) {
+      console.warn("Realtime failed:", err.message);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
   }, [user]);
 
   async function refreshAll(userId) {
@@ -131,39 +89,54 @@ export default function Lobby({ goGame, back }) {
   // LOAD MATCHES
   // =========================
   async function loadMatches() {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.equal("status", "waiting"),
-        Query.orderDesc("$createdAt")
-      ]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [
+          Query.equal("status", "waiting"),
+          Query.orderDesc("$createdAt")
+        ]
+      );
 
-    setMatches(res.documents);
+      setMatches(res.documents);
+
+    } catch (err) {
+      console.warn("Load matches failed:", err.message);
+    }
   }
 
   // =========================
   // ACTIVE MATCHES
   // =========================
   async function loadActiveMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [Query.notEqual("status", "finished")]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [Query.notEqual("status", "finished")]
+      );
 
-    const myMatches = res.documents.filter(
-      (m) =>
-        m.hostId === userId ||
-        m.opponentId === userId
-    );
+      const myMatches = res.documents
+        .filter(
+          (m) =>
+            m.hostId === userId ||
+            m.opponentId === userId
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.$updatedAt) - new Date(a.$updatedAt)
+        );
 
-    setActiveMatches(myMatches);
+      setActiveMatches(myMatches);
+
+    } catch (err) {
+      console.warn("Active matches failed:", err.message);
+    }
   }
 
   // =========================
-  // JOIN MATCH (FINAL FIX)
+  // JOIN MATCH (SAFE)
   // =========================
   async function joinMatch(match) {
     if (loading) return;
@@ -189,31 +162,45 @@ export default function Lobby({ goGame, back }) {
 
       await lockFunds(user.$id, fresh.stake);
 
-      // 🔥 SET TO RUNNING
       const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
         {
           opponentId: user.$id,
-          status: "running",
+          status: "matched",
           pot: fresh.stake * 2
         }
       );
 
-      // 🔥 ALWAYS CREATE GAME HERE
-      const game = await createGame(updated);
+      let gameId = updated.gameId;
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        updated.$id,
-        { gameId: game.$id }
-      );
+      if (!gameId) {
+        const game = await databases.createDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          ID.unique(),
+          {
+            matchId: updated.$id,
+            players: [updated.hostId, updated.opponentId],
+            turn: user.$id,
+            status: "running",
+            round: 1,
+            turnStartTime: new Date().toISOString()
+          }
+        );
 
-      await waitForGame(game.$id);
+        gameId = game.$id;
 
-      goGame(game.$id, updated.stake);
+        await databases.updateDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          updated.$id,
+          { gameId }
+        );
+      }
+
+      goGame(gameId, updated.stake);
 
     } catch (err) {
       alert(err.message);
@@ -221,6 +208,7 @@ export default function Lobby({ goGame, back }) {
       try {
         await unlockFunds(user.$id, match.stake);
       } catch {}
+
     } finally {
       setLoading(false);
     }
@@ -230,8 +218,6 @@ export default function Lobby({ goGame, back }) {
   // CREATE MATCH
   // =========================
   async function createMatch() {
-    if (loading) return;
-
     const amount = Number(stake);
 
     if (!amount || amount < 50) {
@@ -262,7 +248,8 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      alert("Match created. Waiting for opponent...");
+      alert("Match created");
+
     } catch (err) {
       alert(err.message);
     } finally {
@@ -271,80 +258,39 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // UI
+  // UI SAFE GUARD
   // =========================
+  if (loading) {
+    return <div style={{ padding: 20 }}>Loading Lobby...</div>;
+  }
+
   return (
-    <div style={styles.container}>
-      <h1 style={styles.title}>🎮 Game Lobby</h1>
+    <div style={{ padding: 20, color: "#fff" }}>
+      <h2>🎮 Lobby</h2>
 
-      {loading && <p style={styles.loading}>⚡ Processing...</p>}
+      <h3>Available Matches</h3>
 
-      {/* ACTIVE MATCHES */}
-      {activeMatches.map((m) => {
-        const waiting =
-          m.status === "waiting" &&
-          m.hostId === user?.$id;
+      {matches.length === 0 && <p>No matches</p>}
 
-        return (
-          <div key={m.$id} style={styles.activeCard}>
-            <div>
-              <p>💰 ₦{m.stake}</p>
-              <p>Status: {m.status}</p>
-            </div>
-
-            <button
-              style={styles.resumeBtn}
-              onClick={() => {
-                if (!m.gameId) {
-                  alert("Waiting for opponent...");
-                  return;
-                }
-                goGame(m.gameId, m.stake);
-              }}
-            >
-              {waiting ? "⏳ Waiting..." : "▶ Resume"}
-            </button>
-          </div>
-        );
-      })}
-
-      {/* AVAILABLE */}
       {matches.map((m) => (
-        <div key={m.$id} style={styles.card}>
-          <span>₦{m.stake}</span>
-
-          <button
-            style={styles.joinBtn}
-            onClick={() => joinMatch(m)}
-            disabled={loading}
-          >
-            Join
-          </button>
+        <div key={m.$id}>
+          ₦{m.stake}
+          <button onClick={() => joinMatch(m)}>Join</button>
         </div>
       ))}
 
-      {/* CREATE */}
-      <div style={styles.createBox}>
-        <input
-          type="number"
-          placeholder="Enter stake ₦"
-          value={stake}
-          onChange={(e) => setStake(e.target.value)}
-          style={styles.input}
-        />
+      <h3>Create Match</h3>
 
-        <button
-          style={styles.createBtn}
-          onClick={createMatch}
-        >
-          Create Match
-        </button>
-      </div>
+      <input
+        value={stake}
+        onChange={(e) => setStake(e.target.value)}
+        placeholder="Amount"
+      />
 
-      {/* BACK */}
-      <button style={styles.back} onClick={back}>
-        ← Back
-      </button>
+      <button onClick={createMatch}>Create</button>
+
+      <br /><br />
+      <button onClick={back}>Back</button>
     </div>
   );
 }
