@@ -17,7 +17,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
-// CREATE GAME (LIGHTWEIGHT)
+// CREATE GAME (OPPONENT STARTS)
 // =========================
 async function createGame(match) {
   const shapes = ["circle", "triangle", "square", "star", "cross"];
@@ -35,17 +35,15 @@ async function createGame(match) {
       matchId: match.$id,
       players: [match.hostId, match.opponentId],
 
-      // 🔥 lightweight state
       handCounts: JSON.stringify([6, 6]),
       topCard: randomCard,
 
-      turn: match.hostId,
+      // 🔥 opponent starts first
+      turn: match.opponentId,
+
       status: "running",
       winnerId: "",
-
-      // 🔥 REQUIRED
       round: 1,
-
       turnStartTime: new Date().toISOString()
     }
   );
@@ -57,18 +55,22 @@ async function createGame(match) {
 // WAIT FOR GAME
 // =========================
 async function waitForGame(gameId) {
-  while (true) {
+  let tries = 0;
+
+  while (tries < 10) {
     try {
-      await databases.getDocument(
+      return await databases.getDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId
       );
-      return;
     } catch {
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 500));
+      tries++;
     }
   }
+
+  throw new Error("Game creation timeout");
 }
 
 // =========================
@@ -90,22 +92,18 @@ export default function Lobby({ goGame, back }) {
   }, []);
 
   async function init() {
-    try {
-      const u = await account.get();
-      setUser(u);
+    const u = await account.get();
+    setUser(u);
 
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id)]
+    );
 
-      if (w.documents.length) setWallet(w.documents[0]);
+    if (w.documents.length) setWallet(w.documents[0]);
 
-      refreshAll(u.$id);
-    } catch (err) {
-      console.error("INIT ERROR:", err);
-    }
+    refreshAll(u.$id);
   }
 
   // =========================
@@ -155,22 +153,17 @@ export default function Lobby({ goGame, back }) {
       [Query.notEqual("status", "finished")]
     );
 
-    const myMatches = res.documents
-      .filter(
-        (m) =>
-          m.hostId === userId ||
-          m.opponentId === userId
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.$updatedAt) - new Date(a.$updatedAt)
-      );
+    const myMatches = res.documents.filter(
+      (m) =>
+        m.hostId === userId ||
+        m.opponentId === userId
+    );
 
     setActiveMatches(myMatches);
   }
 
   // =========================
-  // JOIN MATCH
+  // JOIN MATCH (FINAL FIX)
   // =========================
   async function joinMatch(match) {
     if (loading) return;
@@ -186,55 +179,41 @@ export default function Lobby({ goGame, back }) {
 
       if (fresh.opponentId) {
         alert("Match already taken");
-        setLoading(false);
         return;
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
         alert("Insufficient balance");
-        setLoading(false);
         return;
       }
 
-      // 🔥 lock funds
       await lockFunds(user.$id, fresh.stake);
 
+      // 🔥 SET TO RUNNING
       const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
         {
           opponentId: user.$id,
-          status: "matched",
+          status: "running",
           pot: fresh.stake * 2
         }
       );
 
-      let gameId = updated.gameId;
+      // 🔥 ALWAYS CREATE GAME HERE
+      const game = await createGame(updated);
 
-      // =========================
-      // CREATE GAME (SAFE)
-      // =========================
-      if (!gameId) {
-        try {
-          const game = await createGame(updated);
-          gameId = game.$id;
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        updated.$id,
+        { gameId: game.$id }
+      );
 
-          await databases.updateDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            updated.$id,
-            { gameId }
-          );
+      await waitForGame(game.$id);
 
-        } catch (err) {
-          console.warn("Game already created by another user");
-        }
-      }
-
-      await waitForGame(gameId);
-
-      goGame(gameId, updated.stake);
+      goGame(game.$id, updated.stake);
 
     } catch (err) {
       alert(err.message);
@@ -242,7 +221,7 @@ export default function Lobby({ goGame, back }) {
       try {
         await unlockFunds(user.$id, match.stake);
       } catch {}
-
+    } finally {
       setLoading(false);
     }
   }
@@ -284,10 +263,9 @@ export default function Lobby({ goGame, back }) {
       );
 
       alert("Match created. Waiting for opponent...");
-      setLoading(false);
-
     } catch (err) {
       alert(err.message);
+    } finally {
       setLoading(false);
     }
   }
@@ -302,50 +280,38 @@ export default function Lobby({ goGame, back }) {
       {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
       {/* ACTIVE MATCHES */}
-      {activeMatches.length > 0 && (
-        <>
-          <h2 style={styles.section}>🔥 Your Matches</h2>
+      {activeMatches.map((m) => {
+        const waiting =
+          m.status === "waiting" &&
+          m.hostId === user?.$id;
 
-          {activeMatches.map((m) => {
-            const waiting =
-              m.status === "waiting" &&
-              m.hostId === user?.$id;
+        return (
+          <div key={m.$id} style={styles.activeCard}>
+            <div>
+              <p>💰 ₦{m.stake}</p>
+              <p>Status: {m.status}</p>
+            </div>
 
-            return (
-              <div key={m.$id} style={styles.activeCard}>
-                <div>
-                  <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-                  <p>Status: {m.status}</p>
-                </div>
-
-                <button
-                  style={styles.resumeBtn}
-                  onClick={() => {
-                    if (!m.gameId) {
-                      alert("Game not started yet");
-                      return;
-                    }
-                    goGame(m.gameId, m.stake);
-                  }}
-                >
-                  {waiting ? "⏳ Waiting..." : "▶ Resume"}
-                </button>
-              </div>
-            );
-          })}
-        </>
-      )}
+            <button
+              style={styles.resumeBtn}
+              onClick={() => {
+                if (!m.gameId) {
+                  alert("Waiting for opponent...");
+                  return;
+                }
+                goGame(m.gameId, m.stake);
+              }}
+            >
+              {waiting ? "⏳ Waiting..." : "▶ Resume"}
+            </button>
+          </div>
+        );
+      })}
 
       {/* AVAILABLE */}
-      <h2 style={styles.section}>🎯 Available Matches</h2>
-
-      {matches.length === 0 && (
-        <p style={{ opacity: 0.6 }}>No matches available</p>
-      )}
-
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
-          <span>₦{Number(m.stake).toLocaleString()}</span>
+          <span>₦{m.stake}</span>
 
           <button
             style={styles.joinBtn}
@@ -370,7 +336,6 @@ export default function Lobby({ goGame, back }) {
         <button
           style={styles.createBtn}
           onClick={createMatch}
-          disabled={loading}
         >
           Create Match
         </button>
@@ -383,78 +348,3 @@ export default function Lobby({ goGame, back }) {
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  container: {
-    padding: 20,
-    minHeight: "100vh",
-    background: "linear-gradient(135deg,#020617,#0f172a)",
-    color: "#fff"
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold"
-  },
-  section: {
-    marginTop: 25,
-    color: "#facc15"
-  },
-  loading: {
-    color: "#facc15"
-  },
-  card: {
-    background: "#111827",
-    padding: 15,
-    margin: "10px 0",
-    borderRadius: 12,
-    display: "flex",
-    justifyContent: "space-between"
-  },
-  activeCard: {
-    background: "#1e293b",
-    padding: 15,
-    marginBottom: 10,
-    borderRadius: 12,
-    display: "flex",
-    justifyContent: "space-between"
-  },
-  joinBtn: {
-    background: "#facc15",
-    padding: "8px 14px",
-    borderRadius: 8,
-    border: "none"
-  },
-  resumeBtn: {
-    background: "#22c55e",
-    padding: "8px 14px",
-    borderRadius: 8,
-    border: "none",
-    color: "#fff"
-  },
-  createBox: {
-    marginTop: 25
-  },
-  input: {
-    width: "100%",
-    padding: 12,
-    marginBottom: 10
-  },
-  createBtn: {
-    width: "100%",
-    padding: 12,
-    background: "#3b82f6",
-    border: "none",
-    borderRadius: 8,
-    color: "#fff"
-  },
-  back: {
-    marginTop: 25,
-    padding: 10,
-    background: "#475569",
-    border: "none",
-    borderRadius: 8
-  }
-};
