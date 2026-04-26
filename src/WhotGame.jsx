@@ -126,6 +126,7 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
+  const [processing, setProcessing] = useState(false);
 
   const gameRef = useRef(null);
 
@@ -134,20 +135,24 @@ export default function WhotGame({ gameId, goHome }) {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
-  // LOAD GAME
+  // LOAD GAME + REALTIME
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      const g = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
+      try {
+        const g = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId
+        );
 
-      const parsed = parseGame(g);
-      setGame(parsed);
-      gameRef.current = parsed;
+        const parsed = parseGame(g);
+        setGame(parsed);
+        gameRef.current = parsed;
+      } catch {
+        setTimeout(load, 800);
+      }
     };
 
     load();
@@ -174,6 +179,9 @@ export default function WhotGame({ gameId, goHome }) {
       .catch(() => {});
   }, [game]);
 
+  // =========================
+  // GUARDS
+  // =========================
   if (!game || !userId) {
     return <div style={styles.center}>Loading...</div>;
   }
@@ -187,46 +195,67 @@ export default function WhotGame({ gameId, goHome }) {
 
   const hand = game.hands[pIndex] || [];
   const opponentHand = game.hands[oIndex] || [];
+
   const top = decodeCard(game.discard);
 
   // =========================
   // PLAY CARD (FIXED)
   // =========================
   async function playCard(i) {
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId
-    );
+    if (processing) return;
+    setProcessing(true);
 
-    const g = parseGame(fresh);
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-    const pIndexFresh = g.players.indexOf(userId);
-    const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+      const g = parseGame(fresh);
 
-    if (g.turn !== userId) return;
+      const myIndex = g.players.indexOf(userId);
+      const oppIndex = myIndex === 0 ? 1 : 0;
 
-    const card = g.hands[pIndexFresh][i];
-    const current = decodeCard(card);
-    const topDecoded = decodeCard(g.discard);
+      if (g.turn !== userId) return;
 
-    if (!current || !topDecoded) return;
+      const card = g.hands[myIndex]?.[i];
+      if (!card) return;
 
-    if (
-      current.number !== topDecoded.number &&
-      current.shape !== topDecoded.shape &&
-      current.number !== 14
-    ) return;
+      const current = decodeCard(card);
+      const topDecoded = decodeCard(g.discard);
 
-    g.hands[pIndexFresh].splice(i, 1);
+      if (!current || !topDecoded) return;
 
-    let nextTurn = g.players[oIndexFresh];
+      if (
+        current.number !== topDecoded.number &&
+        current.shape !== topDecoded.shape &&
+        current.number !== 14
+      ) return;
 
-    if (current.number === 2) g.pendingPick += 2;
-    else if (current.number === 8 || current.number === 1) nextTurn = userId;
-    else if (current.number === 14) g.pendingPick += 1;
+      g.hands[myIndex].splice(i, 1);
 
-    if (g.hands[pIndexFresh].length === 0) {
+      let nextTurn = g.players[oppIndex];
+
+      if (current.number === 2) g.pendingPick += 2;
+      else if (current.number === 8 || current.number === 1) nextTurn = userId;
+      else if (current.number === 14) g.pendingPick += 1;
+
+      if (g.hands[myIndex].length === 0) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          {
+            ...encodeGame(g),
+            discard: card,
+            status: "finished",
+            winnerId: userId
+          }
+        );
+        return;
+      }
+
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -234,64 +263,64 @@ export default function WhotGame({ gameId, goHome }) {
         {
           ...encodeGame(g),
           discard: card,
-          status: "finished",
-          winnerId: userId
+          turn: nextTurn
         }
       );
-      return;
+    } catch (err) {
+      console.error(err);
     }
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        discard: card,
-        turn: nextTurn
-      }
-    );
+    setProcessing(false);
   }
 
   // =========================
-  // DRAW CARD (FIXED)
+  // DRAW MARKET (FIXED)
   // =========================
   async function drawMarket() {
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId
-    );
+    if (processing) return;
+    setProcessing(true);
 
-    const g = parseGame(fresh);
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-    const pIndexFresh = g.players.indexOf(userId);
-    const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+      const g = parseGame(fresh);
 
-    if (g.turn !== userId) return;
+      const myIndex = g.players.indexOf(userId);
+      const oppIndex = myIndex === 0 ? 1 : 0;
 
-    let count = g.pendingPick || 1;
+      if (g.turn !== userId) return;
 
-    for (let i = 0; i < count; i++) {
-      if (!g.deck.length) break;
-      g.hands[pIndexFresh].push(g.deck.pop());
+      let count = g.pendingPick || 1;
+
+      for (let i = 0; i < count; i++) {
+        if (!g.deck.length) break;
+        g.hands[myIndex].push(g.deck.pop());
+      }
+
+      g.pendingPick = 0;
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        {
+          ...encodeGame(g),
+          turn: g.players[oppIndex]
+        }
+      );
+    } catch (err) {
+      console.error(err);
     }
 
-    g.pendingPick = 0;
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        turn: g.players[oIndexFresh]
-      }
-    );
+    setProcessing(false);
   }
 
   // =========================
-  // UI (UNCHANGED)
+  // UI
   // =========================
   return (
     <div style={styles.bg}>
@@ -318,7 +347,12 @@ export default function WhotGame({ gameId, goHome }) {
         </div>
 
         <div style={styles.centerRow}>
-          {top && <img src={drawCard(top)} style={{ width: 65 }} />}
+          {top ? (
+            <img src={drawCard(top)} style={{ width: 65 }} />
+          ) : (
+            <div style={styles.error}>No Card</div>
+          )}
+
           <button onClick={drawMarket}>
             MARKET ({game.deck.length})
           </button>
@@ -327,12 +361,12 @@ export default function WhotGame({ gameId, goHome }) {
         <div style={styles.row}>
           {hand.map((c, i) => {
             const decoded = decodeCard(c);
-            const img = drawCard(decoded);
+            if (!decoded) return <div key={i} style={styles.error}>?</div>;
 
             return (
               <img
                 key={i}
-                src={img}
+                src={drawCard(decoded)}
                 style={{
                   width: 65,
                   cursor: "pointer",
@@ -352,3 +386,60 @@ export default function WhotGame({ gameId, goHome }) {
     </div>
   );
 }
+
+// =========================
+// STYLES
+// =========================
+const styles = {
+  bg: {
+    minHeight: "100vh",
+    background: "green",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 10
+  },
+  box: {
+    width: "100%",
+    maxWidth: 420,
+    background: "#00000088",
+    padding: 10,
+    color: "#fff"
+  },
+  row: {
+    display: "flex",
+    gap: 5,
+    justifyContent: "center"
+  },
+  back: {
+    width: 30,
+    height: 45,
+    background: "#222",
+    border: "2px solid gold"
+  },
+  centerRow: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+    margin: "10px 0"
+  },
+  info: {
+    background: "#111",
+    padding: 8,
+    marginBottom: 10
+  },
+  error: {
+    width: 65,
+    height: 90,
+    background: "red",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  center: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    height: "100vh"
+  }
+};
