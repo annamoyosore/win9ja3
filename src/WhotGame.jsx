@@ -24,19 +24,34 @@ function decodeCard(str) {
 }
 
 // =========================
-// PARSE GAME
+// PARSE GAME (FIXED)
 // =========================
 function parseGame(g) {
   return {
     ...g,
-    players: JSON.parse(g.players || "[]"),
-    deck: g.deck ? g.deck.split(",").filter(Boolean) : [],
+
+    // ✅ FIX: NO JSON.parse
+    players: g.players
+      ? g.players.split(",").filter(Boolean)
+      : [],
+
+    deck: g.deck
+      ? g.deck.split(",").filter(Boolean)
+      : [],
+
     discard: g.discard || "",
+
     hands: g.hands
-      ? g.hands.split("|").map(p => p.split(",").filter(Boolean))
+      ? g.hands.split("|").map(p =>
+          p ? p.split(",").filter(Boolean) : []
+        )
       : [[], []],
+
     pendingPick: Number(g.pendingPick || 0),
-    history: g.history ? g.history.split("||") : []
+
+    history: g.history
+      ? g.history.split("||")
+      : []
   };
 }
 
@@ -49,7 +64,9 @@ function encodeGame(g) {
     deck: g.deck.join(","),
     discard: g.discard,
     pendingPick: String(g.pendingPick || 0),
-    history: g.history.slice(-10).join("||") // keep last 10
+
+    // keep last 10 moves
+    history: g.history.slice(-10).join("||")
   };
 }
 
@@ -86,41 +103,54 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  if (!game || !userId) return <div>Loading...</div>;
+  if (!game || !userId) {
+    return <div style={{ padding: 20 }}>Loading...</div>;
+  }
+
+  if (!game.players.includes(userId)) {
+    return <div style={{ padding: 20 }}>Not your game</div>;
+  }
 
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
 
-  const hand = game.hands[pIndex];
+  const hand = game.hands[pIndex] || [];
   const top = decodeCard(game.discard);
 
   // =========================
   // PLAY CARD
   // =========================
   async function playCard(i) {
-    const g = parseGame(
-      await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      )
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
     );
+
+    const g = parseGame(fresh);
 
     if (g.turn !== userId) return;
 
-    const card = g.hands[pIndex][i];
+    const pIndexFresh = g.players.indexOf(userId);
+    const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+
+    const card = g.hands[pIndexFresh][i];
+    if (!card) return;
+
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
     if (
-      current.number !== topDecoded.number &&
-      current.shape !== topDecoded.shape &&
-      current.number !== 14 // WHOT wildcard
+      !topDecoded ||
+      (current.number !== topDecoded.number &&
+        current.shape !== topDecoded.shape &&
+        current.number !== 14)
     ) return;
 
-    g.hands[pIndex].splice(i, 1);
+    // remove card
+    g.hands[pIndexFresh].splice(i, 1);
 
-    let nextTurn = g.players[oIndex];
+    let nextTurn = g.players[oIndexFresh];
 
     // =========================
     // RULES
@@ -131,12 +161,12 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     else if (current.number === 8) {
-      nextTurn = userId; // skip opponent
+      nextTurn = userId;
       g.history.push("Suspension ⛔");
     }
 
     else if (current.number === 1) {
-      nextTurn = userId; // play again
+      nextTurn = userId;
       g.history.push("Hold On 🔁");
     }
 
@@ -150,7 +180,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     // WIN
-    if (g.hands[pIndex].length === 0) {
+    if (g.hands[pIndexFresh].length === 0) {
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -178,23 +208,23 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW CARD (ENFORCED RULES)
+  // DRAW CARD
   // =========================
   async function drawCard() {
-    const g = parseGame(
-      await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      )
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
     );
+
+    const g = parseGame(fresh);
 
     if (g.turn !== userId) return;
 
-    let drawCount = g.pendingPick || 1;
-
     const pIndexFresh = g.players.indexOf(userId);
     const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+
+    let drawCount = g.pendingPick || 1;
 
     for (let i = 0; i < drawCount; i++) {
       if (!g.deck.length) break;
@@ -203,7 +233,7 @@ export default function WhotGame({ gameId, goHome }) {
       g.hands[pIndexFresh].push(card);
     }
 
-    g.history.push(`Drew ${drawCount} card(s)`);
+    g.history.push(`Drew ${drawCount}`);
     g.pendingPick = 0;
 
     await databases.updateDocument(
