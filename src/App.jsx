@@ -1,5 +1,16 @@
+// =========================
+// IMPORTS (🔥 FIXED)
+// =========================
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useParams
+} from "react-router-dom";
+
 import { account } from "./lib/appwrite";
 
 import Auth from "./pages/Auth";
@@ -25,6 +36,22 @@ function ProtectedRoute({ children }) {
   if (loading) return <p>Loading...</p>;
 
   return authed ? children : <Navigate to="/auth" replace />;
+}
+
+// =========================
+// GAME WRAPPER
+// =========================
+function GameWrapper() {
+  const { gameId, stake } = useParams();
+  const navigate = useNavigate();
+
+  return (
+    <WhotGame
+      gameId={gameId}
+      stake={Number(stake)}
+      goHome={() => navigate("/dashboard")}
+    />
+  );
 }
 
 // =========================
@@ -97,24 +124,6 @@ function AppRoutes() {
       {/* DEFAULT */}
       <Route path="*" element={<Navigate to="/dashboard" />} />
     </Routes>
-  );
-}
-
-// =========================
-// GAME WRAPPER
-// =========================
-import { useParams } from "react-router-dom";
-
-function GameWrapper() {
-  const { gameId, stake } = useParams();
-  const navigate = useNavigate();
-
-  return (
-    <WhotGame
-      gameId={gameId}
-      stake={Number(stake)}
-      goHome={() => navigate("/dashboard")}
-    />
   );
 }
 
