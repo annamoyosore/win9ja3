@@ -17,46 +17,6 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
-// HELPERS
-// =========================
-function createDeck() {
-  const shapes = ["circle", "triangle", "square", "star", "cross"];
-  const deck = [];
-
-  for (const shape of shapes) {
-    for (let i = 1; i <= 13; i++) {
-      if (i === 6 || i === 9) continue;
-      deck.push({ shape, number: i });
-    }
-    deck.push({ shape, number: 14 });
-  }
-
-  return deck.sort(() => Math.random() - 0.5);
-}
-
-async function createGame(match) {
-  const deck = createDeck();
-
-  return databases.createDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    match.$id,
-    {
-      players: [match.hostId, match.opponentId],
-      hands: JSON.stringify([deck.splice(0, 6), deck.splice(0, 6)]),
-      deck: JSON.stringify(deck),
-      discard: JSON.stringify([deck.pop()]),
-      scores: JSON.stringify({ p1: 0, p2: 0 }),
-      round: 1,
-      turn: match.hostId,
-      status: "running",
-      winnerId: "",
-      turnStartTime: new Date().toISOString()
-    }
-  );
-}
-
-// =========================
 // COMPONENT
 // =========================
 export default function Lobby({ goGame, back }) {
@@ -75,54 +35,86 @@ export default function Lobby({ goGame, back }) {
   }, []);
 
   async function init() {
-    const u = await account.get();
-    setUser(u);
+    try {
+      const u = await account.get();
+      setUser(u);
 
-    const w = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", u.$id)]
+      const w = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", u.$id)]
+      );
+
+      if (w.documents.length) setWallet(w.documents[0]);
+
+      await loadMatches();
+      await loadActiveMatches(u.$id);
+    } catch (err) {
+      console.error("INIT ERROR:", err);
+    }
+  }
+
+  // =========================
+  // REALTIME FIX 🔥
+  // =========================
+  useEffect(() => {
+    if (!user) return;
+
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
+      () => {
+        loadMatches();
+        loadActiveMatches(user.$id);
+      }
     );
 
-    if (w.documents.length) setWallet(w.documents[0]);
-
-    await loadMatches();
-    await loadActiveMatches(u.$id);
-  }
+    return () => unsub();
+  }, [user]);
 
   // =========================
   // LOAD WAITING MATCHES
   // =========================
   async function loadMatches() {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.equal("status", "waiting"),
-        Query.orderDesc("$createdAt")
-      ]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [
+          Query.equal("status", "waiting"),
+          Query.orderDesc("$createdAt")
+        ]
+      );
 
-    setMatches(res.documents);
+      setMatches(res.documents);
+    } catch (err) {
+      console.error("LOAD MATCHES ERROR:", err);
+    }
   }
 
   // =========================
-  // LOAD ACTIVE MATCHES (🔥 FIX)
-  // =========================
+  // LOAD ACTIVE MATCHES (FIXED)
+// =========================
   async function loadActiveMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.or([
-          Query.equal("hostId", userId),
-          Query.equal("opponentId", userId)
-        ]),
-        Query.notEqual("status", "finished")
-      ]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [
+          Query.notEqual("status", "finished")
+        ]
+      );
 
-    setActiveMatches(res.documents);
+      // 🔥 FILTER MANUALLY (handles "", null, etc)
+      const myMatches = res.documents.filter(
+        (m) =>
+          m.hostId === userId ||
+          m.opponentId === userId
+      );
+
+      setActiveMatches(myMatches);
+    } catch (err) {
+      console.error("ACTIVE MATCH ERROR:", err);
+    }
   }
 
   // =========================
@@ -165,19 +157,18 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // create game (only one succeeds)
-      try {
-        await createGame({
-          ...fresh,
-          opponentId: user.$id
-        });
-      } catch {}
+      // refresh UI instantly
+      await loadActiveMatches(user.$id);
 
       goGame(fresh.$id, fresh.stake);
 
     } catch (err) {
       alert(err.message);
-      await unlockFunds(user.$id, match.stake);
+
+      try {
+        await unlockFunds(user.$id, match.stake);
+      } catch {}
+
       setLoading(false);
     }
   }
@@ -209,13 +200,15 @@ export default function Lobby({ goGame, back }) {
         ID.unique(),
         {
           hostId: user.$id,
-          opponentId: "",
+          opponentId: null, // ✅ FIXED
           stake: amount,
           pot: amount,
           status: "waiting",
           createdAt: new Date().toISOString()
         }
       );
+
+      await loadActiveMatches(user.$id);
 
       goGame(match.$id, amount);
 
@@ -232,35 +225,38 @@ export default function Lobby({ goGame, back }) {
     <div style={styles.container}>
       <h1 style={styles.title}>🎮 Game Lobby</h1>
 
-      {loading && <p style={styles.loading}>⚡ Matching...</p>}
+      {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
-      {/* 🔥 ACTIVE MATCHES */}
+      {/* ACTIVE MATCHES */}
       {activeMatches.length > 0 && (
         <>
-          <h2 style={styles.section}>🔥 Your Active Games</h2>
+          <h2 style={styles.section}>🔥 Your Matches</h2>
 
-          {activeMatches.map((m) => (
-            <div key={m.$id} style={styles.activeCard}>
-              <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-              <p>Status: {m.status}</p>
+          {activeMatches.map((m) => {
+            const isWaiting =
+              m.status === "waiting" && m.hostId === user?.$id;
 
-              <button
-                style={styles.resumeBtn}
-                onClick={() => goGame(m.$id, m.stake)}
-              >
-                ▶ Resume Game
-              </button>
-            </div>
-          ))}
+            return (
+              <div key={m.$id} style={styles.activeCard}>
+                <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
+                <p>Status: {m.status}</p>
+
+                <button
+                  style={styles.resumeBtn}
+                  onClick={() => goGame(m.$id, m.stake)}
+                >
+                  {isWaiting ? "⏳ Waiting..." : "▶ Resume Game"}
+                </button>
+              </div>
+            );
+          })}
         </>
       )}
 
       {/* AVAILABLE MATCHES */}
       <h2 style={styles.section}>🎯 Available Matches</h2>
 
-      {matches.length === 0 && (
-        <p style={{ opacity: 0.6 }}>No matches yet</p>
-      )}
+      {matches.length === 0 && <p>No matches available</p>}
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
@@ -303,7 +299,7 @@ export default function Lobby({ goGame, back }) {
 }
 
 // =========================
-// STYLES (🔥 UPGRADED UI)
+// STYLES
 // =========================
 const styles = {
   container: {
@@ -313,12 +309,10 @@ const styles = {
     color: "#fff"
   },
   title: {
-    fontSize: 28,
-    marginBottom: 10
+    fontSize: 28
   },
   section: {
-    marginTop: 25,
-    marginBottom: 10,
+    marginTop: 20,
     color: "gold"
   },
   loading: {
@@ -330,8 +324,7 @@ const styles = {
     margin: "10px 0",
     borderRadius: 10,
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center"
+    justifyContent: "space-between"
   },
   activeCard: {
     background: "#1e293b",
@@ -340,18 +333,16 @@ const styles = {
     borderRadius: 10
   },
   joinBtn: {
-    padding: 10,
     background: "gold",
+    padding: 10,
     border: "none",
-    borderRadius: 6,
-    cursor: "pointer"
+    borderRadius: 6
   },
   resumeBtn: {
-    padding: 10,
     background: "#22c55e",
+    padding: 10,
     border: "none",
     borderRadius: 6,
-    cursor: "pointer",
     marginTop: 5
   },
   createBox: {
@@ -360,7 +351,6 @@ const styles = {
   input: {
     width: "100%",
     padding: 10,
-    borderRadius: 6,
     marginBottom: 10
   },
   createBtn: {
