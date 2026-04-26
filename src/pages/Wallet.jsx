@@ -8,7 +8,7 @@ import { getWallet } from "../lib/wallet";
 // =========================
 // COMPONENT
 // =========================
-export default function Wallet({ back }) {
+export default function Wallet({ goTo }) {
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,11 +61,20 @@ export default function Wallet({ back }) {
       </div>
 
       {/* ACTIONS */}
-      <button style={styles.btn}>➕ Deposit (coming soon)</button>
-      <button style={styles.btn}>➖ Withdraw (coming soon)</button>
+      <button type="button" style={styles.btn}>
+        ➕ Deposit (coming soon)
+      </button>
+
+      <button type="button" style={styles.btn}>
+        ➖ Withdraw (coming soon)
+      </button>
 
       {/* BACK */}
-      <button style={styles.back} onClick={back}>
+      <button
+        type="button" // 🔥 CRITICAL FIX
+        style={styles.back}
+        onClick={() => goTo("dashboard")}
+      >
         ⬅ Back
       </button>
     </div>
