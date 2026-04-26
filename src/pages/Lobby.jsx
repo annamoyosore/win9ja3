@@ -33,7 +33,7 @@ function createDeck() {
 }
 
 // =========================
-// CREATE GAME (SAFE)
+// CREATE GAME (FIXED)
 // =========================
 async function createGame(match, opponentId) {
   let deck = createDeck();
@@ -52,20 +52,24 @@ async function createGame(match, opponentId) {
     {
       matchId: match.$id,
 
-      // ✅ ALWAYS STRING
-      players: JSON.stringify([match.hostId, opponentId]),
+      // ✅ FIXED FORMAT
+      players: `${match.hostId},${opponentId}`,
 
-      // ✅ NEVER EMPTY
       hands: hands.map(h => h.join(",")).join("|"),
       deck: deck.join(","),
       discard: topCard,
 
-      turn: opponentId, // 🔥 opponent starts
+      turn: opponentId, // opponent starts
       status: "running",
       round: "1",
       winnerId: "",
 
-      pendingPick: "0",
+      // ✅ RULE ENGINE
+      pp: 0,
+      sk: false,
+      mc: 0,
+
+      lastMove: "",
       history: "",
 
       turnStartTime: new Date().toISOString()
@@ -113,31 +117,31 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // REALTIME (AUTO START GAME)
+  // REALTIME (AUTO START)
 // =========================
-useEffect(() => {
-  if (!user) return;
+  useEffect(() => {
+    if (!user) return;
 
-  const unsub = databases.client.subscribe(
-    `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-    (res) => {
-      const m = res.payload;
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
+      (res) => {
+        const m = res.payload;
 
-      refreshAll(user.$id);
+        refreshAll(user.$id);
 
-      // 🔥 AUTO ENTER GAME
-      if (
-        (m.hostId === user.$id || m.opponentId === user.$id) &&
-        m.status === "matched" &&
-        m.gameId
-      ) {
-        goGame(m.gameId, m.stake);
+        // ✅ AUTO ENTER GAME
+        if (
+          (m.hostId === user.$id || m.opponentId === user.$id) &&
+          m.status === "matched" &&
+          m.gameId
+        ) {
+          goGame(m.gameId, m.stake);
+        }
       }
-    }
-  );
+    );
 
-  return () => unsub();
-}, [user]);
+    return () => unsub();
+  }, [user]);
 
   async function refreshAll(userId) {
     await Promise.all([
@@ -239,7 +243,7 @@ useEffect(() => {
         );
       }
 
-      // 🔥 VERIFY GAME EXISTS BEFORE NAV
+      // ✅ ENSURE GAME EXISTS
       await databases.getDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -322,24 +326,13 @@ useEffect(() => {
 
           <button
             style={styles.resumeBtn}
-            onClick={async () => {
+            onClick={() => {
               if (!m.gameId) {
                 alert("Game initializing...");
                 return;
               }
 
-              try {
-                await databases.getDocument(
-                  DATABASE_ID,
-                  GAME_COLLECTION,
-                  m.gameId
-                );
-
-                goGame(m.gameId, m.stake);
-
-              } catch {
-                alert("Game not ready yet");
-              }
+              goGame(m.gameId, m.stake);
             }}
           >
             ▶ Resume
