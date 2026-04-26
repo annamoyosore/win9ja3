@@ -17,28 +17,15 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
-// CREATE DECK
-// =========================
-function createDeck() {
-  const shapes = ["circle", "triangle", "square", "star", "cross"];
-  const deck = [];
-
-  for (const shape of shapes) {
-    for (let i = 1; i <= 13; i++) {
-      if (i === 6 || i === 9) continue;
-      deck.push({ shape, number: i });
-    }
-    deck.push({ shape, number: 14 });
-  }
-
-  return deck.sort(() => Math.random() - 0.5);
-}
-
-// =========================
-// CREATE GAME
+// CREATE GAME (LIGHTWEIGHT)
 // =========================
 async function createGame(match) {
-  const deck = createDeck();
+  const shapes = ["circle", "triangle", "square", "star", "cross"];
+
+  const randomCard =
+    shapes[Math.floor(Math.random() * shapes.length)] +
+    "_" +
+    Math.floor(Math.random() * 13 + 1);
 
   const game = await databases.createDocument(
     DATABASE_ID,
@@ -47,15 +34,18 @@ async function createGame(match) {
     {
       matchId: match.$id,
       players: [match.hostId, match.opponentId],
-      hands: JSON.stringify([
-        deck.splice(0, 6),
-        deck.splice(0, 6)
-      ]),
-      deck: JSON.stringify(deck),
-      discard: JSON.stringify([deck.pop()]),
+
+      // 🔥 lightweight state
+      handCounts: JSON.stringify([6, 6]),
+      topCard: randomCard,
+
       turn: match.hostId,
       status: "running",
       winnerId: "",
+
+      // 🔥 REQUIRED
+      round: 1,
+
       turnStartTime: new Date().toISOString()
     }
   );
@@ -206,6 +196,7 @@ export default function Lobby({ goGame, back }) {
         return;
       }
 
+      // 🔥 lock funds
       await lockFunds(user.$id, fresh.stake);
 
       const updated = await databases.updateDocument(
@@ -221,17 +212,24 @@ export default function Lobby({ goGame, back }) {
 
       let gameId = updated.gameId;
 
-      // CREATE GAME ONCE
+      // =========================
+      // CREATE GAME (SAFE)
+      // =========================
       if (!gameId) {
-        const game = await createGame(updated);
-        gameId = game.$id;
+        try {
+          const game = await createGame(updated);
+          gameId = game.$id;
 
-        await databases.updateDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          updated.$id,
-          { gameId }
-        );
+          await databases.updateDocument(
+            DATABASE_ID,
+            MATCH_COLLECTION,
+            updated.$id,
+            { gameId }
+          );
+
+        } catch (err) {
+          console.warn("Game already created by another user");
+        }
       }
 
       await waitForGame(gameId);
