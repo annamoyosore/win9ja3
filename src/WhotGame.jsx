@@ -31,14 +31,18 @@ function decodeCard(str) {
 }
 
 // =========================
-// SAFE PARSER
+// SAFE PARSER (🔥 FIXED)
 // =========================
 function parseGame(g) {
   return {
     ...g,
-    players: g.players || [],
+
+    // ✅ FIX: convert string → array
+    players: g.players ? g.players.split(",") : [],
+
     deck: g.deck ? g.deck.split(",") : [],
     discard: g.discard || "",
+
     hands: g.hands
       ? g.hands.split("|").map(p => (p ? p.split(",") : []))
       : [[], []]
@@ -79,6 +83,7 @@ export default function WhotGame({ gameId, goHome }) {
 
         const parsed = parseGame(g);
 
+        // wait until both players exist
         if (!parsed.players || parsed.players.length < 2) {
           retry = setTimeout(load, 500);
           return;
@@ -176,7 +181,7 @@ export default function WhotGame({ gameId, goHome }) {
 
       g.hands[pIndexFresh].splice(i, 1);
 
-      // ✅ WIN CHECK
+      // WIN
       if (g.hands[pIndexFresh].length === 0) {
         await databases.updateDocument(
           DATABASE_ID,
@@ -232,13 +237,7 @@ export default function WhotGame({ gameId, goHome }) {
       const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
 
       const card = g.deck.pop();
-
       g.hands[pIndexFresh].push(card);
-
-      // 🔥 LIMIT SIZE (VERY IMPORTANT)
-      if (g.deck.length > 80) {
-        g.deck = g.deck.slice(-80);
-      }
 
       await databases.updateDocument(
         DATABASE_ID,
