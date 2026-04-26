@@ -13,16 +13,44 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
 
+// =========================
+// CREATE GAME
+// =========================
+async function createGame(match, opponentId) {
+  const game = await databases.createDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    ID.unique(),
+    {
+      matchId: match.$id,
+      players: [match.hostId, opponentId],
+      turn: opponentId, // 🔥 opponent starts
+      status: "running",
+      round: 1,
+      discard: "c1", // starter card (safe)
+      deck: "",
+      hands: "",
+      winnerId: "",
+      turnStartTime: new Date().toISOString()
+    }
+  );
+
+  return game;
+}
+
+// =========================
+// COMPONENT
+// =========================
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   // =========================
-  // INIT (SAFE)
+  // INIT
   // =========================
   useEffect(() => {
     init();
@@ -40,42 +68,28 @@ export default function Lobby({ goGame, back }) {
           [Query.equal("userId", u.$id)]
         );
 
-        if (w.documents.length) {
-          setWallet(w.documents[0]);
-        }
-      } catch (err) {
-        console.warn("Wallet load failed:", err.message);
-      }
+        if (w.documents.length) setWallet(w.documents[0]);
+      } catch {}
 
-      await refreshAll(u.$id);
+      refreshAll(u.$id);
 
     } catch (err) {
-      console.error("AUTH ERROR:", err.message);
-    } finally {
-      setLoading(false);
+      console.error("INIT ERROR:", err.message);
     }
   }
 
   // =========================
-  // REALTIME (SAFE)
+  // REALTIME
   // =========================
   useEffect(() => {
     if (!user) return;
 
-    let unsub;
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
+      () => refreshAll(user.$id)
+    );
 
-    try {
-      unsub = databases.client.subscribe(
-        `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-        () => refreshAll(user.$id)
-      );
-    } catch (err) {
-      console.warn("Realtime failed:", err.message);
-    }
-
-    return () => {
-      if (unsub) unsub();
-    };
+    return () => unsub();
   }, [user]);
 
   async function refreshAll(userId) {
@@ -100,9 +114,8 @@ export default function Lobby({ goGame, back }) {
       );
 
       setMatches(res.documents);
-
     } catch (err) {
-      console.warn("Load matches failed:", err.message);
+      console.warn(err.message);
     }
   }
 
@@ -129,14 +142,13 @@ export default function Lobby({ goGame, back }) {
         );
 
       setActiveMatches(myMatches);
-
     } catch (err) {
-      console.warn("Active matches failed:", err.message);
+      console.warn(err.message);
     }
   }
 
   // =========================
-  // JOIN MATCH (SAFE)
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loading) return;
@@ -176,20 +188,7 @@ export default function Lobby({ goGame, back }) {
       let gameId = updated.gameId;
 
       if (!gameId) {
-        const game = await databases.createDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          ID.unique(),
-          {
-            matchId: updated.$id,
-            players: [updated.hostId, updated.opponentId],
-            turn: user.$id,
-            status: "running",
-            round: 1,
-            turnStartTime: new Date().toISOString()
-          }
-        );
-
+        const game = await createGame(updated, user.$id);
         gameId = game.$id;
 
         await databases.updateDocument(
@@ -248,8 +247,6 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      alert("Match created");
-
     } catch (err) {
       alert(err.message);
     } finally {
@@ -258,39 +255,172 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // UI SAFE GUARD
+  // UI
   // =========================
-  if (loading) {
-    return <div style={{ padding: 20 }}>Loading Lobby...</div>;
-  }
-
   return (
-    <div style={{ padding: 20, color: "#fff" }}>
-      <h2>🎮 Lobby</h2>
+    <div style={styles.container}>
+      <h1 style={styles.title}>🎮 Game Lobby</h1>
 
-      <h3>Available Matches</h3>
+      {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
-      {matches.length === 0 && <p>No matches</p>}
+      {/* ACTIVE MATCHES */}
+      {activeMatches.length > 0 && (
+        <>
+          <h2 style={styles.section}>🔥 Your Matches</h2>
+
+          {activeMatches.map((m) => {
+            const waiting =
+              m.status === "waiting" &&
+              m.hostId === user?.$id;
+
+            return (
+              <div key={m.$id} style={styles.activeCard}>
+                <div>
+                  <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
+                  <p>Status: {m.status}</p>
+                </div>
+
+                <button
+                  style={styles.resumeBtn}
+                  onClick={() => {
+                    if (!m.gameId) {
+                      alert("Waiting for opponent...");
+                      return;
+                    }
+                    goGame(m.gameId, m.stake);
+                  }}
+                >
+                  {waiting ? "⏳ Waiting..." : "▶ Resume"}
+                </button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* AVAILABLE */}
+      <h2 style={styles.section}>🎯 Available Matches</h2>
+
+      {matches.length === 0 && (
+        <p style={{ opacity: 0.6 }}>
+          No matches available
+        </p>
+      )}
 
       {matches.map((m) => (
-        <div key={m.$id}>
-          ₦{m.stake}
-          <button onClick={() => joinMatch(m)}>Join</button>
+        <div key={m.$id} style={styles.card}>
+          <span>
+            ₦{Number(m.stake).toLocaleString()}
+          </span>
+
+          <button
+            style={styles.joinBtn}
+            onClick={() => joinMatch(m)}
+            disabled={loading}
+          >
+            Join
+          </button>
         </div>
       ))}
 
-      <h3>Create Match</h3>
+      {/* CREATE */}
+      <div style={styles.createBox}>
+        <input
+          type="number"
+          placeholder="Enter stake ₦"
+          value={stake}
+          onChange={(e) => setStake(e.target.value)}
+          style={styles.input}
+        />
 
-      <input
-        value={stake}
-        onChange={(e) => setStake(e.target.value)}
-        placeholder="Amount"
-      />
+        <button
+          style={styles.createBtn}
+          onClick={createMatch}
+          disabled={loading}
+        >
+          Create Match
+        </button>
+      </div>
 
-      <button onClick={createMatch}>Create</button>
-
-      <br /><br />
-      <button onClick={back}>Back</button>
+      {/* BACK */}
+      <button style={styles.back} onClick={back}>
+        ← Back
+      </button>
     </div>
   );
 }
+
+// =========================
+// STYLES
+// =========================
+const styles = {
+  container: {
+    padding: 20,
+    minHeight: "100vh",
+    background: "linear-gradient(135deg,#020617,#0f172a)",
+    color: "#fff"
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "bold"
+  },
+  section: {
+    marginTop: 25,
+    color: "#facc15"
+  },
+  loading: {
+    color: "#facc15"
+  },
+  card: {
+    background: "#111827",
+    padding: 15,
+    margin: "10px 0",
+    borderRadius: 12,
+    display: "flex",
+    justifyContent: "space-between"
+  },
+  activeCard: {
+    background: "#1e293b",
+    padding: 15,
+    marginBottom: 10,
+    borderRadius: 12,
+    display: "flex",
+    justifyContent: "space-between"
+  },
+  joinBtn: {
+    background: "#facc15",
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "none"
+  },
+  resumeBtn: {
+    background: "#22c55e",
+    padding: "8px 14px",
+    borderRadius: 8,
+    border: "none",
+    color: "#fff"
+  },
+  createBox: {
+    marginTop: 25
+  },
+  input: {
+    width: "100%",
+    padding: 12,
+    marginBottom: 10
+  },
+  createBtn: {
+    width: "100%",
+    padding: 12,
+    background: "#3b82f6",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff"
+  },
+  back: {
+    marginTop: 25,
+    padding: 10,
+    background: "#475569",
+    border: "none",
+    borderRadius: 8
+  }
+};
