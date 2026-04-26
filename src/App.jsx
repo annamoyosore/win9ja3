@@ -20,9 +20,9 @@ import Lobby from "./pages/Lobby";
 import WhotGame from "./WhotGame";
 
 // =========================
-// AUTH WRAPPER
+// AUTH CHECK HOOK
 // =========================
-function ProtectedRoute({ children }) {
+function useAuth() {
   const [loading, setLoading] = useState(true);
   const [authed, setAuthed] = useState(false);
 
@@ -32,6 +32,15 @@ function ProtectedRoute({ children }) {
       .catch(() => setAuthed(false))
       .finally(() => setLoading(false));
   }, []);
+
+  return { loading, authed };
+}
+
+// =========================
+// PROTECTED ROUTE
+// =========================
+function ProtectedRoute({ children }) {
+  const { loading, authed } = useAuth();
 
   if (loading) {
     return (
@@ -45,18 +54,10 @@ function ProtectedRoute({ children }) {
 }
 
 // =========================
-// ROOT REDIRECT (🔥 IMPORTANT)
+// PUBLIC ROUTE (Auth only)
 // =========================
-function RootRedirect() {
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    account.get()
-      .then(() => setAuthed(true))
-      .catch(() => setAuthed(false))
-      .finally(() => setLoading(false));
-  }, []);
+function PublicRoute({ children }) {
+  const { loading, authed } = useAuth();
 
   if (loading) {
     return (
@@ -66,7 +67,8 @@ function RootRedirect() {
     );
   }
 
-  return <Navigate to={authed ? "/dashboard" : "/auth"} replace />;
+  // 🔥 If already logged in → skip auth page
+  return !authed ? children : <Navigate to="/dashboard" replace />;
 }
 
 // =========================
@@ -75,6 +77,8 @@ function RootRedirect() {
 function GameWrapper() {
   const { gameId, stake } = useParams();
   const navigate = useNavigate();
+
+  if (!gameId) return <Navigate to="/dashboard" />;
 
   return (
     <WhotGame
@@ -94,16 +98,17 @@ function AppRoutes() {
   return (
     <Routes>
 
-      {/* ROOT */}
-      <Route path="/" element={<RootRedirect />} />
-
-      {/* AUTH */}
+      {/* 🔐 AUTH (ENTRY POINT) */}
       <Route
         path="/auth"
-        element={<Auth onLogin={() => navigate("/dashboard")} />}
+        element={
+          <PublicRoute>
+            <Auth onLogin={() => navigate("/dashboard")} />
+          </PublicRoute>
+        }
       />
 
-      {/* DASHBOARD */}
+      {/* 🏠 DASHBOARD */}
       <Route
         path="/dashboard"
         element={
@@ -120,7 +125,7 @@ function AppRoutes() {
         }
       />
 
-      {/* WALLET */}
+      {/* 💳 WALLET */}
       <Route
         path="/wallet"
         element={
@@ -130,7 +135,7 @@ function AppRoutes() {
         }
       />
 
-      {/* LOBBY */}
+      {/* 🎮 LOBBY */}
       <Route
         path="/lobby"
         element={
@@ -145,7 +150,7 @@ function AppRoutes() {
         }
       />
 
-      {/* GAME */}
+      {/* 🎯 GAME */}
       <Route
         path="/game/:gameId/:stake"
         element={
@@ -155,14 +160,18 @@ function AppRoutes() {
         }
       />
 
-      {/* FALLBACK */}
-      <Route path="*" element={<Navigate to="/" />} />
+      {/* 🔥 DEFAULT ROUTE */}
+      <Route path="/" element={<Navigate to="/auth" replace />} />
+
+      {/* 🔥 FALLBACK */}
+      <Route path="*" element={<Navigate to="/auth" replace />} />
+
     </Routes>
   );
 }
 
 // =========================
-// MAIN EXPORT
+// MAIN APP
 // =========================
 export default function App() {
   return (
