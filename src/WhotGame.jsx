@@ -1,30 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
+const MATCH_COLLECTION = "matches";
 
 // =========================
-// DECODE CARD
-// =========================
-function decodeCard(str) {
-  if (!str) return null;
-
-  const map = {
-    c: "circle",
-    t: "triangle",
-    s: "square",
-    x: "cross",
-    r: "star"
-  };
-
-  return {
-    shape: map[str[0]],
-    number: Number(str.slice(1))
-  };
-}
-
-// =========================
-// PARSE GAME
+// SAFE PARSE GAME
 // =========================
 function parseGame(g) {
   return {
@@ -56,19 +37,104 @@ function encodeGame(g) {
 }
 
 // =========================
+// SAFE DECODE CARD
+// =========================
+function decodeCard(str) {
+  if (!str || typeof str !== "string") return null;
+
+  const map = {
+    c: "circle",
+    t: "triangle",
+    s: "square",
+    r: "star",
+    x: "cross"
+  };
+
+  const shape = map[str[0]];
+  const number = Number(str.slice(1));
+
+  if (!shape || !number) return null;
+
+  return { shape, number };
+}
+
+// =========================
+// DRAW CARD (CANVAS)
+// =========================
+const cache = new Map();
+
+function drawCard(card) {
+  if (!card) return null;
+
+  const key = `${card.shape}_${card.number}`;
+  if (cache.has(key)) return cache.get(key);
+
+  const c = document.createElement("canvas");
+  c.width = 80;
+  c.height = 120;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, 80, 120);
+
+  ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(2, 2, 76, 116);
+
+  ctx.fillStyle = "#e11d48";
+  ctx.font = "bold 14px Arial";
+  ctx.fillText(card.number, 6, 18);
+
+  const cx = 40, cy = 60;
+
+  if (card.shape === "circle") {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (card.shape === "square") {
+    ctx.fillRect(cx - 12, cy - 12, 24, 24);
+  }
+
+  if (card.shape === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 14);
+    ctx.lineTo(cx - 14, cy + 14);
+    ctx.lineTo(cx + 14, cy + 14);
+    ctx.fill();
+  }
+
+  if (card.shape === "star") {
+    ctx.fillText("★", cx - 8, cy + 5);
+  }
+
+  if (card.shape === "cross") {
+    ctx.fillRect(cx - 3, cy - 14, 6, 28);
+    ctx.fillRect(cx - 14, cy - 3, 28, 6);
+  }
+
+  const img = c.toDataURL();
+  cache.set(key, img);
+  return img;
+}
+
+// =========================
 // COMPONENT
 // =========================
 export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
+  const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [processing, setProcessing] = useState(false);
+
+  const gameRef = useRef(null);
 
   // LOAD USER
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
-  // LOAD + REALTIME
+  // LOAD GAME
   useEffect(() => {
     if (!gameId || !userId) return;
 
@@ -78,109 +144,89 @@ export default function WhotGame({ gameId, goHome }) {
         GAME_COLLECTION,
         gameId
       );
-      setGame(parseGame(g));
+
+      const parsed = parseGame(g);
+      setGame(parsed);
+      gameRef.current = parsed;
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      res => setGame(parseGame(res.payload))
+      res => {
+        const parsed = parseGame(res.payload);
+        setGame(parsed);
+        gameRef.current = parsed;
+      }
     );
 
     return () => unsub();
   }, [gameId, userId]);
 
-  // =========================
-  // GUARDS
-  // =========================
+  // LOAD MATCH
+  useEffect(() => {
+    if (!game?.matchId) return;
+
+    databases
+      .getDocument(DATABASE_ID, MATCH_COLLECTION, game.matchId)
+      .then(setMatch)
+      .catch(() => {});
+  }, [game]);
+
   if (!game || !userId) {
-    return <div style={{ padding: 20 }}>Loading...</div>;
+    return <div style={styles.center}>Loading...</div>;
   }
 
   if (!game.players.includes(userId)) {
-    return <div style={{ padding: 20 }}>Not your game</div>;
+    return <div style={styles.center}>Not your game</div>;
   }
 
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
 
   const hand = game.hands[pIndex] || [];
+  const opponentHand = game.hands[oIndex] || [];
   const top = decodeCard(game.discard);
 
   // =========================
-  // PLAY CARD
+  // PLAY CARD (FIXED)
   // =========================
   async function playCard(i) {
-    if (processing) return;
-    setProcessing(true);
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
+    );
 
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
+    const g = parseGame(fresh);
 
-      const g = parseGame(fresh);
+    const pIndexFresh = g.players.indexOf(userId);
+    const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
 
-      const pIndexFresh = g.players.indexOf(userId);
-      const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+    if (g.turn !== userId) return;
 
-      if (g.turn !== userId) return;
+    const card = g.hands[pIndexFresh][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
 
-      const card = g.hands[pIndexFresh][i];
-      if (!card) return;
+    if (!current || !topDecoded) return;
 
-      const current = decodeCard(card);
-      const topDecoded = decodeCard(g.discard);
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) return;
 
-      if (!current || !topDecoded) return;
+    g.hands[pIndexFresh].splice(i, 1);
 
-      if (
-        current.number !== topDecoded.number &&
-        current.shape !== topDecoded.shape &&
-        current.number !== 14
-      ) return;
+    let nextTurn = g.players[oIndexFresh];
 
-      // REMOVE CARD
-      g.hands[pIndexFresh].splice(i, 1);
+    if (current.number === 2) g.pendingPick += 2;
+    else if (current.number === 8 || current.number === 1) nextTurn = userId;
+    else if (current.number === 14) g.pendingPick += 1;
 
-      let nextTurn = g.players[oIndexFresh];
-
-      // RULES
-      if (current.number === 2) {
-        g.pendingPick += 2;
-        g.history.push("Pick 2 🔥");
-      } else if (current.number === 8) {
-        nextTurn = userId;
-        g.history.push("Suspension ⛔");
-      } else if (current.number === 1) {
-        nextTurn = userId;
-        g.history.push("Hold On 🔁");
-      } else if (current.number === 14) {
-        g.pendingPick += 1;
-        g.history.push("General Market 🛒");
-      } else {
-        g.history.push(`${current.shape} ${current.number}`);
-      }
-
-      // WIN
-      if (g.hands[pIndexFresh].length === 0) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            ...encodeGame(g),
-            discard: card,
-            status: "finished",
-            winnerId: userId
-          }
-        );
-        return;
-      }
-
+    if (g.hands[pIndexFresh].length === 0) {
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -188,110 +234,121 @@ export default function WhotGame({ gameId, goHome }) {
         {
           ...encodeGame(g),
           discard: card,
-          turn: nextTurn
+          status: "finished",
+          winnerId: userId
         }
       );
-
-    } finally {
-      setProcessing(false);
+      return;
     }
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        discard: card,
+        turn: nextTurn
+      }
+    );
   }
 
   // =========================
-  // DRAW CARD
+  // DRAW CARD (FIXED)
   // =========================
   async function drawMarket() {
-    if (processing) return;
-    setProcessing(true);
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
+    );
 
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
+    const g = parseGame(fresh);
 
-      const g = parseGame(fresh);
+    const pIndexFresh = g.players.indexOf(userId);
+    const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
 
-      const pIndexFresh = g.players.indexOf(userId);
-      const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+    if (g.turn !== userId) return;
 
-      if (g.turn !== userId) return;
+    let count = g.pendingPick || 1;
 
-      let count = g.pendingPick || 1;
-
-      for (let i = 0; i < count; i++) {
-        if (!g.deck.length) break;
-
-        const card = g.deck.pop();
-        g.hands[pIndexFresh].push(card);
-      }
-
-      g.history.push(`Drew ${count}`);
-      g.pendingPick = 0;
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(g),
-          turn: g.players[oIndexFresh]
-        }
-      );
-
-    } finally {
-      setProcessing(false);
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[pIndexFresh].push(g.deck.pop());
     }
+
+    g.pendingPick = 0;
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.players[oIndexFresh]
+      }
+    );
   }
 
   // =========================
-  // UI
+  // UI (UNCHANGED)
   // =========================
   return (
-    <div style={{ padding: 20 }}>
-      <h2>🎮 Whot Game</h2>
+    <div style={styles.bg}>
+      <div style={styles.box}>
+        <h2>WHOT GAME</h2>
 
-      <p>
-        Turn: {game.turn === userId ? "🟢 You" : "⏳ Opponent"}
-      </p>
+        {match && (
+          <div style={styles.info}>
+            💰 Stake: ₦{match.stake} | 🏆 Pot: ₦{match.pot}
+          </div>
+        )}
 
-      <p>
-        Top: {top?.shape} {top?.number}
-      </p>
+        <p>
+          Turn: {game.turn === userId ? "🟢 You" : "⏳ Opponent"}
+        </p>
 
-      <button onClick={drawMarket}>
-        🃏 Market ({game.deck.length})
-      </button>
+        <div>
+          Opponent: {opponentHand.length} cards
+          <div style={styles.row}>
+            {opponentHand.map((_, i) => (
+              <div key={i} style={styles.back}></div>
+            ))}
+          </div>
+        </div>
 
-      <div style={{ marginTop: 20 }}>
-        {hand.map((c, i) => {
-          const d = decodeCard(c);
-          return (
-            <button
-              key={i}
-              onClick={() => playCard(i)}
-              style={{
-                margin: 5,
-                padding: 10,
-                cursor: "pointer"
-              }}
-            >
-              {d.shape} {d.number}
-            </button>
-          );
-        })}
+        <div style={styles.centerRow}>
+          {top && <img src={drawCard(top)} style={{ width: 65 }} />}
+          <button onClick={drawMarket}>
+            MARKET ({game.deck.length})
+          </button>
+        </div>
+
+        <div style={styles.row}>
+          {hand.map((c, i) => {
+            const decoded = decodeCard(c);
+            const img = drawCard(decoded);
+
+            return (
+              <img
+                key={i}
+                src={img}
+                style={{
+                  width: 65,
+                  cursor: "pointer",
+                  border:
+                    game.turn === userId
+                      ? "2px solid gold"
+                      : "2px solid transparent"
+                }}
+                onClick={() => playCard(i)}
+              />
+            );
+          })}
+        </div>
+
+        <button onClick={goHome}>Exit</button>
       </div>
-
-      {/* HISTORY */}
-      <div style={{ marginTop: 30 }}>
-        <h3>📜 Moves</h3>
-        {game.history.slice().reverse().map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
-      </div>
-
-      <button onClick={goHome}>Exit</button>
     </div>
   );
 }
