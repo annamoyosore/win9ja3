@@ -1,158 +1,148 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useParams
+} from "react-router-dom";
+
 import { account } from "./lib/appwrite";
 
-// =========================
-// PAGES
-// =========================
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
-import Match from "./pages/Match";
 import WhotGame from "./WhotGame";
 
 // =========================
-// MAIN APP
+// AUTH WRAPPER (SAFE)
 // =========================
-export default function App() {
-  const [page, setPage] = useState("loading");
-  const [matchId, setMatchId] = useState(null);
-  const [stake, setStake] = useState(0);
+function ProtectedRoute({ children }) {
+  const [checked, setChecked] = useState(false);
+  const [authed, setAuthed] = useState(false);
 
-  // =========================
-  // SESSION CHECK
-  // =========================
   useEffect(() => {
     account.get()
-      .then(() => setPage("dashboard"))
-      .catch(() => setPage("auth"));
+      .then(() => setAuthed(true))
+      .catch(() => setAuthed(false))
+      .finally(() => setChecked(true));
   }, []);
 
-  // =========================
-  // SAFETY FIX
-  // =========================
-  useEffect(() => {
-    if (page === "match" && !matchId) {
-      setPage("dashboard");
-    }
-  }, [page, matchId]);
-
-  // =========================
-  // LOGOUT
-  // =========================
-  async function logout() {
-    try {
-      await account.deleteSession("current");
-    } catch (e) {
-      console.warn(e);
-    }
-
-    setMatchId(null);
-    setStake(0);
-    setPage("auth");
-  }
-
-  // =========================
-  // ROUTES
-  // =========================
-
-  // 🔄 LOADING
-  if (page === "loading") {
+  if (!checked) {
     return (
-      <div style={styles.loading}>
-        <h2>🎮 Win9ja</h2>
-        <p>Loading...</p>
+      <div style={{ color: "white", padding: 20 }}>
+        Loading...
       </div>
     );
   }
 
-  // 🔐 AUTH
-  if (page === "auth") {
-    return <Auth onLogin={() => setPage("dashboard")} />;
-  }
-
-  // 🏠 DASHBOARD
-  if (page === "dashboard") {
-    return (
-      <Dashboard
-        goLobby={() => setPage("lobby")}
-        goWallet={() => setPage("wallet")}
-        logout={logout}
-      />
-    );
-  }
-
-  // 💳 WALLET (✅ FIXED PROP)
-  if (page === "wallet") {
-    return (
-      <Wallet
-        goTo={(p) => setPage(p)}   // ✅ FIXED
-      />
-    );
-  }
-
-  // 🎮 LOBBY
-  if (page === "lobby") {
-    return (
-      <Lobby
-        goMatch={(id, s) => {
-          setMatchId(id);
-          setStake(s);
-          setPage("match");
-        }}
-        back={() => setPage("dashboard")}
-      />
-    );
-  }
-
-  // 🎯 MATCH WAITING
-  if (page === "match") {
-    return (
-      <Match
-        matchId={matchId}
-        stake={stake}
-        startGame={() => setPage("game")}
-        cancel={() => {
-          setMatchId(null);
-          setStake(0);
-          setPage("dashboard");
-        }}
-      />
-    );
-  }
-
-  // 🎮 GAME (✅ FIXED gameId)
-  if (page === "game") {
-    return (
-      <WhotGame
-        gameId={matchId}   // ✅ CRITICAL FIX
-        stake={stake}
-        goHome={() => {
-          setMatchId(null);
-          setStake(0);
-          setPage("dashboard");
-        }}
-      />
-    );
-  }
-
-  return null;
+  return authed ? children : <Navigate to="/auth" replace />;
 }
 
 // =========================
-// STYLES
+// GAME WRAPPER
 // =========================
-const styles = {
-  loading: {
-    minHeight: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    flexDirection: "column",
-    background: "#0f172a",
-    color: "#fff"
-  }
-};
+function GameWrapper() {
+  const { gameId, stake } = useParams();
+  const navigate = useNavigate();
+
+  return (
+    <WhotGame
+      gameId={gameId}
+      stake={Number(stake)}
+      goHome={() => navigate("/dashboard")}
+    />
+  );
+}
+
+// =========================
+// ROUTES
+// =========================
+function AppRoutes() {
+  const navigate = useNavigate();
+
+  return (
+    <Routes>
+
+      {/* 🔐 AUTH FIRST */}
+      <Route
+        path="/auth"
+        element={
+          <Auth onLogin={() => navigate("/dashboard")} />
+        }
+      />
+
+      {/* 🏠 DASHBOARD */}
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard
+              goLobby={() => navigate("/lobby")}
+              goWallet={() => navigate("/wallet")}
+              logout={async () => {
+                try {
+                  await account.deleteSession("current");
+                } catch {}
+                navigate("/auth");
+              }}
+            />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 💳 WALLET */}
+      <Route
+        path="/wallet"
+        element={
+          <ProtectedRoute>
+            <Wallet back={() => navigate("/dashboard")} />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 🎮 LOBBY */}
+      <Route
+        path="/lobby"
+        element={
+          <ProtectedRoute>
+            <Lobby
+              goGame={(id, stake) =>
+                navigate(`/game/${id}/${stake}`)
+              }
+              back={() => navigate("/dashboard")}
+            />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 🎯 GAME */}
+      <Route
+        path="/game/:gameId/:stake"
+        element={
+          <ProtectedRoute>
+            <GameWrapper />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ✅ DEFAULT → AUTH (IMPORTANT) */}
+      <Route path="*" element={<Navigate to="/auth" />} />
+    </Routes>
+  );
+}
+
+// =========================
+// APP ROOT
+// =========================
+export default function App() {
+  return (
+    <BrowserRouter>
+      <div style={{ minHeight: "100vh", background: "#0f172a" }}>
+        <AppRoutes />
+      </div>
+    </BrowserRouter>
+  );
+}
