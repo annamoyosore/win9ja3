@@ -4,32 +4,55 @@ import { databases, DATABASE_ID, account } from "./lib/appwrite";
 const GAME_COLLECTION = "games";
 
 // =========================
-// SOUND
+// SAFE PARSE
 // =========================
-function playSound(type) {
-  const s = {
-    play: "https://actions.google.com/sounds/v1/cartoon/pop.ogg",
-    draw: "https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg",
-  };
-  new Audio(s[type]).play().catch(() => {});
-}
-
-// =========================
-// CARD HELPERS
-// =========================
-function decode(str) {
+function parseGame(g) {
   return {
-    shape: str[0],
-    number: Number(str.slice(1)),
+    ...g,
+    players: g.players ? g.players.split(",").filter(Boolean) : [],
+    deck: g.deck ? g.deck.split(",").filter(Boolean) : [],
+    discard: g.discard || "",
+    hands: g.hands
+      ? g.hands.split("|").map(p => p.split(",").filter(Boolean))
+      : [[], []],
+    pendingPick: Number(g.pendingPick || 0),
+    history: g.history ? g.history.split("||") : []
   };
 }
 
-function encode(card) {
-  return card.shape + card.number;
+// =========================
+// ENCODE
+// =========================
+function encodeGame(g) {
+  return {
+    hands: g.hands.map(p => p.join(",")).join("|"),
+    deck: g.deck.join(","),
+    discard: g.discard,
+    pendingPick: String(g.pendingPick || 0),
+    history: g.history.slice(-10).join("||")
+  };
 }
 
 // =========================
-// CANVAS DRAW
+// DECODE CARD (UI ONLY)
+// =========================
+function decodeCard(str) {
+  const map = {
+    c: "circle",
+    t: "triangle",
+    s: "square",
+    r: "star",
+    x: "cross"
+  };
+
+  return {
+    shape: map[str[0]],
+    number: Number(str.slice(1))
+  };
+}
+
+// =========================
+// DRAW CARD (CANVAS)
 // =========================
 const cache = new Map();
 
@@ -38,45 +61,45 @@ function drawCard(card) {
   if (cache.has(key)) return cache.get(key);
 
   const c = document.createElement("canvas");
-  c.width = 90;
-  c.height = 130;
+  c.width = 80;
+  c.height = 120;
   const ctx = c.getContext("2d");
 
   ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, 90, 130);
+  ctx.fillRect(0, 0, 80, 120);
 
   ctx.strokeStyle = "#e11d48";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(2, 2, 86, 126);
+  ctx.strokeRect(2, 2, 76, 116);
 
   ctx.fillStyle = "#e11d48";
   ctx.font = "bold 14px Arial";
-  ctx.fillText(card.number, 8, 18);
+  ctx.fillText(card.number, 6, 18);
 
-  const cx = 45, cy = 65;
+  const cx = 40, cy = 60;
 
-  if (card.shape === "c") {
+  if (card.shape === "circle") {
     ctx.beginPath();
-    ctx.arc(cx, cy, 16, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  if (card.shape === "s") ctx.fillRect(cx - 14, cy - 14, 28, 28);
+  if (card.shape === "square") {
+    ctx.fillRect(cx - 12, cy - 12, 24, 24);
+  }
 
-  if (card.shape === "t") {
+  if (card.shape === "triangle") {
     ctx.beginPath();
-    ctx.moveTo(cx, cy - 16);
-    ctx.lineTo(cx - 16, cy + 16);
-    ctx.lineTo(cx + 16, cy + 16);
-    ctx.closePath();
+    ctx.moveTo(cx, cy - 14);
+    ctx.lineTo(cx - 14, cy + 14);
+    ctx.lineTo(cx + 14, cy + 14);
     ctx.fill();
   }
 
-  if (card.shape === "r") ctx.fillText("★", cx - 8, cy + 6);
+  if (card.shape === "star") ctx.fillText("★", cx - 8, cy + 5);
 
-  if (card.shape === "x") {
-    ctx.fillRect(cx - 3, cy - 16, 6, 32);
-    ctx.fillRect(cx - 16, cy - 3, 32, 6);
+  if (card.shape === "cross") {
+    ctx.fillRect(cx - 3, cy - 14, 6, 28);
+    ctx.fillRect(cx - 14, cy - 3, 28, 6);
   }
 
   const img = c.toDataURL();
@@ -85,40 +108,11 @@ function drawCard(card) {
 }
 
 // =========================
-// PARSE GAME
-// =========================
-function parse(g) {
-  return {
-    ...g,
-    players: JSON.parse(g.players || "[]"),
-    deck: g.deck ? g.deck.split(",") : [],
-    hands: g.hands
-      ? g.hands.split("|").map(p => p.split(","))
-      : [[], []],
-    history: g.history ? g.history.split("||") : [],
-    pendingPick: Number(g.pendingPick || 0),
-  };
-}
-
-// =========================
-// ENCODE GAME
-// =========================
-function encodeGame(g) {
-  return {
-    deck: g.deck.join(","),
-    hands: g.hands.map(p => p.join(",")).join("|"),
-    history: g.history.slice(-10).join("||"),
-    pendingPick: String(g.pendingPick),
-  };
-}
-
-// =========================
 // COMPONENT
 // =========================
 export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [alerts, setAlerts] = useState([]);
 
   const gameRef = useRef(null);
 
@@ -127,7 +121,7 @@ export default function WhotGame({ gameId, goHome }) {
   }, []);
 
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId || !userId) return;
 
     const load = async () => {
       const g = await databases.getDocument(
@@ -135,152 +129,111 @@ export default function WhotGame({ gameId, goHome }) {
         GAME_COLLECTION,
         gameId
       );
-      setGame(parse(g));
+      const parsed = parseGame(g);
+      setGame(parsed);
+      gameRef.current = parsed;
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      res => setGame(parse(res.payload))
+      res => {
+        const parsed = parseGame(res.payload);
+        setGame(parsed);
+        gameRef.current = parsed;
+      }
     );
 
     return () => unsub();
-  }, [gameId]);
+  }, [gameId, userId]);
 
-  if (!game || !userId) return <div>Loading...</div>;
+  if (!game || !userId) return <div style={styles.center}>Loading...</div>;
+
+  if (!game.players || game.players.length < 2) {
+    return <div style={styles.center}>Waiting for opponent...</div>;
+  }
+
+  if (!game.players.includes(userId)) {
+    return <div style={styles.center}>Not your game</div>;
+  }
 
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
 
   const hand = game.hands[pIndex];
-  const top = decode(game.discard);
+  const opponentHand = game.hands[oIndex];
 
-  function pushAlert(msg) {
-    setAlerts(p => [...p.slice(-3), msg]);
-    setTimeout(() => setAlerts(p => p.slice(1)), 2000);
-  }
+  const top = decodeCard(game.discard);
 
   // =========================
-  // PLAY
+  // PLAY CARD
   // =========================
   async function playCard(i) {
-    if (game.turn !== userId) return;
-
-    const fresh = parse(
-      await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      )
+    const g = parseGame(
+      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
     );
 
-    const cardStr = fresh.hands[pIndex][i];
-    const card = decode(cardStr);
-    const topCard = decode(fresh.discard);
+    if (g.turn !== userId) return;
+
+    const card = g.hands[pIndex][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
 
     if (
-      card.number !== topCard.number &&
-      card.shape !== topCard.shape &&
-      card.number !== 14
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
     ) return;
 
-    fresh.hands[pIndex].splice(i, 1);
-    fresh.discard = cardStr;
+    g.hands[pIndex].splice(i, 1);
 
-    let nextTurn = fresh.players[oIndex];
+    let nextTurn = g.players[oIndex];
 
-    // RULES
-    if (card.number === 2) {
-      fresh.pendingPick += 2;
-      fresh.history.push("Pick 2 🔥");
-      pushAlert("Pick 2!");
-    }
+    if (current.number === 2) g.pendingPick += 2;
+    else if (current.number === 8 || current.number === 1) nextTurn = userId;
+    else if (current.number === 14) g.pendingPick += 1;
 
-    else if (card.number === 8) {
-      nextTurn = userId;
-      fresh.history.push("Suspended ⛔");
-    }
-
-    else if (card.number === 1) {
-      nextTurn = userId;
-      fresh.history.push("Hold On 🔁");
-    }
-
-    else if (card.number === 14) {
-      fresh.pendingPick += 1;
-      fresh.history.push("General Market 🛒");
-    }
-
-    else {
-      fresh.history.push(`${card.shape}${card.number}`);
-    }
-
-    // WIN
-    if (fresh.hands[pIndex].length === 0) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(fresh),
-          discard: cardStr,
-          status: "finished",
-          winnerId: userId,
-        }
-      );
+    if (g.hands[pIndex].length === 0) {
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g),
+        discard: card,
+        status: "finished",
+        winnerId: userId
+      });
       return;
     }
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(fresh),
-        discard: cardStr,
-        turn: nextTurn,
-      }
-    );
-
-    playSound("play");
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      discard: card,
+      turn: nextTurn
+    });
   }
 
   // =========================
   // DRAW
   // =========================
   async function drawCard() {
-    if (game.turn !== userId) return;
-
-    const fresh = parse(
-      await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      )
+    const g = parseGame(
+      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
     );
 
-    let count = fresh.pendingPick || 1;
+    if (g.turn !== userId) return;
+
+    let count = g.pendingPick || 1;
 
     for (let i = 0; i < count; i++) {
-      if (!fresh.deck.length) break;
-      fresh.hands[pIndex].push(fresh.deck.pop());
+      if (!g.deck.length) break;
+      g.hands[pIndex].push(g.deck.pop());
     }
 
-    fresh.pendingPick = 0;
-    fresh.history.push(`Drew ${count}`);
+    g.pendingPick = 0;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(fresh),
-        turn: fresh.players[oIndex],
-      }
-    );
-
-    playSound("draw");
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      turn: g.players[oIndex]
+    });
   }
 
   // =========================
@@ -291,45 +244,37 @@ export default function WhotGame({ gameId, goHome }) {
       <div style={styles.box}>
         <h2>WHOT GAME</h2>
 
-        <div style={styles.alertBox}>
-          {alerts.map((a, i) => <div key={i}>{a}</div>)}
-        </div>
-
-        {/* OPPONENT */}
+        {/* Opponent */}
         <div>
-          Opponent Cards: {game.hands[oIndex].length}
-          <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
-            {game.hands[oIndex].map((_, i) => (
-              <div key={i} style={styles.cardBack}></div>
+          Opponent: {opponentHand.length} cards
+          <div style={styles.row}>
+            {opponentHand.map((_, i) => (
+              <div key={i} style={styles.back}></div>
             ))}
           </div>
         </div>
 
-        {/* CENTER */}
-        <div style={styles.center}>
-          <img src={drawCard(top)} style={{ width: 70 }} />
-          <button onClick={drawCard} style={styles.marketBtn}>
+        {/* Center */}
+        <div style={styles.centerRow}>
+          {top && <img src={drawCard(top)} style={{ width: 60 }} />}
+          <button onClick={drawCard}>
             MARKET ({game.deck.length})
           </button>
         </div>
 
-        {/* PLAYER */}
-        <div>
-          {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(decode(c))}
-              style={{ width: 70 }}
-              onClick={() => playCard(i)}
-            />
-          ))}
-        </div>
-
-        {/* HISTORY */}
-        <div style={styles.history}>
-          {game.history.slice().reverse().map((h, i) => (
-            <div key={i}>• {h}</div>
-          ))}
+        {/* Player */}
+        <div style={styles.row}>
+          {hand.map((c, i) => {
+            const d = decodeCard(c);
+            return (
+              <img
+                key={i}
+                src={drawCard(d)}
+                onClick={() => playCard(i)}
+                style={{ width: 60 }}
+              />
+            );
+          })}
         </div>
 
         <button onClick={goHome}>Exit</button>
@@ -347,41 +292,35 @@ const styles = {
     background: "green",
     display: "flex",
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: "center"
   },
   box: {
     width: 420,
     padding: 10,
-    background: "#00000066",
-    color: "#fff",
+    background: "#00000088",
+    color: "#fff"
+  },
+  row: {
+    display: "flex",
+    gap: 4,
+    justifyContent: "center"
+  },
+  back: {
+    width: 30,
+    height: 45,
+    background: "#222",
+    border: "2px solid gold"
+  },
+  centerRow: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+    margin: "10px 0"
   },
   center: {
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    gap: 10,
-    margin: "10px 0",
-  },
-  marketBtn: {
-    background: "gold",
-    border: "none",
-    padding: 10,
-    fontWeight: "bold",
-    borderRadius: 8,
-  },
-  cardBack: {
-    width: 30,
-    height: 45,
-    background: "#222",
-    border: "2px solid gold",
-  },
-  alertBox: {
-    background: "#000000aa",
-    color: "yellow",
-    padding: 6,
-  },
-  history: {
-    fontSize: 12,
-    marginTop: 10,
-  },
+    height: "100vh"
+  }
 };
