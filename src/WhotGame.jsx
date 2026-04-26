@@ -282,6 +282,15 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   async function drawMarket() {
   if (processing) return;
+
+  const currentGame = gameRef.current;
+  if (!currentGame) return;
+
+  if (currentGame.turn !== userId) {
+    alert("⏳ Not your turn");
+    return;
+  }
+
   setProcessing(true);
 
   try {
@@ -293,17 +302,19 @@ export default function WhotGame({ gameId, goHome }) {
 
     const g = parseGame(fresh);
 
-    // ✅ FIX: recalc index
-    const myIndex = g.players.indexOf(userId);
-    const oppIndex = myIndex === 0 ? 1 : 0;
-
-    if (g.turn !== userId) return;
+    const myIdx = g.players.indexOf(userId);
+    const oppIdx = myIdx === 0 ? 1 : 0;
 
     let count = g.pendingPick || 1;
 
+    if (!g.deck.length) {
+      alert("No cards in market");
+      return;
+    }
+
     for (let i = 0; i < count; i++) {
       if (!g.deck.length) break;
-      g.hands[myIndex].push(g.deck.pop());
+      g.hands[myIdx].push(g.deck.pop());
     }
 
     g.pendingPick = 0;
@@ -314,7 +325,7 @@ export default function WhotGame({ gameId, goHome }) {
       gameId,
       {
         ...encodeGame(g),
-        turn: g.players[oppIndex]
+        turn: g.players[oppIdx]
       }
     );
 
