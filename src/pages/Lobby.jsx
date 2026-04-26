@@ -17,9 +17,34 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
+// CREATE DECK
+// =========================
+function createDeck() {
+  const shapes = ["c", "t", "s", "r", "x"];
+  const deck = [];
+
+  for (let s of shapes) {
+    for (let i = 1; i <= 13; i++) {
+      deck.push(s + i);
+    }
+  }
+
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+// =========================
 // CREATE GAME (FIXED)
 // =========================
 async function createGame(match, opponentId) {
+  let deck = createDeck();
+
+  const hands = [
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ];
+
+  const topCard = deck.pop();
+
   const game = await databases.createDocument(
     DATABASE_ID,
     GAME_COLLECTION,
@@ -27,18 +52,16 @@ async function createGame(match, opponentId) {
     {
       matchId: match.$id,
 
-      // ✅ FIX: store as STRING (NOT ARRAY)
-      players: `${match.hostId},${opponentId}`,
+      // ✅ FIX: store as JSON string
+      players: JSON.stringify([match.hostId, opponentId]),
 
-      turn: opponentId, // opponent starts
+      hands: hands.map(h => h.join(",")).join("|"),
+      deck: deck.join(","),
+      discard: topCard,
+
+      turn: opponentId,
       status: "running",
-
-      // ✅ SAFE DEFAULTS
       round: "1",
-      discard: "c1",
-      deck: "",
-      hands: "",
-
       winnerId: "",
       turnStartTime: new Date().toISOString()
     }
@@ -58,9 +81,6 @@ export default function Lobby({ goGame, back }) {
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // =========================
-  // INIT
-  // =========================
   useEffect(() => {
     init();
   }, []);
@@ -70,29 +90,20 @@ export default function Lobby({ goGame, back }) {
       const u = await account.get();
       setUser(u);
 
-      // wallet
-      try {
-        const w = await databases.listDocuments(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          [Query.equal("userId", u.$id)]
-        );
+      const w = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", u.$id)]
+      );
 
-        if (w.documents.length) {
-          setWallet(w.documents[0]);
-        }
-      } catch {}
+      if (w.documents.length) setWallet(w.documents[0]);
 
       refreshAll(u.$id);
-
     } catch (err) {
-      console.error("INIT ERROR:", err.message);
+      console.error(err);
     }
   }
 
-  // =========================
-  // REALTIME
-  // =========================
   useEffect(() => {
     if (!user) return;
 
@@ -111,56 +122,32 @@ export default function Lobby({ goGame, back }) {
     ]);
   }
 
-  // =========================
-  // LOAD MATCHES
-  // =========================
   async function loadMatches() {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        [
-          Query.equal("status", "waiting"),
-          Query.orderDesc("$createdAt")
-        ]
-      );
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [Query.equal("status", "waiting")]
+    );
 
-      setMatches(res.documents);
-    } catch (err) {
-      console.warn("loadMatches:", err.message);
-    }
+    setMatches(res.documents);
   }
 
-  // =========================
-  // ACTIVE MATCHES
-  // =========================
   async function loadActiveMatches(userId) {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        [Query.notEqual("status", "finished")]
-      );
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [Query.notEqual("status", "finished")]
+    );
 
-      const myMatches = res.documents
-        .filter(
-          (m) =>
-            m.hostId === userId ||
-            m.opponentId === userId
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.$updatedAt) - new Date(a.$updatedAt)
-        );
-
-      setActiveMatches(myMatches);
-    } catch (err) {
-      console.warn("loadActive:", err.message);
-    }
+    setActiveMatches(
+      res.documents.filter(
+        m => m.hostId === userId || m.opponentId === userId
+      )
+    );
   }
 
   // =========================
-  // JOIN MATCH (FIXED)
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loading) return;
@@ -174,17 +161,11 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      if (fresh.opponentId) {
-        alert("Match already taken");
-        return;
-      }
+      if (fresh.opponentId) return alert("Taken");
 
-      if ((wallet?.balance || 0) < fresh.stake) {
-        alert("Insufficient balance");
-        return;
-      }
+      if ((wallet?.balance || 0) < fresh.stake)
+        return alert("Insufficient");
 
-      // lock funds
       await lockFunds(user.$id, fresh.stake);
 
       const updated = await databases.updateDocument(
@@ -200,14 +181,10 @@ export default function Lobby({ goGame, back }) {
 
       let gameId = updated.gameId;
 
-      // =========================
-      // CREATE GAME (SAFE)
-      // =========================
       if (!gameId) {
         const game = await createGame(updated, user.$id);
         gameId = game.$id;
 
-        // ✅ IMPORTANT FIX
         await databases.updateDocument(
           DATABASE_ID,
           MATCH_COLLECTION,
@@ -216,19 +193,14 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
-      // ✅ GO GAME IMMEDIATELY
       goGame(gameId, updated.stake);
 
     } catch (err) {
       alert(err.message);
-
-      try {
-        await unlockFunds(user.$id, match.stake);
-      } catch {}
-
-    } finally {
-      setLoading(false);
+      await unlockFunds(user.$id, match.stake);
     }
+
+    setLoading(false);
   }
 
   // =========================
@@ -237,13 +209,10 @@ export default function Lobby({ goGame, back }) {
   async function createMatch() {
     const amount = Number(stake);
 
-    if (!amount || amount < 50) {
-      return alert("Minimum ₦50");
-    }
+    if (!amount || amount < 50) return alert("Min ₦50");
 
-    if ((wallet?.balance || 0) < amount) {
-      return alert("Insufficient balance");
-    }
+    if ((wallet?.balance || 0) < amount)
+      return alert("Insufficient");
 
     try {
       setLoading(true);
@@ -260,187 +229,53 @@ export default function Lobby({ goGame, back }) {
           stake: amount,
           pot: amount,
           status: "waiting",
-          gameId: "",
-          createdAt: new Date().toISOString()
+          gameId: ""
         }
       );
 
     } catch (err) {
       alert(err.message);
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
-    <div style={styles.container}>
-      <h1 style={styles.title}>🎮 Game Lobby</h1>
+    <div style={{ padding: 20 }}>
+      <h2>Lobby</h2>
 
-      {loading && <p style={styles.loading}>⚡ Processing...</p>}
-
-      {/* ACTIVE MATCHES */}
-      {activeMatches.length > 0 && (
-        <>
-          <h2 style={styles.section}>🔥 Your Matches</h2>
-
-          {activeMatches.map((m) => {
-            const waiting =
-              m.status === "waiting" &&
-              m.hostId === user?.$id;
-
-            return (
-              <div key={m.$id} style={styles.activeCard}>
-                <div>
-                  <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-                  <p>Status: {m.status}</p>
-                </div>
-
-                <button
-                  style={styles.resumeBtn}
-                  onClick={() => {
-                    if (!m.gameId) {
-                      alert("Game still initializing...");
-                      return;
-                    }
-
-                    // ✅ ALWAYS ENTER GAME
-                    goGame(m.gameId, m.stake);
-                  }}
-                >
-                  {waiting ? "⏳ Waiting..." : "▶ Resume"}
-                </button>
-              </div>
-            );
-          })}
-        </>
-      )}
-
-      {/* AVAILABLE */}
-      <h2 style={styles.section}>🎯 Available Matches</h2>
-
-      {matches.length === 0 && (
-        <p style={{ opacity: 0.6 }}>
-          No matches available
-        </p>
-      )}
-
-      {matches.map((m) => (
-        <div key={m.$id} style={styles.card}>
-          <span>
-            ₦{Number(m.stake).toLocaleString()}
-          </span>
-
+      {activeMatches.map(m => (
+        <div key={m.$id}>
+          ₦{m.stake}
           <button
-            style={styles.joinBtn}
-            onClick={() => joinMatch(m)}
-            disabled={loading}
+            onClick={() => {
+              if (!m.gameId) return alert("Initializing...");
+              goGame(m.gameId, m.stake);
+            }}
           >
+            Resume
+          </button>
+        </div>
+      ))}
+
+      <h3>Available</h3>
+
+      {matches.map(m => (
+        <div key={m.$id}>
+          ₦{m.stake}
+          <button onClick={() => joinMatch(m)}>
             Join
           </button>
         </div>
       ))}
 
-      {/* CREATE */}
-      <div style={styles.createBox}>
-        <input
-          type="number"
-          placeholder="Enter stake ₦"
-          value={stake}
-          onChange={(e) => setStake(e.target.value)}
-          style={styles.input}
-        />
+      <input
+        value={stake}
+        onChange={e => setStake(e.target.value)}
+      />
 
-        <button
-          style={styles.createBtn}
-          onClick={createMatch}
-          disabled={loading}
-        >
-          Create Match
-        </button>
-      </div>
-
-      {/* BACK */}
-      <button style={styles.back} onClick={back}>
-        ← Back
-      </button>
+      <button onClick={createMatch}>Create</button>
+      <button onClick={back}>Back</button>
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  container: {
-    padding: 20,
-    minHeight: "100vh",
-    background: "linear-gradient(135deg,#020617,#0f172a)",
-    color: "#fff"
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold"
-  },
-  section: {
-    marginTop: 25,
-    color: "#facc15"
-  },
-  loading: {
-    color: "#facc15"
-  },
-  card: {
-    background: "#111827",
-    padding: 15,
-    margin: "10px 0",
-    borderRadius: 12,
-    display: "flex",
-    justifyContent: "space-between"
-  },
-  activeCard: {
-    background: "#1e293b",
-    padding: 15,
-    marginBottom: 10,
-    borderRadius: 12,
-    display: "flex",
-    justifyContent: "space-between"
-  },
-  joinBtn: {
-    background: "#facc15",
-    padding: "8px 14px",
-    borderRadius: 8,
-    border: "none"
-  },
-  resumeBtn: {
-    background: "#22c55e",
-    padding: "8px 14px",
-    borderRadius: 8,
-    border: "none",
-    color: "#fff"
-  },
-  createBox: {
-    marginTop: 25
-  },
-  input: {
-    width: "100%",
-    padding: 12,
-    marginBottom: 10
-  },
-  createBtn: {
-    width: "100%",
-    padding: 12,
-    background: "#3b82f6",
-    border: "none",
-    borderRadius: 8,
-    color: "#fff"
-  },
-  back: {
-    marginTop: 25,
-    padding: 10,
-    background: "#475569",
-    border: "none",
-    borderRadius: 8
-  }
-};
