@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import {
   account,
@@ -14,11 +11,6 @@ import {
 
 import { lockFunds, unlockFunds } from "../lib/wallet";
 
-const GAME_COLLECTION = "games";
-
-// =========================
-// COMPONENT
-// =========================
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
@@ -47,15 +39,14 @@ export default function Lobby({ goGame, back }) {
 
       if (w.documents.length) setWallet(w.documents[0]);
 
-      await loadMatches();
-      await loadActiveMatches(u.$id);
+      await refreshAll(u.$id);
     } catch (err) {
       console.error("INIT ERROR:", err);
     }
   }
 
   // =========================
-  // REALTIME FIX 🔥
+  // REALTIME 🔥
   // =========================
   useEffect(() => {
     if (!user) return;
@@ -63,16 +54,22 @@ export default function Lobby({ goGame, back }) {
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
       () => {
-        loadMatches();
-        loadActiveMatches(user.$id);
+        refreshAll(user.$id);
       }
     );
 
     return () => unsub();
   }, [user]);
 
+  async function refreshAll(userId) {
+    await Promise.all([
+      loadMatches(),
+      loadActiveMatches(userId)
+    ]);
+  }
+
   // =========================
-  // LOAD WAITING MATCHES
+  // AVAILABLE MATCHES
   // =========================
   async function loadMatches() {
     try {
@@ -92,8 +89,8 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD ACTIVE MATCHES (FIXED)
-// =========================
+  // ACTIVE MATCHES (FIXED 🔥)
+  // =========================
   async function loadActiveMatches(userId) {
     try {
       const res = await databases.listDocuments(
@@ -104,12 +101,17 @@ export default function Lobby({ goGame, back }) {
         ]
       );
 
-      // 🔥 FILTER MANUALLY (handles "", null, etc)
-      const myMatches = res.documents.filter(
-        (m) =>
-          m.hostId === userId ||
-          m.opponentId === userId
-      );
+      const myMatches = res.documents
+        .filter(
+          (m) =>
+            m.hostId === userId ||
+            m.opponentId === userId
+        )
+        // 🔥 IMPORTANT: latest first
+        .sort(
+          (a, b) =>
+            new Date(b.$updatedAt) - new Date(a.$updatedAt)
+        );
 
       setActiveMatches(myMatches);
     } catch (err) {
@@ -157,9 +159,6 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // refresh UI instantly
-      await loadActiveMatches(user.$id);
-
       goGame(fresh.$id, fresh.stake);
 
     } catch (err) {
@@ -182,7 +181,7 @@ export default function Lobby({ goGame, back }) {
     const amount = Number(stake);
 
     if (!amount || amount < 50) {
-      return alert("Minimum stake ₦50");
+      return alert("Minimum ₦50");
     }
 
     if ((wallet?.balance || 0) < amount) {
@@ -200,15 +199,13 @@ export default function Lobby({ goGame, back }) {
         ID.unique(),
         {
           hostId: user.$id,
-          opponentId: null, // ✅ FIXED
+          opponentId: null,
           stake: amount,
           pot: amount,
           status: "waiting",
           createdAt: new Date().toISOString()
         }
       );
-
-      await loadActiveMatches(user.$id);
 
       goGame(match.$id, amount);
 
@@ -227,25 +224,29 @@ export default function Lobby({ goGame, back }) {
 
       {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
-      {/* ACTIVE MATCHES */}
+      {/* 🔥 ACTIVE MATCHES */}
       {activeMatches.length > 0 && (
         <>
           <h2 style={styles.section}>🔥 Your Matches</h2>
 
           {activeMatches.map((m) => {
-            const isWaiting =
-              m.status === "waiting" && m.hostId === user?.$id;
+            const isHost = m.hostId === user?.$id;
+            const waiting = m.status === "waiting";
 
             return (
               <div key={m.$id} style={styles.activeCard}>
-                <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-                <p>Status: {m.status}</p>
+                <div>
+                  <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
+                  <p>Status: {m.status}</p>
+                </div>
 
                 <button
                   style={styles.resumeBtn}
                   onClick={() => goGame(m.$id, m.stake)}
                 >
-                  {isWaiting ? "⏳ Waiting..." : "▶ Resume Game"}
+                  {waiting && isHost
+                    ? "⏳ Waiting..."
+                    : "▶ Resume"}
                 </button>
               </div>
             );
@@ -253,14 +254,16 @@ export default function Lobby({ goGame, back }) {
         </>
       )}
 
-      {/* AVAILABLE MATCHES */}
+      {/* AVAILABLE */}
       <h2 style={styles.section}>🎯 Available Matches</h2>
 
-      {matches.length === 0 && <p>No matches available</p>}
+      {matches.length === 0 && (
+        <p style={{ opacity: 0.6 }}>No matches available</p>
+      )}
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
-          <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
+          <span>₦{Number(m.stake).toLocaleString()}</span>
 
           <button
             style={styles.joinBtn}
@@ -291,6 +294,7 @@ export default function Lobby({ goGame, back }) {
         </button>
       </div>
 
+      {/* BACK */}
       <button style={styles.back} onClick={back}>
         ← Back
       </button>
@@ -299,73 +303,97 @@ export default function Lobby({ goGame, back }) {
 }
 
 // =========================
-// STYLES
+// STYLES (UPGRADED UI 🎨)
 // =========================
 const styles = {
   container: {
     padding: 20,
-    background: "linear-gradient(135deg,#0f172a,#020617)",
     minHeight: "100vh",
+    background: "linear-gradient(135deg,#020617,#0f172a)",
     color: "#fff"
   },
+
   title: {
-    fontSize: 28
+    fontSize: 28,
+    fontWeight: "bold"
   },
+
   section: {
-    marginTop: 20,
-    color: "gold"
+    marginTop: 25,
+    color: "#facc15"
   },
+
   loading: {
-    color: "gold"
+    color: "#facc15"
   },
+
   card: {
     background: "#111827",
     padding: 15,
     margin: "10px 0",
-    borderRadius: 10,
+    borderRadius: 12,
     display: "flex",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    alignItems: "center"
   },
+
   activeCard: {
     background: "#1e293b",
     padding: 15,
     marginBottom: 10,
-    borderRadius: 10
+    borderRadius: 12,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    border: "1px solid #334155"
   },
+
   joinBtn: {
-    background: "gold",
-    padding: 10,
+    background: "#facc15",
+    padding: "8px 14px",
+    borderRadius: 8,
     border: "none",
-    borderRadius: 6
+    cursor: "pointer"
   },
+
   resumeBtn: {
     background: "#22c55e",
-    padding: 10,
+    padding: "8px 14px",
+    borderRadius: 8,
     border: "none",
-    borderRadius: 6,
-    marginTop: 5
+    color: "#fff",
+    cursor: "pointer"
   },
+
   createBox: {
-    marginTop: 20
+    marginTop: 25
   },
+
   input: {
     width: "100%",
-    padding: 10,
-    marginBottom: 10
+    padding: 12,
+    marginBottom: 10,
+    borderRadius: 8,
+    border: "none"
   },
+
   createBtn: {
     width: "100%",
     padding: 12,
     background: "#3b82f6",
     border: "none",
-    borderRadius: 6,
-    color: "#fff"
+    borderRadius: 8,
+    color: "#fff",
+    fontWeight: "bold",
+    cursor: "pointer"
   },
+
   back: {
-    marginTop: 20,
+    marginTop: 25,
     padding: 10,
-    background: "gray",
+    background: "#475569",
     border: "none",
-    borderRadius: 6
+    borderRadius: 8,
+    cursor: "pointer"
   }
 };
