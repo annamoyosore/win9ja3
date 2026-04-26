@@ -17,7 +17,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 
 // =========================
-// CREATE GAME (SAFE)
+// CREATE GAME (FIXED)
 // =========================
 async function createGame(match, opponentId) {
   const game = await databases.createDocument(
@@ -27,15 +27,14 @@ async function createGame(match, opponentId) {
     {
       matchId: match.$id,
 
-      // 🔥 STRING (NOT ARRAY)
+      // ✅ FIX: store as STRING (NOT ARRAY)
       players: `${match.hostId},${opponentId}`,
 
       turn: opponentId, // opponent starts
       status: "running",
 
-      // 🔥 MUST BE STRING (Appwrite limit fix)
+      // ✅ SAFE DEFAULTS
       round: "1",
-
       discard: "c1",
       deck: "",
       hands: "",
@@ -45,29 +44,7 @@ async function createGame(match, opponentId) {
     }
   );
 
-  console.log("✅ GAME CREATED:", game.$id);
   return game;
-}
-
-// =========================
-// WAIT FOR GAME ID
-// =========================
-async function waitForGameId(matchId) {
-  for (let i = 0; i < 10; i++) {
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      matchId
-    );
-
-    if (fresh.gameId) {
-      return fresh.gameId;
-    }
-
-    await new Promise(r => setTimeout(r, 300));
-  }
-
-  throw new Error("Game creation timeout");
 }
 
 // =========================
@@ -93,13 +70,18 @@ export default function Lobby({ goGame, back }) {
       const u = await account.get();
       setUser(u);
 
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
+      // wallet
+      try {
+        const w = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", u.$id)]
+        );
 
-      if (w.documents.length) setWallet(w.documents[0]);
+        if (w.documents.length) {
+          setWallet(w.documents[0]);
+        }
+      } catch {}
 
       refreshAll(u.$id);
 
@@ -145,7 +127,7 @@ export default function Lobby({ goGame, back }) {
 
       setMatches(res.documents);
     } catch (err) {
-      console.warn(err.message);
+      console.warn("loadMatches:", err.message);
     }
   }
 
@@ -173,13 +155,13 @@ export default function Lobby({ goGame, back }) {
 
       setActiveMatches(myMatches);
     } catch (err) {
-      console.warn(err.message);
+      console.warn("loadActive:", err.message);
     }
   }
 
   // =========================
   // JOIN MATCH (FIXED)
-// =========================
+  // =========================
   async function joinMatch(match) {
     if (loading) return;
 
@@ -202,6 +184,7 @@ export default function Lobby({ goGame, back }) {
         return;
       }
 
+      // lock funds
       await lockFunds(user.$id, fresh.stake);
 
       const updated = await databases.updateDocument(
@@ -217,11 +200,14 @@ export default function Lobby({ goGame, back }) {
 
       let gameId = updated.gameId;
 
-      // 🔥 CREATE GAME IF NOT EXISTS
+      // =========================
+      // CREATE GAME (SAFE)
+      // =========================
       if (!gameId) {
         const game = await createGame(updated, user.$id);
         gameId = game.$id;
 
+        // ✅ IMPORTANT FIX
         await databases.updateDocument(
           DATABASE_ID,
           MATCH_COLLECTION,
@@ -230,9 +216,7 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
-      // 🔥 WAIT UNTIL SAVED
-      gameId = await waitForGameId(updated.$id);
-
+      // ✅ GO GAME IMMEDIATELY
       goGame(gameId, updated.stake);
 
     } catch (err) {
@@ -244,42 +228,6 @@ export default function Lobby({ goGame, back }) {
 
     } finally {
       setLoading(false);
-    }
-  }
-
-  // =========================
-  // RESUME MATCH (FIXED)
-// =========================
-  async function resumeMatch(m) {
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        m.$id
-      );
-
-      // 🔥 AUTO FIX IF GAME MISSING
-      if (!fresh.gameId && fresh.opponentId) {
-        const game = await createGame(fresh, fresh.opponentId);
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          fresh.$id,
-          { gameId: game.$id }
-        );
-
-        return goGame(game.$id, fresh.stake);
-      }
-
-      if (fresh.gameId) {
-        return goGame(fresh.gameId, fresh.stake);
-      }
-
-      alert("Waiting for opponent...");
-
-    } catch (err) {
-      alert(err.message);
     }
   }
 
@@ -352,7 +300,15 @@ export default function Lobby({ goGame, back }) {
 
                 <button
                   style={styles.resumeBtn}
-                  onClick={() => resumeMatch(m)}
+                  onClick={() => {
+                    if (!m.gameId) {
+                      alert("Game still initializing...");
+                      return;
+                    }
+
+                    // ✅ ALWAYS ENTER GAME
+                    goGame(m.gameId, m.stake);
+                  }}
                 >
                   {waiting ? "⏳ Waiting..." : "▶ Resume"}
                 </button>
