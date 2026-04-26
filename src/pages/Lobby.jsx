@@ -11,115 +11,122 @@ import {
 
 import { lockFunds, unlockFunds } from "../lib/wallet";
 
-export default function Lobby({ goMatch, back }) {
+const GAME_COLLECTION = "games";
+
+// =========================
+// CREATE DECK
+// =========================
+function createDeck() {
+  const shapes = ["circle", "triangle", "square", "star", "cross"];
+  const deck = [];
+
+  for (const shape of shapes) {
+    for (let i = 1; i <= 13; i++) {
+      if (i === 6 || i === 9) continue;
+      deck.push({ shape, number: i });
+    }
+    deck.push({ shape, number: 14 });
+  }
+
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+// =========================
+// CREATE GAME
+// =========================
+async function createGame(match) {
+  const deck = createDeck();
+
+  return databases.createDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    match.$id,
+    {
+      players: [match.hostId, match.opponentId],
+      hands: JSON.stringify([deck.splice(0, 6), deck.splice(0, 6)]),
+      deck: JSON.stringify(deck),
+      discard: JSON.stringify([deck.pop()]),
+      scores: JSON.stringify({ p1: 0, p2: 0 }),
+      round: 1,
+      turn: match.hostId,
+      status: "running",
+      winnerId: "",
+      turnStartTime: new Date().toISOString()
+    }
+  );
+}
+
+// =========================
+// WAIT FOR GAME
+// =========================
+async function waitForGame(matchId) {
+  let ready = false;
+
+  while (!ready) {
+    try {
+      await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        matchId
+      );
+      ready = true;
+    } catch {
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+}
+
+// =========================
+// COMPONENT
+// =========================
+export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
-  const [activeMatch, setActiveMatch] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     init();
   }, []);
 
   async function init() {
-    try {
-      const u = await account.get();
-      setUser(u);
+    const u = await account.get();
+    setUser(u);
 
-      // wallet
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id)]
+    );
 
-      if (w.documents.length) {
-        setWallet(w.documents[0]);
-      }
+    if (w.documents.length) setWallet(w.documents[0]);
 
-      await checkActiveMatch(u.$id);
-      await loadMatches();
-
-    } catch (err) {
-      console.error("INIT ERROR:", err);
-    }
-  }
-
-  // ✅ FIXED ACTIVE MATCH CHECK
-  async function checkActiveMatch(userId) {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        [
-          Query.limit(20),
-          Query.orderDesc("$createdAt")
-        ]
-      );
-
-      // ✅ FILTER MANUALLY (VERY IMPORTANT)
-      const active = res.documents.find(
-        (m) =>
-          (m.hostId === userId || m.opponentId === userId) &&
-          m.status !== "finished"
-      );
-
-      if (active) {
-        setActiveMatch(active);
-      }
-
-    } catch (err) {
-      console.error("ACTIVE MATCH ERROR:", err);
-    }
+    loadMatches();
   }
 
   async function loadMatches() {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        [
-          Query.equal("status", "waiting"),
-          Query.orderDesc("$createdAt")
-        ]
-      );
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [Query.equal("status", "waiting")]
+    );
 
-      setMatches(res.documents);
-    } catch (err) {
-      console.error("LOAD MATCHES ERROR:", err);
-    }
+    setMatches(res.documents);
   }
 
+  // =========================
+  // JOIN MATCH → GAME
+  // =========================
   async function joinMatch(match) {
     try {
-      if (!user) return;
-
-      if (match.hostId === user.$id) {
-        alert("You cannot join your own match");
-        return;
-      }
-
-      if (match.opponentId) {
-        alert("Match already full");
-        return;
-      }
-
-      if ((wallet?.balance || 0) < match.stake) {
-        alert("Insufficient balance");
-        return;
-      }
+      setLoading(true);
 
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id
       );
-
-      if (fresh.opponentId) {
-        alert("Someone already joined");
-        return;
-      }
 
       await lockFunds(user.$id, fresh.stake);
 
@@ -134,29 +141,41 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
-      goMatch(fresh.$id, fresh.stake);
+      // create game (or skip if exists)
+      try {
+        await createGame({
+          ...fresh,
+          opponentId: user.$id
+        });
+      } catch {}
+
+      await waitForGame(fresh.$id);
+
+      goGame(fresh.$id, fresh.stake);
 
     } catch (err) {
-      console.error(err);
-
-      try {
-        await unlockFunds(user.$id, Number(match?.stake || 0));
-      } catch {}
+      alert(err.message);
+      await unlockFunds(user.$id, match.stake);
+      setLoading(false);
     }
   }
 
+  // =========================
+  // CREATE MATCH → GAME
+  // =========================
   async function createMatch() {
     const amount = Number(stake);
 
-    if (!amount || amount <= 0) return alert("Enter valid stake");
-    if (amount < 50) return alert("Minimum stake is ₦50");
+    if (amount < 50) return alert("Min ₦50");
     if ((wallet?.balance || 0) < amount)
       return alert("Insufficient balance");
 
-    let match = null;
-
     try {
-      match = await databases.createDocument(
+      setLoading(true);
+
+      await lockFunds(user.$id, amount);
+
+      const match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
@@ -170,113 +189,41 @@ export default function Lobby({ goMatch, back }) {
         }
       );
 
-      await lockFunds(user.$id, amount);
+      // 🔥 wait for opponent automatically (optional skip)
 
-      goMatch(match.$id, amount);
+      goGame(match.$id, amount);
 
     } catch (err) {
-      console.error(err);
-
-      if (match?.$id) {
-        await databases.deleteDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          match.$id
-        );
-      }
+      alert(err.message);
+      setLoading(false);
     }
   }
 
+  // =========================
+  // UI
+  // =========================
   return (
-    <div style={styles.container}>
+    <div style={{ padding: 20, color: "white" }}>
       <h2>🎮 Lobby</h2>
 
-      {/* ✅ SHOW RESUME BUTTON */}
-      {activeMatch && (
-        <div style={styles.activeBox}>
-          <p>⚡ Ongoing Match Found</p>
-          <button
-            style={styles.btn}
-            onClick={() =>
-              goMatch(activeMatch.$id, activeMatch.stake)
-            }
-          >
-            ▶ Resume Game
-          </button>
-        </div>
-      )}
-
-      <h3>Available Matches</h3>
-
-      {matches.length === 0 && <p>No active matches</p>}
+      {loading && <p>⚡ Matching...</p>}
 
       {matches.map((m) => (
-        <div key={m.$id} style={styles.card}>
-          <p>💰 ₦{Number(m.stake).toLocaleString()}</p>
-          <button onClick={() => joinMatch(m)} style={styles.btn}>
-            Join
-          </button>
+        <div key={m.$id}>
+          ₦{m.stake}
+          <button onClick={() => joinMatch(m)}>Join</button>
         </div>
       ))}
 
-      <h3>Create Match</h3>
-
       <input
-        type="number"
-        placeholder="Enter stake ₦"
         value={stake}
         onChange={(e) => setStake(e.target.value)}
-        style={styles.input}
+        placeholder="Stake"
       />
 
-      <button onClick={createMatch} style={styles.btn}>
-        Create Match
-      </button>
+      <button onClick={createMatch}>Create Match</button>
 
-      <button onClick={back} style={styles.back}>
-        ← Back
-      </button>
+      <button onClick={back}>Back</button>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    padding: 20,
-    background: "#0f172a",
-    color: "white",
-    minHeight: "100vh"
-  },
-  activeBox: {
-    background: "#1e293b",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20
-  },
-  card: {
-    background: "#111827",
-    padding: 15,
-    margin: "10px 0",
-    borderRadius: 10
-  },
-  btn: {
-    padding: 10,
-    background: "gold",
-    border: "none",
-    borderRadius: 6,
-    cursor: "pointer"
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    marginTop: 10,
-    borderRadius: 6
-  },
-  back: {
-    marginTop: 20,
-    padding: 10,
-    background: "gray",
-    border: "none",
-    borderRadius: 6
-  }
-};
