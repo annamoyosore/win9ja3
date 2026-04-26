@@ -43,7 +43,7 @@ async function createGame(match) {
   const game = await databases.createDocument(
     DATABASE_ID,
     GAME_COLLECTION,
-    ID.unique(), // 🔥 NEW ID (not matchId)
+    ID.unique(),
     {
       matchId: match.$id,
       players: [match.hostId, match.opponentId],
@@ -53,8 +53,6 @@ async function createGame(match) {
       ]),
       deck: JSON.stringify(deck),
       discard: JSON.stringify([deck.pop()]),
-      scores: JSON.stringify({ p1: 0, p2: 0 }),
-      round: 1,
       turn: match.hostId,
       status: "running",
       winnerId: "",
@@ -182,7 +180,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN MATCH 🔥
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loading) return;
@@ -223,24 +221,17 @@ export default function Lobby({ goGame, back }) {
 
       let gameId = updated.gameId;
 
-      // =========================
-      // CREATE GAME IF NEEDED
-      // =========================
+      // CREATE GAME ONCE
       if (!gameId) {
-        try {
-          const game = await createGame(updated);
-          gameId = game.$id;
+        const game = await createGame(updated);
+        gameId = game.$id;
 
-          await databases.updateDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            updated.$id,
-            { gameId }
-          );
-
-        } catch (err) {
-          console.warn("Game already exists");
-        }
+        await databases.updateDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          updated.$id,
+          { gameId }
+        );
       }
 
       await waitForGame(gameId);
@@ -279,7 +270,7 @@ export default function Lobby({ goGame, back }) {
 
       await lockFunds(user.$id, amount);
 
-      const match = await databases.createDocument(
+      await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
@@ -289,12 +280,13 @@ export default function Lobby({ goGame, back }) {
           stake: amount,
           pot: amount,
           status: "waiting",
-          gameId: "", // 🔥 NEW FIELD
+          gameId: "",
           createdAt: new Date().toISOString()
         }
       );
 
-      goGame(match.$id, amount); // waiting screen
+      alert("Match created. Waiting for opponent...");
+      setLoading(false);
 
     } catch (err) {
       alert(err.message);
@@ -330,9 +322,13 @@ export default function Lobby({ goGame, back }) {
 
                 <button
                   style={styles.resumeBtn}
-                  onClick={() =>
-                    goGame(m.gameId || m.$id, m.stake)
-                  }
+                  onClick={() => {
+                    if (!m.gameId) {
+                      alert("Game not started yet");
+                      return;
+                    }
+                    goGame(m.gameId, m.stake);
+                  }}
                 >
                   {waiting ? "⏳ Waiting..." : "▶ Resume"}
                 </button>
@@ -346,16 +342,12 @@ export default function Lobby({ goGame, back }) {
       <h2 style={styles.section}>🎯 Available Matches</h2>
 
       {matches.length === 0 && (
-        <p style={{ opacity: 0.6 }}>
-          No matches available
-        </p>
+        <p style={{ opacity: 0.6 }}>No matches available</p>
       )}
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
-          <span>
-            ₦{Number(m.stake).toLocaleString()}
-          </span>
+          <span>₦{Number(m.stake).toLocaleString()}</span>
 
           <button
             style={styles.joinBtn}
