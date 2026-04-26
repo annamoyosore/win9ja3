@@ -1,170 +1,160 @@
-// =========================
-// IMPORTS
-// =========================
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
-  BrowserRouter,
-  Routes,
-  Route,
-  Navigate,
-  useNavigate,
-  useParams
-} from "react-router-dom";
+  account,
+  databases,
+  DATABASE_ID,
+  WALLET_COLLECTION,
+  ID
+} from "../lib/appwrite";
 
-import { account } from "./lib/appwrite";
+export default function Auth({ onLogin }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-import Auth from "./pages/Auth";
-import Dashboard from "./pages/Dashboard";
-import Wallet from "./pages/Wallet";
-import Lobby from "./pages/Lobby";
-import WhotGame from "./WhotGame";
-
-// =========================
-// AUTH WRAPPER
-// =========================
-function ProtectedRoute({ children }) {
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    account.get()
-      .then(() => setAuthed(true))
-      .catch(() => setAuthed(false))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div style={{ textAlign: "center", marginTop: 50 }}>
-        Loading...
-      </div>
-    );
+  async function ensureNoSession() {
+    try {
+      const sessions = await account.listSessions();
+      for (const s of sessions.sessions) {
+        await account.deleteSession(s.$id);
+      }
+    } catch {}
   }
 
-  return authed ? children : <Navigate to="/auth" replace />;
-}
+  async function handle() {
+    if (!email || !password || (!isLogin && !name)) {
+      alert("Fill all fields");
+      return;
+    }
 
-// =========================
-// GAME WRAPPER
-// =========================
-function GameWrapper() {
-  const { gameId, stake } = useParams();
-  const navigate = useNavigate();
+    try {
+      setLoading(true);
+
+      if (isLogin) {
+        // ✅ LOGIN (MATCHES YOUR WORKING PROJECT)
+        await account.createEmailSession(email, password);
+      } else {
+        // 🔥 CLEAN OLD SESSION
+        await ensureNoSession();
+
+        // ✅ REGISTER
+        const user = await account.create(
+          ID.unique(),
+          email,
+          password,
+          name
+        );
+
+        // ✅ LOGIN AFTER REGISTER
+        await account.createEmailSession(email, password);
+
+        const currentUser = await account.get();
+
+        // ✅ CREATE WALLET
+        await databases.createDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          ID.unique(),
+          {
+            userId: currentUser.$id,
+            balance: 0
+          }
+        );
+      }
+
+      onLogin();
+
+    } catch (e) {
+      console.error(e);
+      alert(e.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <WhotGame
-      gameId={gameId}
-      stake={Number(stake)}
-      goHome={() => navigate("/dashboard")}
-    />
+    <div style={styles.container}>
+      <div style={styles.box}>
+        <h1 style={styles.logo}>🎮 Win9ja</h1>
+
+        <h2>{isLogin ? "Login" : "Register"}</h2>
+
+        {!isLogin && (
+          <input
+            style={styles.input}
+            placeholder="Username"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        )}
+
+        <input
+          style={styles.input}
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value.trim())}
+        />
+
+        <input
+          style={styles.input}
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+
+        <button style={styles.button} onClick={handle} disabled={loading}>
+          {loading ? "Please wait..." : isLogin ? "Login" : "Register"}
+        </button>
+
+        <p style={styles.switch} onClick={() => setIsLogin(!isLogin)}>
+          {isLogin ? "Create account" : "Login instead"}
+        </p>
+      </div>
+    </div>
   );
 }
 
-// =========================
-// ROOT DECIDER (🔥 IMPORTANT)
-// =========================
-function RootRedirect() {
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    account.get()
-      .then(() => setAuthed(true))
-      .catch(() => setAuthed(false))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <p style={{ textAlign: "center" }}>Loading...</p>;
-
-  return authed
-    ? <Navigate to="/dashboard" replace />
-    : <Navigate to="/auth" replace />;
-}
-
-// =========================
-// APP ROUTES
-// =========================
-function AppRoutes() {
-  const navigate = useNavigate();
-
-  return (
-    <Routes>
-
-      {/* 🔥 ROOT FIX */}
-      <Route path="/" element={<RootRedirect />} />
-
-      {/* AUTH */}
-      <Route
-        path="/auth"
-        element={<Auth onLogin={() => navigate("/dashboard")} />}
-      />
-
-      {/* DASHBOARD */}
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <Dashboard
-              goLobby={() => navigate("/lobby")}
-              goWallet={() => navigate("/wallet")}
-              logout={async () => {
-                await account.deleteSession("current");
-                navigate("/auth");
-              }}
-            />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* WALLET */}
-      <Route
-        path="/wallet"
-        element={
-          <ProtectedRoute>
-            <Wallet back={() => navigate("/dashboard")} />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* LOBBY */}
-      <Route
-        path="/lobby"
-        element={
-          <ProtectedRoute>
-            <Lobby
-              goGame={(id, stake) =>
-                navigate(`/game/${id}/${stake}`)
-              }
-              back={() => navigate("/dashboard")}
-            />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* GAME */}
-      <Route
-        path="/game/:gameId/:stake"
-        element={
-          <ProtectedRoute>
-            <GameWrapper />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* FALLBACK */}
-      <Route path="*" element={<Navigate to="/" />} />
-
-    </Routes>
-  );
-}
-
-// =========================
-// MAIN EXPORT
-// =========================
-export default function App() {
-  return (
-    <BrowserRouter>
-      <AppRoutes />
-    </BrowserRouter>
-  );
-}
+const styles = {
+  container: {
+    minHeight: "100vh",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    background: "#0f172a",
+    color: "#fff"
+  },
+  box: {
+    padding: 20,
+    background: "#111827",
+    borderRadius: 10,
+    width: 300,
+    textAlign: "center"
+  },
+  logo: {
+    color: "gold",
+    marginBottom: 10
+  },
+  input: {
+    width: "100%",
+    padding: 10,
+    margin: "10px 0",
+    borderRadius: 6,
+    border: "none"
+  },
+  button: {
+    width: "100%",
+    padding: 12,
+    background: "gold",
+    border: "none",
+    borderRadius: 8,
+    fontWeight: "bold"
+  },
+  switch: {
+    marginTop: 10,
+    cursor: "pointer",
+    color: "lightblue"
+  }
+};
