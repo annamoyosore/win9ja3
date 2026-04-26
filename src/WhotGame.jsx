@@ -8,11 +8,13 @@ const GAME_COLLECTION = "games";
 const USERS_COLLECTION = "users";
 
 // =========================
-// CARD RENDER ENGINE
+// CARD RENDER
 // =========================
 const cache = new Map();
 
 function renderCard(card) {
+  if (!card) return "";
+
   const key = `${card.shape}_${card.number}`;
   if (cache.has(key)) return cache.get(key);
 
@@ -94,7 +96,7 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
   }, []);
 
   // =========================
-  // LOAD GAME (RECONNECT SAFE)
+  // LOAD GAME (SAFE)
   // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
@@ -110,6 +112,13 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
         );
 
         const parsed = parseGame(g);
+
+        // 🔥 WAIT until players exist
+        if (!parsed.players || parsed.players.length < 2) {
+          retry = setTimeout(load, 500);
+          return;
+        }
+
         setGame(parsed);
         setLoading(false);
 
@@ -134,7 +143,12 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
       (res) => {
-        setGame(parseGame(res.payload));
+        const parsed = parseGame(res.payload);
+
+        // prevent bad updates
+        if (!parsed.players || parsed.players.length < 2) return;
+
+        setGame(parsed);
       }
     );
 
@@ -156,16 +170,41 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
   }
 
   // =========================
-  // PARSE GAME
+  // PARSE
   // =========================
   function parseGame(g) {
     return {
       ...g,
+      players: g.players || [],
       deck: JSON.parse(g.deck || "[]"),
       discard: JSON.parse(g.discard || "[]"),
       hands: JSON.parse(g.hands || "[[],[]]")
     };
   }
+
+  // =========================
+  // SAFE UI GUARD 🔥
+  // =========================
+  if (loading || !game || !userId) {
+    return <div style={styles.center}>Loading Game...</div>;
+  }
+
+  if (!game.players.includes(userId)) {
+    return (
+      <div style={styles.center}>
+        ❌ You are not part of this game
+        <br />
+        <button onClick={goHome}>Go Back</button>
+      </div>
+    );
+  }
+
+  const playerIndex = game.players.indexOf(userId);
+  const opponentIndex = playerIndex === 0 ? 1 : 0;
+
+  const hand = game.hands[playerIndex] || [];
+  const opponentHand = game.hands[opponentIndex] || [];
+  const top = game.discard?.at(-1);
 
   // =========================
   // PLAY CARD
@@ -202,10 +241,7 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
           DATABASE_ID,
           GAME_COLLECTION,
           gameId,
-          {
-            status: "finished",
-            winnerId: userId
-          }
+          { status: "finished", winnerId: userId }
         );
         return;
       }
@@ -227,7 +263,7 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
   }
 
   // =========================
-  // DRAW FROM MARKET
+  // DRAW
   // =========================
   async function drawFromMarket() {
     if (processing) return;
@@ -268,26 +304,11 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
   }
 
   // =========================
-  // UI STATES
-  // =========================
-  if (loading) {
-    return <div style={styles.center}>Loading Game...</div>;
-  }
-
-  const playerIndex = game.players.indexOf(userId);
-  const opponentIndex = playerIndex === 0 ? 1 : 0;
-
-  const hand = game.hands[playerIndex] || [];
-  const opponentHand = game.hands[opponentIndex] || [];
-  const top = game.discard.at(-1);
-
-  // =========================
   // UI
   // =========================
   return (
     <div style={styles.table}>
 
-      {/* HEADER */}
       <div style={styles.header}>
         <div>💰 ₦{stake}</div>
         <div>
@@ -296,14 +317,12 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
         </div>
       </div>
 
-      {/* OPPONENT */}
       <div style={styles.opponent}>
         {opponentHand.map((_, i) => (
           <div key={i} style={styles.cardBack}></div>
         ))}
       </div>
 
-      {/* CENTER */}
       <div style={styles.centerArea}>
         {top && <img src={renderCard(top)} style={styles.topCard} />}
         <button style={styles.market} onClick={drawFromMarket}>
@@ -311,7 +330,6 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
         </button>
       </div>
 
-      {/* PLAYER */}
       <div style={styles.hand}>
         {hand.map((c, i) => (
           <img
@@ -323,7 +341,6 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
         ))}
       </div>
 
-      {/* FOOTER */}
       <div style={styles.footer}>
         {game.turn === userId ? "🟢 Your Turn" : "⏳ Opponent Turn"}
         <button onClick={goHome}>Exit</button>
@@ -331,64 +348,3 @@ export default function WhotGame({ gameId, stake = 0, goHome }) {
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  table: {
-    minHeight: "100vh",
-    background: "green",
-    padding: 10,
-    color: "#fff"
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between"
-  },
-  opponent: {
-    display: "flex",
-    justifyContent: "center",
-    marginTop: 20
-  },
-  cardBack: {
-    width: 30,
-    height: 45,
-    background: "#222",
-    border: "2px solid gold",
-    margin: 2
-  },
-  centerArea: {
-    textAlign: "center",
-    margin: 20
-  },
-  topCard: {
-    width: 70
-  },
-  market: {
-    marginTop: 10,
-    padding: 10,
-    background: "gold",
-    border: "none"
-  },
-  hand: {
-    display: "flex",
-    justifyContent: "center",
-    flexWrap: "wrap"
-  },
-  card: {
-    width: 70,
-    margin: 5,
-    cursor: "pointer"
-  },
-  footer: {
-    textAlign: "center",
-    marginTop: 20
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    height: "100vh"
-  }
-};
