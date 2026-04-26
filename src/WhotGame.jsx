@@ -5,7 +5,7 @@ const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
 
 // =========================
-// PARSE GAME
+// SAFE PARSE GAME
 // =========================
 function parseGame(g) {
   return {
@@ -14,7 +14,9 @@ function parseGame(g) {
     deck: g.deck ? g.deck.split(",").filter(Boolean) : [],
     discard: g.discard || "",
     hands: g.hands
-      ? g.hands.split("|").map(p => p.split(",").filter(Boolean))
+      ? g.hands.split("|").map(p =>
+          p ? p.split(",").filter(Boolean) : []
+        )
       : [[], []],
     pendingPick: Number(g.pendingPick || 0),
     history: g.history ? g.history.split("||") : []
@@ -35,9 +37,11 @@ function encodeGame(g) {
 }
 
 // =========================
-// DECODE CARD (UI ONLY)
+// SAFE DECODE CARD
 // =========================
 function decodeCard(str) {
+  if (!str || typeof str !== "string") return null;
+
   const map = {
     c: "circle",
     t: "triangle",
@@ -46,10 +50,12 @@ function decodeCard(str) {
     x: "cross"
   };
 
-  return {
-    shape: map[str?.[0]],
-    number: Number(str?.slice(1))
-  };
+  const shape = map[str[0]];
+  const number = Number(str.slice(1));
+
+  if (!shape || !number) return null;
+
+  return { shape, number };
 }
 
 // =========================
@@ -72,6 +78,7 @@ function drawCard(card) {
   ctx.fillRect(0, 0, 80, 120);
 
   ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 3;
   ctx.strokeRect(2, 2, 76, 116);
 
   ctx.fillStyle = "#e11d48";
@@ -86,7 +93,9 @@ function drawCard(card) {
     ctx.fill();
   }
 
-  if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+  if (card.shape === "square") {
+    ctx.fillRect(cx - 12, cy - 12, 24, 24);
+  }
 
   if (card.shape === "triangle") {
     ctx.beginPath();
@@ -96,7 +105,9 @@ function drawCard(card) {
     ctx.fill();
   }
 
-  if (card.shape === "star") ctx.fillText("★", cx - 8, cy + 5);
+  if (card.shape === "star") {
+    ctx.fillText("★", cx - 8, cy + 5);
+  }
 
   if (card.shape === "cross") {
     ctx.fillRect(cx - 3, cy - 14, 6, 28);
@@ -133,6 +144,7 @@ export default function WhotGame({ gameId, goHome }) {
         GAME_COLLECTION,
         gameId
       );
+
       const parsed = parseGame(g);
       setGame(parsed);
       gameRef.current = parsed;
@@ -152,7 +164,7 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  // LOAD MATCH (for stake & pot)
+  // LOAD MATCH
   useEffect(() => {
     if (!game?.matchId) return;
 
@@ -180,8 +192,8 @@ export default function WhotGame({ gameId, goHome }) {
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
 
-  const hand = game.hands[pIndex];
-  const opponentHand = game.hands[oIndex];
+  const hand = game.hands[pIndex] || [];
+  const opponentHand = game.hands[oIndex] || [];
 
   const top = decodeCard(game.discard);
 
@@ -189,15 +201,21 @@ export default function WhotGame({ gameId, goHome }) {
   // PLAY CARD
   // =========================
   async function playCard(i) {
-    const g = parseGame(
-      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
     );
+
+    const g = parseGame(fresh);
 
     if (g.turn !== userId) return;
 
     const card = g.hands[pIndex][i];
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
+
+    if (!current || !topDecoded) return;
 
     if (
       current.number !== topDecoded.number &&
@@ -214,29 +232,43 @@ export default function WhotGame({ gameId, goHome }) {
     else if (current.number === 14) g.pendingPick += 1;
 
     if (g.hands[pIndex].length === 0) {
-      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-        ...encodeGame(g),
-        discard: card,
-        status: "finished",
-        winnerId: userId
-      });
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        {
+          ...encodeGame(g),
+          discard: card,
+          status: "finished",
+          winnerId: userId
+        }
+      );
       return;
     }
 
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-      ...encodeGame(g),
-      discard: card,
-      turn: nextTurn
-    });
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        discard: card,
+        turn: nextTurn
+      }
+    );
   }
 
   // =========================
   // DRAW CARD
   // =========================
-  async function drawCard() {
-    const g = parseGame(
-      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
+  async function drawMarket() {
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
     );
+
+    const g = parseGame(fresh);
 
     if (g.turn !== userId) return;
 
@@ -249,10 +281,15 @@ export default function WhotGame({ gameId, goHome }) {
 
     g.pendingPick = 0;
 
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-      ...encodeGame(g),
-      turn: g.players[oIndex]
-    });
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.players[oIndex]
+      }
+    );
   }
 
   // =========================
@@ -263,19 +300,18 @@ export default function WhotGame({ gameId, goHome }) {
       <div style={styles.box}>
         <h2>WHOT GAME</h2>
 
-        {/* STAKE INFO */}
+        {/* Stake */}
         {match && (
-          <div style={styles.infoBox}>
+          <div style={styles.info}>
             💰 Stake: ₦{match.stake} | 🏆 Pot: ₦{match.pot}
           </div>
         )}
 
-        {/* TURN */}
         <p>
           Turn: {game.turn === userId ? "🟢 You" : "⏳ Opponent"}
         </p>
 
-        {/* OPPONENT */}
+        {/* Opponent */}
         <div>
           Opponent: {opponentHand.length} cards
           <div style={styles.row}>
@@ -285,29 +321,46 @@ export default function WhotGame({ gameId, goHome }) {
           </div>
         </div>
 
-        {/* CENTER */}
+        {/* Center */}
         <div style={styles.centerRow}>
-          {top && (
-            <img src={drawCard(top)} alt="" style={{ width: 60 }} />
+          {top ? (
+            <img src={drawCard(top)} style={{ width: 65 }} />
+          ) : (
+            <div style={styles.error}>No Card</div>
           )}
-          <button onClick={drawCard}>
+
+          <button onClick={drawMarket}>
             MARKET ({game.deck.length})
           </button>
         </div>
 
-        {/* PLAYER */}
+        {/* Player Cards */}
         <div style={styles.row}>
           {hand.map((c, i) => {
-            const d = decodeCard(c);
-            const img = drawCard(d);
-            if (!img) return null;
+            const decoded = decodeCard(c);
+
+            if (!decoded) {
+              return (
+                <div key={i} style={styles.error}>
+                  ?
+                </div>
+              );
+            }
+
+            const img = drawCard(decoded);
 
             return (
               <img
                 key={i}
                 src={img}
-                alt=""
-                style={{ width: 60 }}
+                style={{
+                  width: 65,
+                  cursor: "pointer",
+                  border:
+                    game.turn === userId
+                      ? "2px solid gold"
+                      : "2px solid transparent"
+                }}
                 onClick={() => playCard(i)}
               />
             );
@@ -341,7 +394,7 @@ const styles = {
   },
   row: {
     display: "flex",
-    gap: 4,
+    gap: 5,
     justifyContent: "center"
   },
   back: {
@@ -356,11 +409,18 @@ const styles = {
     gap: 10,
     margin: "10px 0"
   },
-  infoBox: {
+  info: {
     background: "#111",
     padding: 8,
-    marginBottom: 10,
-    borderRadius: 6
+    marginBottom: 10
+  },
+  error: {
+    width: 65,
+    height: 90,
+    background: "red",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
   },
   center: {
     display: "flex",
