@@ -5,6 +5,22 @@ const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
 
 // =========================
+// SOUND SYSTEM 🔊
+// =========================
+const playSound = (type) => {
+  const sounds = {
+    play: new Audio("/sounds/play.mp3"),
+    draw: new Audio("/sounds/draw.mp3"),
+    win: new Audio("/sounds/win.mp3")
+  };
+
+  if (sounds[type]) {
+    sounds[type].currentTime = 0;
+    sounds[type].play().catch(() => {});
+  }
+};
+
+// =========================
 // PARSE GAME
 // =========================
 function parseGame(g) {
@@ -18,7 +34,8 @@ function parseGame(g) {
           p ? p.split(",").filter(Boolean) : []
         )
       : [[], []],
-    pendingPick: Number(g.pendingPick || 0)
+    pendingPick: Number(g.pendingPick || 0),
+    history: g.history ? g.history.split("||") : []
   };
 }
 
@@ -31,7 +48,7 @@ function encodeGame(g) {
     deck: g.deck.join(","),
     discard: g.discard,
     pendingPick: String(g.pendingPick || 0),
-    turn: g.turn
+    history: g.history.slice(-10).join("||")
   };
 }
 
@@ -56,7 +73,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// DRAW CARD (CANVAS)
+// CANVAS CARD
 // =========================
 const cache = new Map();
 
@@ -127,33 +144,25 @@ export default function WhotGame({ gameId, goHome }) {
 
   const gameRef = useRef(null);
 
-  // =========================
   // LOAD USER
-  // =========================
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
-  // =========================
   // LOAD GAME + REALTIME
-  // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      try {
-        const g = await databases.getDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId
-        );
+      const g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-        const parsed = parseGame(g);
-        setGame(parsed);
-        gameRef.current = parsed;
-      } catch {
-        setTimeout(load, 800);
-      }
+      const parsed = parseGame(g);
+      setGame(parsed);
+      gameRef.current = parsed;
     };
 
     load();
@@ -162,17 +171,20 @@ export default function WhotGame({ gameId, goHome }) {
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
       res => {
         const parsed = parseGame(res.payload);
-        setGame(parsed);
+
+        // 🔥 FORCE UPDATE
+        setGame({ ...parsed });
         gameRef.current = parsed;
+
+        // 🔊 SOUND ON UPDATE
+        playSound("play");
       }
     );
 
     return () => unsub();
   }, [gameId, userId]);
 
-  // =========================
   // LOAD MATCH
-  // =========================
   useEffect(() => {
     if (!game?.matchId) return;
 
@@ -182,28 +194,7 @@ export default function WhotGame({ gameId, goHome }) {
       .catch(() => {});
   }, [game]);
 
-  // =========================
-  // SAVE GAME
-  // =========================
-  async function saveGame(g) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame(g)
-    );
-  }
-
-  // =========================
-  // GUARDS
-  // =========================
-  if (!game || !userId) {
-    return <div style={styles.center}>Loading...</div>;
-  }
-
-  if (!game.players.includes(userId)) {
-    return <div style={styles.center}>Not your game</div>;
-  }
+  if (!game || !userId) return <div style={styles.center}>Loading...</div>;
 
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
@@ -218,65 +209,51 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   async function playCard(i) {
     if (processing) return;
-    setProcessing(true);
 
-    try {
-      const g = parseGame(
-        await databases.getDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId
-        )
-      );
+    const g = parseGame(
+      await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      )
+    );
 
-      if (g.turn !== userId) return;
+    if (g.turn !== userId) return;
 
-      const myIdx = g.players.indexOf(userId);
-      const oppIdx = myIdx === 0 ? 1 : 0;
+    const myIdx = g.players.indexOf(userId);
+    const oppIdx = myIdx === 0 ? 1 : 0;
 
-      const card = g.hands[myIdx][i];
-      const current = decodeCard(card);
-      const topCard = decodeCard(g.discard);
+    const card = g.hands[myIdx][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
 
-      if (
-        current.number !== topCard.number &&
-        current.shape !== topCard.shape &&
-        current.number !== 14
-      ) return;
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) return;
 
-      g.hands[myIdx].splice(i, 1);
+    g.hands[myIdx].splice(i, 1);
 
-      let nextTurn = g.players[oppIdx];
+    let nextTurn = g.players[oppIdx];
 
-      if (current.number === 2) g.pendingPick += 2;
-      else if (current.number === 8 || current.number === 1)
-        nextTurn = userId;
-      else if (current.number === 14) g.pendingPick += 1;
+    if (current.number === 2) g.pendingPick += 2;
+    else if (current.number === 8 || current.number === 1)
+      nextTurn = userId;
+    else if (current.number === 14) g.pendingPick += 1;
 
-      g.discard = card;
-      g.turn = nextTurn;
+    playSound("play");
 
-      setGame({ ...g });
-
-      if (g.hands[myIdx].length === 0) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            ...encodeGame(g),
-            status: "finished",
-            winnerId: userId
-          }
-        );
-        return;
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        discard: card,
+        turn: nextTurn
       }
-
-      await saveGame(g);
-
-    } finally {
-      setProcessing(false);
-    }
+    );
   }
 
   // =========================
@@ -284,38 +261,40 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   async function drawMarket() {
     if (processing) return;
-    setProcessing(true);
 
-    try {
-      const g = parseGame(
-        await databases.getDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId
-        )
-      );
+    const g = parseGame(
+      await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      )
+    );
 
-      if (g.turn !== userId) return;
+    if (g.turn !== userId) return;
 
-      const myIdx = g.players.indexOf(userId);
-      const oppIdx = myIdx === 0 ? 1 : 0;
+    const myIdx = g.players.indexOf(userId);
+    const oppIdx = myIdx === 0 ? 1 : 0;
 
-      let count = g.pendingPick || 1;
+    let count = g.pendingPick || 1;
 
-      for (let i = 0; i < count; i++) {
-        if (!g.deck.length) break;
-        g.hands[myIdx].push(g.deck.pop());
-      }
-
-      g.pendingPick = 0;
-      g.turn = g.players[oppIdx];
-
-      setGame({ ...g });
-      await saveGame(g);
-
-    } finally {
-      setProcessing(false);
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
     }
+
+    g.pendingPick = 0;
+
+    playSound("draw");
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.players[oppIdx]
+      }
+    );
   }
 
   // =========================
@@ -360,16 +339,14 @@ export default function WhotGame({ gameId, goHome }) {
               <img
                 key={i}
                 src={drawCard(d)}
-                style={styles.card}
+                style={{ width: 65, cursor: "pointer" }}
                 onClick={() => playCard(i)}
               />
             );
           })}
         </div>
 
-        <button style={styles.exit} onClick={goHome}>
-          Exit
-        </button>
+        <button onClick={goHome}>Exit</button>
       </div>
     </div>
   );
@@ -387,18 +364,15 @@ const styles = {
     alignItems: "center"
   },
   box: {
-    width: "100%",
-    maxWidth: 420,
-    background: "#000000aa",
-    padding: 15,
-    color: "#fff",
-    borderRadius: 10
+    width: 420,
+    background: "#00000088",
+    padding: 10,
+    color: "#fff"
   },
   row: {
     display: "flex",
     gap: 5,
-    justifyContent: "center",
-    flexWrap: "wrap"
+    justifyContent: "center"
   },
   back: {
     width: 30,
@@ -414,17 +388,7 @@ const styles = {
   },
   info: {
     background: "#111",
-    padding: 8,
-    marginBottom: 10
-  },
-  card: {
-    width: 65,
-    cursor: "pointer"
-  },
-  exit: {
-    marginTop: 15,
-    padding: 10,
-    width: "100%"
+    padding: 8
   },
   center: {
     display: "flex",
