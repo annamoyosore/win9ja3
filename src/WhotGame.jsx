@@ -31,7 +31,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// PARSE GAME (SAFE)
+// SAFE PARSER
 // =========================
 function parseGame(g) {
   return {
@@ -162,8 +162,12 @@ export default function WhotGame({ gameId, goHome }) {
       const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
 
       const card = g.hands[pIndexFresh][i];
+      if (!card) return;
+
       const topDecoded = decodeCard(g.discard);
       const current = decodeCard(card);
+
+      if (!topDecoded) return;
 
       if (
         current.number !== topDecoded.number &&
@@ -195,7 +199,8 @@ export default function WhotGame({ gameId, goHome }) {
         {
           hands: g.hands.map(p => p.join(",")).join("|"),
           discard: card,
-          turn: g.players[oIndexFresh]
+          turn: g.players[oIndexFresh],
+          turnStartTime: new Date().toISOString()
         }
       );
 
@@ -227,7 +232,13 @@ export default function WhotGame({ gameId, goHome }) {
       const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
 
       const card = g.deck.pop();
+
       g.hands[pIndexFresh].push(card);
+
+      // 🔥 LIMIT SIZE (VERY IMPORTANT)
+      if (g.deck.length > 80) {
+        g.deck = g.deck.slice(-80);
+      }
 
       await databases.updateDocument(
         DATABASE_ID,
@@ -236,7 +247,8 @@ export default function WhotGame({ gameId, goHome }) {
         {
           deck: g.deck.join(","),
           hands: g.hands.map(p => p.join(",")).join("|"),
-          turn: g.players[oIndexFresh]
+          turn: g.players[oIndexFresh],
+          turnStartTime: new Date().toISOString()
         }
       );
 
