@@ -202,60 +202,51 @@ export default function WhotGame({ gameId, goHome }) {
   // PLAY CARD (FIXED)
   // =========================
   async function playCard(i) {
-    if (processing) return;
-    setProcessing(true);
+  if (processing) return;
+  setProcessing(true);
 
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
+  try {
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId
+    );
 
-      const g = parseGame(fresh);
+    const g = parseGame(fresh);
 
-      const myIndex = g.players.indexOf(userId);
-      const oppIndex = myIndex === 0 ? 1 : 0;
+    // ✅ ALWAYS recalc index from fresh data
+    const myIndex = g.players.indexOf(userId);
+    const oppIndex = myIndex === 0 ? 1 : 0;
 
-      if (g.turn !== userId) return;
+    if (g.turn !== userId) return;
 
-      const card = g.hands[myIndex]?.[i];
-      if (!card) return;
+    const card = g.hands[myIndex]?.[i];
+    if (!card) return;
 
-      const current = decodeCard(card);
-      const topDecoded = decodeCard(g.discard);
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
 
-      if (!current || !topDecoded) return;
+    if (!current || !topDecoded) return;
 
-      if (
-        current.number !== topDecoded.number &&
-        current.shape !== topDecoded.shape &&
-        current.number !== 14
-      ) return;
+    // ✅ VALID MOVE CHECK
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) return;
 
-      g.hands[myIndex].splice(i, 1);
+    // ✅ REMOVE CARD
+    g.hands[myIndex].splice(i, 1);
 
-      let nextTurn = g.players[oppIndex];
+    let nextTurn = g.players[oppIndex];
 
-      if (current.number === 2) g.pendingPick += 2;
-      else if (current.number === 8 || current.number === 1) nextTurn = userId;
-      else if (current.number === 14) g.pendingPick += 1;
+    // RULES
+    if (current.number === 2) g.pendingPick += 2;
+    else if (current.number === 8 || current.number === 1) nextTurn = userId;
+    else if (current.number === 14) g.pendingPick += 1;
 
-      if (g.hands[myIndex].length === 0) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            ...encodeGame(g),
-            discard: card,
-            status: "finished",
-            winnerId: userId
-          }
-        );
-        return;
-      }
-
+    // WIN
+    if (g.hands[myIndex].length === 0) {
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -263,15 +254,28 @@ export default function WhotGame({ gameId, goHome }) {
         {
           ...encodeGame(g),
           discard: card,
-          turn: nextTurn
+          status: "finished",
+          winnerId: userId
         }
       );
-    } catch (err) {
-      console.error(err);
+      return;
     }
 
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        discard: card,
+        turn: nextTurn
+      }
+    );
+
+  } finally {
     setProcessing(false);
   }
+}
 
   // =========================
   // DRAW MARKET (FIXED)
