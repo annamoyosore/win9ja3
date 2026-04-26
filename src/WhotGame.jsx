@@ -1,3 +1,6 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
@@ -22,21 +25,22 @@ function decodeCard(str) {
   };
 
   return {
-    shape: map[str[0]],
-    number: Number(str.slice(1))
+    shape: map[str[0]] || "circle",
+    number: Number(str.slice(1)) || 0
   };
 }
 
 // =========================
-// PARSE GAME (COMPRESSED)
+// PARSE GAME (SAFE)
 // =========================
 function parseGame(g) {
   return {
     ...g,
+    players: g.players || [],
     deck: g.deck ? g.deck.split(",") : [],
-    discard: g.discard ? decodeCard(g.discard) : null,
+    discard: g.discard || "",
     hands: g.hands
-      ? g.hands.split("|").map(p => p ? p.split(",") : [])
+      ? g.hands.split("|").map(p => (p ? p.split(",") : []))
       : [[], []]
   };
 }
@@ -48,6 +52,7 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
 
   // =========================
   // LOAD USER
@@ -108,7 +113,7 @@ export default function WhotGame({ gameId, goHome }) {
   }, [gameId]);
 
   // =========================
-  // SAFE GUARD
+  // GUARDS
   // =========================
   if (loading || !game || !userId) {
     return <div style={styles.center}>Loading...</div>;
@@ -118,80 +123,126 @@ export default function WhotGame({ gameId, goHome }) {
     return <div style={styles.center}>Not your game</div>;
   }
 
+  if (game.status === "finished") {
+    return (
+      <div style={styles.center}>
+        🏆 Game Finished <br />
+        Winner: {game.winnerId === userId ? "You 🎉" : "Opponent"}
+        <br /><br />
+        <button onClick={goHome}>Back</button>
+      </div>
+    );
+  }
+
   const pIndex = game.players.indexOf(userId);
   const oIndex = pIndex === 0 ? 1 : 0;
 
-  const hand = game.hands[pIndex];
-  const top = game.discard;
+  const hand = game.hands[pIndex] || [];
+  const top = decodeCard(game.discard);
 
   // =========================
   // PLAY CARD
   // =========================
   async function playCard(i) {
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId
-    );
+    if (processing) return;
+    setProcessing(true);
 
-    const g = parseGame(fresh);
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-    if (g.turn !== userId) return;
+      const g = parseGame(fresh);
 
-    const card = g.hands[pIndex][i];
-    const top = g.discard;
+      if (g.turn !== userId) return;
 
-    const decoded = decodeCard(card);
+      const pIndexFresh = g.players.indexOf(userId);
+      const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
 
-    if (
-      decoded.number !== top.number &&
-      decoded.shape !== top.shape
-    ) return;
+      const card = g.hands[pIndexFresh][i];
+      const topDecoded = decodeCard(g.discard);
+      const current = decodeCard(card);
 
-    g.hands[pIndex].splice(i, 1);
+      if (
+        current.number !== topDecoded.number &&
+        current.shape !== topDecoded.shape
+      ) return;
 
-    const newTop = card;
+      g.hands[pIndexFresh].splice(i, 1);
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        hands: g.hands.map(p => p.join(",")).join("|"),
-        discard: newTop,
-        turn: g.players[oIndex]
+      // ✅ WIN CHECK
+      if (g.hands[pIndexFresh].length === 0) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          {
+            hands: g.hands.map(p => p.join(",")).join("|"),
+            discard: card,
+            status: "finished",
+            winnerId: userId
+          }
+        );
+        return;
       }
-    );
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        {
+          hands: g.hands.map(p => p.join(",")).join("|"),
+          discard: card,
+          turn: g.players[oIndexFresh]
+        }
+      );
+
+    } finally {
+      setProcessing(false);
+    }
   }
 
   // =========================
   // DRAW CARD
   // =========================
   async function drawCard() {
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId
-    );
+    if (processing) return;
+    setProcessing(true);
 
-    const g = parseGame(fresh);
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-    if (g.turn !== userId) return;
-    if (!g.deck.length) return;
+      const g = parseGame(fresh);
 
-    const card = g.deck.pop();
-    g.hands[pIndex].push(card);
+      if (g.turn !== userId) return;
+      if (!g.deck.length) return;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        deck: g.deck.join(","),
-        hands: g.hands.map(p => p.join(",")).join("|"),
-        turn: g.players[oIndex]
-      }
-    );
+      const pIndexFresh = g.players.indexOf(userId);
+      const oIndexFresh = pIndexFresh === 0 ? 1 : 0;
+
+      const card = g.deck.pop();
+      g.hands[pIndexFresh].push(card);
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        {
+          deck: g.deck.join(","),
+          hands: g.hands.map(p => p.join(",")).join("|"),
+          turn: g.players[oIndexFresh]
+        }
+      );
+
+    } finally {
+      setProcessing(false);
+    }
   }
 
   // =========================
@@ -199,26 +250,38 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   return (
     <div style={styles.container}>
-      <h2>Game</h2>
+      <h2>🎮 Whot Game</h2>
 
-      <p>Top Card: {top?.shape} {top?.number}</p>
+      <p>
+        Turn: {game.turn === userId ? "🟢 You" : "⏳ Opponent"}
+      </p>
+
+      <p>
+        Top Card: {top?.shape} {top?.number}
+      </p>
 
       <button onClick={drawCard}>
         Draw ({game.deck.length})
       </button>
 
-      <div>
+      <div style={{ marginTop: 20 }}>
         {hand.map((c, i) => {
           const d = decodeCard(c);
           return (
-            <button key={i} onClick={() => playCard(i)}>
+            <button
+              key={i}
+              onClick={() => playCard(i)}
+              style={styles.card}
+            >
               {d.shape} {d.number}
             </button>
           );
         })}
       </div>
 
-      <button onClick={goHome}>Exit</button>
+      <button style={styles.exit} onClick={goHome}>
+        Exit
+      </button>
     </div>
   );
 }
@@ -231,12 +294,28 @@ const styles = {
     padding: 20,
     color: "#fff",
     background: "#111",
-    minHeight: "100vh"
+    minHeight: "100vh",
+    textAlign: "center"
   },
   center: {
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    height: "100vh"
+    height: "100vh",
+    flexDirection: "column"
+  },
+  card: {
+    margin: 5,
+    padding: 10,
+    background: "#222",
+    color: "#fff",
+    border: "1px solid #555",
+    cursor: "pointer"
+  },
+  exit: {
+    marginTop: 20,
+    padding: 10,
+    background: "gray",
+    border: "none"
   }
 };
