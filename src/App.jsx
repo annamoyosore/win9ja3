@@ -1,6 +1,9 @@
+// =========================
+// IMPORTS
+// =========================
 import { useEffect, useState } from "react";
 import {
-  BrowserRouter,
+  HashRouter,   // 🔥 CHANGED
   Routes,
   Route,
   Navigate,
@@ -17,28 +20,42 @@ import Lobby from "./pages/Lobby";
 import WhotGame from "./WhotGame";
 
 // =========================
-// AUTH WRAPPER (SAFE)
+// AUTH HOOK
 // =========================
-function ProtectedRoute({ children }) {
-  const [checked, setChecked] = useState(false);
+function useAuth() {
+  const [loading, setLoading] = useState(true);
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     account.get()
       .then(() => setAuthed(true))
       .catch(() => setAuthed(false))
-      .finally(() => setChecked(true));
+      .finally(() => setLoading(false));
   }, []);
 
-  if (!checked) {
-    return (
-      <div style={{ color: "white", padding: 20 }}>
-        Loading...
-      </div>
-    );
-  }
+  return { loading, authed };
+}
+
+// =========================
+// PROTECTED ROUTE
+// =========================
+function ProtectedRoute({ children }) {
+  const { loading, authed } = useAuth();
+
+  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
 
   return authed ? children : <Navigate to="/auth" replace />;
+}
+
+// =========================
+// PUBLIC ROUTE
+// =========================
+function PublicRoute({ children }) {
+  const { loading, authed } = useAuth();
+
+  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+
+  return authed ? <Navigate to="/dashboard" replace /> : children;
 }
 
 // =========================
@@ -66,15 +83,17 @@ function AppRoutes() {
   return (
     <Routes>
 
-      {/* 🔐 AUTH FIRST */}
+      {/* AUTH */}
       <Route
         path="/auth"
         element={
-          <Auth onLogin={() => navigate("/dashboard")} />
+          <PublicRoute>
+            <Auth onLogin={() => navigate("/dashboard")} />
+          </PublicRoute>
         }
       />
 
-      {/* 🏠 DASHBOARD */}
+      {/* DASHBOARD */}
       <Route
         path="/dashboard"
         element={
@@ -83,9 +102,7 @@ function AppRoutes() {
               goLobby={() => navigate("/lobby")}
               goWallet={() => navigate("/wallet")}
               logout={async () => {
-                try {
-                  await account.deleteSession("current");
-                } catch {}
+                await account.deleteSession("current");
                 navigate("/auth");
               }}
             />
@@ -93,17 +110,17 @@ function AppRoutes() {
         }
       />
 
-      {/* 💳 WALLET */}
+      {/* WALLET */}
       <Route
         path="/wallet"
         element={
           <ProtectedRoute>
-            <Wallet back={() => navigate("/dashboard")} />
+            <Wallet />
           </ProtectedRoute>
         }
       />
 
-      {/* 🎮 LOBBY */}
+      {/* LOBBY */}
       <Route
         path="/lobby"
         element={
@@ -118,7 +135,7 @@ function AppRoutes() {
         }
       />
 
-      {/* 🎯 GAME */}
+      {/* GAME */}
       <Route
         path="/game/:gameId/:stake"
         element={
@@ -128,21 +145,20 @@ function AppRoutes() {
         }
       />
 
-      {/* ✅ DEFAULT → AUTH (IMPORTANT) */}
-      <Route path="*" element={<Navigate to="/auth" />} />
+      {/* DEFAULT */}
+      <Route path="*" element={<Navigate to="/auth" replace />} />
+
     </Routes>
   );
 }
 
 // =========================
-// APP ROOT
+// MAIN APP
 // =========================
 export default function App() {
   return (
-    <BrowserRouter>
-      <div style={{ minHeight: "100vh", background: "#0f172a" }}>
-        <AppRoutes />
-      </div>
-    </BrowserRouter>
+    <HashRouter> {/* 🔥 KEY FIX */}
+      <AppRoutes />
+    </HashRouter>
   );
 }
