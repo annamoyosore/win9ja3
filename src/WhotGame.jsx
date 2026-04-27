@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
 
 // =========================
-// 🔊 WEB AUDIO ENGINE
+// 🔊 SOUND ENGINE
 // =========================
 let audioCtx;
 
@@ -15,14 +15,13 @@ function getCtx() {
   return audioCtx;
 }
 
-function beep(freq = 400, duration = 0.1, type = "sine", volume = 0.2) {
+function beep(freq = 400, duration = 0.1) {
   const ctx = getCtx();
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
 
-  osc.type = type;
   osc.frequency.value = freq;
-  gain.gain.value = volume;
+  gain.gain.value = 0.2;
 
   osc.connect(gain);
   gain.connect(ctx.destination);
@@ -31,14 +30,12 @@ function beep(freq = 400, duration = 0.1, type = "sine", volume = 0.2) {
   osc.stop(ctx.currentTime + duration);
 }
 
-// 🎮 SOUND TYPES
-const soundPlay = () => beep(500, 0.08, "square");
-const soundDraw = () => beep(200, 0.12, "sawtooth");
-const soundRule = () => beep(300, 0.15, "triangle");
-const soundWin = () => {
-  beep(600, 0.1);
-  setTimeout(() => beep(800, 0.1), 100);
-  setTimeout(() => beep(1000, 0.2), 200);
+const playSound = () => beep(500);
+const drawSound = () => beep(200);
+const winSound = () => {
+  beep(600);
+  setTimeout(() => beep(900), 120);
+  setTimeout(() => beep(1200), 240);
 };
 
 // =========================
@@ -81,6 +78,7 @@ function parseGame(g) {
   return {
     ...g,
     players: g.players ? g.players.split(",") : [],
+    playerNames: g.playerNames ? g.playerNames.split(",") : [],
     deck: g.deck ? g.deck.split(",").filter(Boolean) : [],
     hands: g.hands
       ? g.hands.split("|").map(p => p.split(",").filter(Boolean))
@@ -107,79 +105,17 @@ function encodeGame(g) {
 }
 
 // =========================
-// CANVAS CARD
-// =========================
-const cache = new Map();
-
-function drawCard(card) {
-  if (!card) return null;
-
-  const key = `${card.shape}_${card.number}`;
-  if (cache.has(key)) return cache.get(key);
-
-  const c = document.createElement("canvas");
-  c.width = 70;
-  c.height = 100;
-  const ctx = c.getContext("2d");
-
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, 70, 100);
-
-  ctx.strokeStyle = "#e11d48";
-  ctx.strokeRect(2, 2, 66, 96);
-
-  ctx.fillStyle = "#e11d48";
-  ctx.font = "bold 12px Arial";
-  ctx.fillText(card.number, 5, 15);
-
-  const cx = 35, cy = 50;
-
-  if (card.shape === "circle") {
-    ctx.beginPath();
-    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  if (card.shape === "square") ctx.fillRect(cx - 10, cy - 10, 20, 20);
-
-  if (card.shape === "triangle") {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - 10);
-    ctx.lineTo(cx - 10, cy + 10);
-    ctx.lineTo(cx + 10, cy + 10);
-    ctx.fill();
-  }
-
-  if (card.shape === "star") ctx.fillText("★", cx - 6, cy + 5);
-
-  if (card.shape === "cross") {
-    ctx.fillRect(cx - 2, cy - 10, 4, 20);
-    ctx.fillRect(cx - 10, cy - 2, 20, 4);
-  }
-
-  const img = c.toDataURL();
-  cache.set(key, img);
-  return img;
-}
-
-// =========================
 // COMPONENT
 // =========================
 export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
   const [processing, setProcessing] = useState(false);
-
-  const [showWin, setShowWin] = useState(false);
   const [winText, setWinText] = useState("");
 
-  // 🔓 unlock audio on first tap
+  // unlock sound
   useEffect(() => {
-    document.addEventListener(
-      "click",
-      () => getCtx(),
-      { once: true }
-    );
+    document.addEventListener("click", () => getCtx(), { once: true });
   }, []);
 
   useEffect(() => {
@@ -208,10 +144,13 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  if (!game || !userId) return <div style={styles.center}>Loading...</div>;
+  if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
+
+  const myName = game.playerNames[myIdx] || "You";
+  const oppName = game.playerNames[oppIdx] || "Opponent";
 
   const hand = game.hands[myIdx];
   const opponentHand = game.hands[oppIdx];
@@ -222,10 +161,8 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   function showWinner(text) {
     setWinText(text);
-    setShowWin(true);
-    soundWin();
-
-    setTimeout(() => setShowWin(false), 4000);
+    winSound();
+    setTimeout(() => setWinText(""), 4000);
   }
 
   // =========================
@@ -242,9 +179,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     g.scores[winnerIdx]++;
 
-    showWinner(
-      `${winnerIdx === myIdx ? "You" : "Opponent"} won round (${scores[winnerIdx]} pts)`
-    );
+    showWinner(`${g.playerNames[winnerIdx]} wins round 🎉`);
 
     if (g.scores[winnerIdx] >= 2) {
       await databases.updateDocument(
@@ -256,6 +191,8 @@ export default function WhotGame({ gameId, goHome }) {
           winnerId: g.players[winnerIdx]
         }
       );
+
+      showWinner(`🏆 ${g.playerNames[winnerIdx]} wins game!`);
       return;
     }
 
@@ -279,12 +216,12 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // PLAY CARD
+  // PLAY
   // =========================
   async function playCard(i) {
     if (processing) return;
     setProcessing(true);
-    soundPlay();
+    playSound();
 
     const g = parseGame(
       await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
@@ -316,20 +253,16 @@ export default function WhotGame({ gameId, goHome }) {
     if (current.number === 2) {
       g.pendingPick += 2;
       text = "🔥 Pick 2";
-      soundRule();
     } else if (current.number === 8) {
       next = userId;
       text = "⛔ Suspension";
-      soundRule();
     } else if (current.number === 1) {
       next = userId;
       text = "🔁 Hold On";
-      soundRule();
     } else if (current.number === 14) {
       g.pendingPick += 1;
       next = userId;
       text = "🛒 Market";
-      soundRule();
     }
 
     g.history.push(text);
@@ -355,7 +288,7 @@ export default function WhotGame({ gameId, goHome }) {
   async function drawMarket() {
     if (processing) return;
     setProcessing(true);
-    soundDraw();
+    drawSound();
 
     const g = parseGame(
       await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
@@ -389,13 +322,16 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   return (
     <div style={styles.bg}>
-      {showWin && <div style={styles.win}>{winText}</div>}
+      {winText && <div style={styles.win}>{winText}</div>}
 
       <div style={styles.box}>
         <h2>WHOT GAME</h2>
 
         <h3>Round {game.round}/3</h3>
         <h4>Score: {game.scores[0]} - {game.scores[1]}</h4>
+
+        <p>👤 You: {myName}</p>
+        <p>👤 Opponent: {oppName}</p>
 
         <p>💰 Stake: ₦{game.stake}</p>
         <p>🏦 Pot: ₦{game.pot}</p>
@@ -464,11 +400,5 @@ const styles = {
     padding: 20,
     fontSize: 20,
     borderRadius: 10
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    height: "100vh"
   }
 };
