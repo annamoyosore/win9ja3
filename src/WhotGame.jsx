@@ -131,6 +131,7 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
   const [processing, setProcessing] = useState(false);
+
   const gameRef = useRef(null);
 
   function notify(msg) {
@@ -161,7 +162,7 @@ export default function WhotGame({ gameId, goHome }) {
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
       res => {
         const parsed = parseGame(res.payload);
-        setGame({ ...parsed });
+        setGame(parsed);
         gameRef.current = parsed;
       }
     );
@@ -169,7 +170,9 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  if (!game || !userId) return <div style={styles.center}>Loading...</div>;
+  if (!game || !userId) {
+    return <div style={styles.center}>Loading...</div>;
+  }
 
   const myIdx = game.players.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
@@ -179,52 +182,55 @@ export default function WhotGame({ gameId, goHome }) {
   const top = decodeCard(game.discard);
 
   // =========================
-  // END CHECK
+  // END GAME / ROUND
   // =========================
   async function checkEnd(g) {
-    if (!g.deck.length) {
-      const sum = arr =>
-        arr.reduce((a, c) => a + decodeCard(c).number, 0);
+    if (g.deck.length > 0) return;
 
-      const mySum = sum(g.hands[myIdx]);
-      const oppSum = sum(g.hands[oppIdx]);
+    const sum = arr =>
+      arr.reduce((a, c) => a + decodeCard(c).number, 0);
 
-      const winnerIdx = mySum <= oppSum ? myIdx : oppIdx;
+    const mySum = sum(g.hands[myIdx]);
+    const oppSum = sum(g.hands[oppIdx]);
 
-      g.scores[winnerIdx]++;
+    const winnerIdx = mySum <= oppSum ? myIdx : oppIdx;
 
-      if (g.scores[winnerIdx] >= 2) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            status: "finished",
-            winnerId: g.players[winnerIdx]
-          }
-        );
-        notify("🏆 Game Winner!");
-        return;
-      }
+    notify("📦 Market finished — counting cards");
 
-      // next round
-      g.round++;
-      g.deck = shuffleDeck();
-      g.hands = [g.deck.splice(0, 6), g.deck.splice(0, 6)];
-      g.discard = g.deck.pop();
-      g.pendingPick = 0;
-      g.history = [`--- Round ${g.round} ---`];
+    g.scores[winnerIdx]++;
 
+    // FINAL WINNER
+    if (g.scores[winnerIdx] >= 2) {
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId,
         {
-          ...encodeGame(g),
-          turn: g.players[1]
+          status: "finished",
+          winnerId: g.players[winnerIdx]
         }
       );
+      notify("🏆 Game Winner!");
+      return;
     }
+
+    // NEXT ROUND
+    g.round++;
+    g.deck = shuffleDeck();
+    g.hands = [g.deck.splice(0, 6), g.deck.splice(0, 6)];
+    g.discard = g.deck.pop();
+    g.pendingPick = 0;
+    g.history = [`--- Round ${g.round} ---`];
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.players[1]
+      }
+    );
   }
 
   // =========================
@@ -238,7 +244,10 @@ export default function WhotGame({ gameId, goHome }) {
       await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
     );
 
-    if (g.turn !== userId) return notify("Not your turn");
+    if (g.turn !== userId) {
+      setProcessing(false);
+      return notify("Not your turn");
+    }
 
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
@@ -248,7 +257,10 @@ export default function WhotGame({ gameId, goHome }) {
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
-    ) return notify("Invalid move");
+    ) {
+      setProcessing(false);
+      return notify("Invalid move");
+    }
 
     g.hands[myIdx].splice(i, 1);
 
@@ -274,7 +286,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     g.history.push(text);
 
-    // WIN
+    // ROUND WIN (EMPTY HAND)
     if (g.hands[myIdx].length === 0) {
       g.scores[myIdx]++;
 
@@ -288,7 +300,8 @@ export default function WhotGame({ gameId, goHome }) {
             winnerId: userId
           }
         );
-        notify("🎉 You won the game!");
+        notify("🎉 You won!");
+        setProcessing(false);
         return;
       }
 
@@ -311,6 +324,8 @@ export default function WhotGame({ gameId, goHome }) {
       }
     );
 
+    await checkEnd(g);
+
     setProcessing(false);
   }
 
@@ -325,9 +340,18 @@ export default function WhotGame({ gameId, goHome }) {
       await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
     );
 
-    if (g.turn !== userId) return notify("Not your turn");
+    if (g.turn !== userId) {
+      setProcessing(false);
+      return notify("Not your turn");
+    }
 
-    let count = g.pendingPick || 1;
+    if (!g.deck.length) {
+      await checkEnd(g);
+      setProcessing(false);
+      return;
+    }
+
+    let count = g.pendingPick > 0 ? g.pendingPick : 1;
 
     for (let i = 0; i < count; i++) {
       if (!g.deck.length) break;
