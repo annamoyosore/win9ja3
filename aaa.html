@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Dashboard</title>
+</head>
+
+<body style="background:#111;color:#fff;font-family:Arial;padding:20px">
+
+<h2>💼 Admin Payout Dashboard</h2>
+
+<div id="stats"></div>
+<hr/>
+<div id="list"></div>
+
+<script type="module">
+import { databases, DATABASE_ID } from "./lib/appwrite.js";
+import { account } from "./lib/appwrite.js";
+import { Query } from "https://cdn.jsdelivr.net/npm/appwrite@13.0.0/+esm";
+
+// 🔐 Admin ID (must match wallet userId)
+const ADMIN_ID = "YOUR_ADMIN_USER_ID";
+
+// =========================
+// LOAD DATA
+// =========================
+async function load() {
+  const list = document.getElementById("list");
+  const stats = document.getElementById("stats");
+
+  list.innerHTML = "Loading...";
+
+  try {
+    // 🔐 Ensure admin is logged in
+    await account.get();
+
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      "games",
+      [Query.equal("status", "pending_admin_payout")]
+    );
+
+    list.innerHTML = "";
+
+    let total = 0;
+
+    if (!res.documents.length) {
+      list.innerHTML = "<p>No pending payouts</p>";
+      stats.innerHTML = "";
+      return;
+    }
+
+    res.documents.forEach(g => {
+      total += Number(g.adminFee || 0);
+
+      const div = document.createElement("div");
+      div.style.border = "1px solid #444";
+      div.style.padding = "10px";
+      div.style.marginBottom = "10px";
+      div.style.borderRadius = "8px";
+
+      div.innerHTML = `
+        <p><b>Game:</b> ${g.$id}</p>
+        <p>👤 Winner: ${g.winnerId}</p>
+        <p>💰 Pot: ₦${g.pot}</p>
+        <p>🧾 Admin Fee: ₦${g.adminFee}</p>
+        <button data-id="${g.$id}" data-fee="${g.adminFee}">
+          ✅ Approve
+        </button>
+      `;
+
+      div.querySelector("button").onclick = () =>
+        approve(g.$id, g.adminFee);
+
+      list.appendChild(div);
+    });
+
+    stats.innerHTML = `<h3>Total Pending: ₦${total}</h3>`;
+
+  } catch (e) {
+    list.innerHTML = "❌ Error loading data";
+    console.error(e);
+  }
+}
+
+// =========================
+// APPROVE PAYOUT
+// =========================
+async function approve(gameId, fee) {
+  try {
+    // 🔍 Get admin wallet
+    const wallets = await databases.listDocuments(
+      DATABASE_ID,
+      "wallets",
+      [Query.equal("userId", ADMIN_ID)]
+    );
+
+    if (!wallets.documents.length) {
+      alert("Admin wallet not found");
+      return;
+    }
+
+    const wallet = wallets.documents[0];
+
+    // 💰 Add balance
+    await databases.updateDocument(
+      DATABASE_ID,
+      "wallets",
+      wallet.$id,
+      {
+        balance: Number(wallet.balance || 0) + Number(fee)
+      }
+    );
+
+    // ✅ Mark game complete
+    await databases.updateDocument(
+      DATABASE_ID,
+      "games",
+      gameId,
+      {
+        status: "completed"
+      }
+    );
+
+    alert("✅ Admin paid");
+
+    load();
+
+  } catch (e) {
+    alert("❌ Error: " + e.message);
+  }
+}
+
+// =========================
+// AUTO REFRESH
+// =========================
+load();
+setInterval(load, 4000);
+
+</script>
+
+</body>
+</html>
