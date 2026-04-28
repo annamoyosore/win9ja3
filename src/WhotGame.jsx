@@ -5,7 +5,7 @@ const GAME_COLLECTION = "games";
 const WALLET_COLLECTION = "wallets";
 
 // 🔥 SET YOUR REAL ADMIN USER ID HERE
-const ADMIN_ID = "PUT_YOUR_ADMIN_USER_ID_HERE";
+const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
 // DECODE CARD
