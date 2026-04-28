@@ -202,10 +202,9 @@ export default function WhotGame({ gameId, goHome }) {
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
   const payoutRef = useRef(false);
-  const [popup, setPopup] = useState(null);
 
   useEffect(() => {
-    account.get().then(u => setUserId(u.$id));
+    account.get().then(u => setUserId(u.$id)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -225,46 +224,11 @@ export default function WhotGame({ gameId, goHome }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      async (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
-
-        if (parsed.status === "finished" && !parsed.payoutDone && !payoutRef.current) {
-          payoutRef.current = true;
-
-          const total = Number(match?.pot || 0);
-          const adminCut = total * 0.1;
-          const winnerAmount = total - adminCut;
-
-          const w = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", parsed.winnerId)]
-          );
-
-          if (w.documents.length) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              w.documents[0].$id,
-              { balance: Number(w.documents[0].balance || 0) + winnerAmount }
-            );
-          }
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id,
-            { payoutDone: true }
-          );
-
-          setPopup("💰 Payout Completed!");
-        }
-      }
+      (res) => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
-  }, [gameId, userId, match]);
+  }, [gameId, userId]);
 
   if (!game || !userId) return <div>Loading...</div>;
 
@@ -278,10 +242,11 @@ export default function WhotGame({ gameId, goHome }) {
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
   const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
+  // =========================
+  // END ROUND
+  // =========================
   async function endRound(g, winnerIdx) {
     g.scores[winnerIdx]++;
-
-    setPopup(winnerIdx === myIdx ? "🎉 You won round!" : "😢 You lost round");
 
     if (g.scores[winnerIdx] >= 2) {
       await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
@@ -289,8 +254,6 @@ export default function WhotGame({ gameId, goHome }) {
         status: "finished",
         winnerId: g.players[winnerIdx]
       });
-
-      setPopup(winnerIdx === myIdx ? "🏆 YOU WON MATCH!" : "💀 YOU LOST MATCH");
       return;
     }
 
@@ -304,9 +267,16 @@ export default function WhotGame({ gameId, goHome }) {
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
   }
 
+  // =========================
+  // PLAY CARD (FIXED)
+  // =========================
   async function playCard(i) {
     const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
-    if (g.turn !== userId) return;
+
+    if (g.turn !== userId) {
+      beep(150);
+      return;
+    }
 
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
@@ -314,6 +284,9 @@ export default function WhotGame({ gameId, goHome }) {
 
     if (g.pendingPick > 0 && current.number !== 2) {
       beep(200, 400);
+      g.history.push("🔴 MUST PLAY 2 OR DRAW");
+      setGame({ ...g });
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
       return;
     }
 
@@ -322,37 +295,76 @@ export default function WhotGame({ gameId, goHome }) {
       current.shape !== topDecoded.shape &&
       current.number !== 14
     ) {
-      beep(120, 300);
+      beep(120);
+      g.history.push("🔴 INVALID MOVE");
+      setGame({ ...g });
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
       return;
     }
 
     g.hands[myIdx].splice(i, 1);
+
+    let nextTurn = g.players[oppIdx];
+
+    if (current.number === 2) {
+      g.pendingPick += 2;
+      g.history.push(`🔥 PICK 2 → ${g.pendingPick}`);
+    }
+
+    if (current.number === 8) {
+      nextTurn = userId;
+      g.history.push("⛔ SUSPENSION");
+    }
+
+    if (current.number === 1) {
+      nextTurn = userId;
+      g.history.push("🔁 HOLD ON");
+    }
+
+    if (current.number === 14) {
+      nextTurn = userId;
+      g.history.push("🛒 MARKET");
+    }
 
     if (g.hands[myIdx].length === 0) {
       await endRound(g, myIdx);
       return;
     }
 
+    setGame({ ...g });
+
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
       discard: card,
-      turn: g.players[oppIdx]
+      turn: nextTurn
     });
   }
 
+  // =========================
+  // DRAW MARKET
+  // =========================
   async function drawMarket() {
     const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
     if (g.turn !== userId) return;
 
+    let count = g.pendingPick > 0 ? g.pendingPick : 1;
+
     if (!g.deck.length) {
       const winner =
         g.hands[myIdx].length < g.hands[oppIdx].length ? myIdx : oppIdx;
-
       await endRound(g, winner);
       return;
     }
 
-    g.hands[myIdx].push(g.deck.pop());
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
+    }
+
+    g.pendingPick = 0;
+    g.history.push(`📦 DRAW ${count}`);
+
+    setGame({ ...g });
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
@@ -408,10 +420,15 @@ export default function WhotGame({ gameId, goHome }) {
           ))}
         </div>
 
+        {/* HISTORY */}
+        <div style={styles.history}>
+          {game.history.slice().reverse().map((h, i) => (
+            <div key={i}>{h}</div>
+          ))}
+        </div>
+
         <button onClick={goHome}>Exit</button>
       </div>
-
-      {popup && <div style={styles.popup}>{popup}</div>}
     </div>
   );
 }
@@ -461,12 +478,11 @@ const styles = {
     borderRadius: 8,
     border: "none"
   },
-  popup: {
-    position: "fixed",
-    top: "40%",
-    width: "100%",
-    textAlign: "center",
-    fontSize: 28,
-    color: "#fff"
+  history: {
+    marginTop: 10,
+    maxHeight: 120,
+    overflow: "auto",
+    fontSize: 12,
+    color: "#ff4d4d"
   }
 };
