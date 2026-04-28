@@ -2,10 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
-const MATCH_COLLECTION = "matches";
-const WALLET_COLLECTION = "wallets";
-
-const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
 // 🔊 SOUND
@@ -52,6 +48,30 @@ function createDeck() {
 }
 
 // =========================
+// START NEXT ROUND
+// =========================
+function startNextRound(g) {
+  const deck = createDeck();
+
+  const hands = [
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ];
+
+  const top = deck.pop();
+
+  return {
+    ...g,
+    hands,
+    deck,
+    discard: top,
+    pendingPick: 0,
+    history: [`--- ROUND ${g.round} ---`],
+    turn: g.players[g.round % 2]
+  };
+}
+
+// =========================
 // CARD DECODE
 // =========================
 function decodeCard(str) {
@@ -80,18 +100,13 @@ function parseGame(g) {
     players: g.players?.split(",") || [],
     deck: g.deck?.split(",").filter(Boolean) || [],
     hands:
-      g.hands?.split("|").map((p) =>
+      g.hands?.split("|").map(p =>
         p.split(",").filter(Boolean)
       ) || [[], []],
     pendingPick: Number(g.pendingPick || 0),
     history: g.history?.split("||").filter(Boolean) || [],
     scores: g.scores?.split(",").map(Number) || [0, 0],
-    round: Number(g.round || 1),
-    pot: Number(g.pot || 0),
-    stake: Number(g.stake || 0),
-    hostName: g.hostName || "Player 1",
-    opponentName: g.opponentName || "Player 2",
-    payoutDone: Boolean(g.payoutDone)
+    round: Number(g.round || 1)
   };
 }
 
@@ -100,7 +115,7 @@ function parseGame(g) {
 // =========================
 function encodeGame(g) {
   return {
-    hands: g.hands.map((p) => p.join(",")).join("|"),
+    hands: g.hands.map(p => p.join(",")).join("|"),
     deck: g.deck.join(","),
     discard: g.discard,
     pendingPick: String(g.pendingPick),
@@ -119,10 +134,8 @@ export default function WhotGame({ gameId, goHome }) {
   const [processing, setProcessing] = useState(false);
   const [invalidMove, setInvalidMove] = useState("");
 
-  const payoutRef = useRef(false);
-
   useEffect(() => {
-    account.get().then((u) => setUserId(u.$id));
+    account.get().then(u => setUserId(u.$id));
   }, []);
 
   useEffect(() => {
@@ -141,10 +154,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
-      }
+      res => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
@@ -156,14 +166,12 @@ export default function WhotGame({ gameId, goHome }) {
   const oppIdx = myIdx === 0 ? 1 : 0;
 
   const hand = game.hands[myIdx];
-  const opponentHand = game.hands[oppIdx];
   const top = decodeCard(game.discard);
 
-  const myName =
-    myIdx === 0 ? game.hostName : game.opponentName;
+  const myName = myIdx === 0 ? "You" : "Opponent";
 
   // =========================
-  // PLAY CARD (FIXED HOLD ON)
+  // PLAY CARD
   // =========================
   async function playCard(i) {
     if (processing) return;
@@ -203,51 +211,56 @@ export default function WhotGame({ gameId, goHome }) {
 
     beep(500, 80);
 
-    // =========================
-    // ✅ FIXED RULES
-    // =========================
-    if (current.number === 2) {
-      g.pendingPick += 2;
-      g.history.push(`${myName}: 🔥 PICK 2`);
-    }
-
-    else if (current.number === 8) {
-      nextTurn = userId; // skip opponent
-      g.history.push(`${myName}: ⛔ SUSPENSION`);
-    }
-
-    else if (current.number === 1) {
-      nextTurn = userId; // ✅ FIXED HOLD ON
-      g.history.push(`${myName}: 🔁 HOLD ON`);
-    }
-
+    // RULES
+    if (current.number === 2) g.pendingPick += 2;
+    else if (current.number === 8) nextTurn = userId;
+    else if (current.number === 1) nextTurn = userId;
     else if (current.number === 14) {
       g.pendingPick += 1;
-      nextTurn = userId; // ✅ CONTINUE PLAY
-      g.history.push(`${myName}: 🛒 MARKET`);
-    }
-
-    else {
-      g.history.push(
-        `${myName}: ${current.shape} ${current.number}`
-      );
+      nextTurn = userId;
     }
 
     // =========================
-    // WIN CHECK
+    // 🏆 ROUND WIN FIX
     // =========================
     if (g.hands[myIdx].length === 0) {
+      g.scores[myIdx] += 1;
+
+      g.history.push(`🏆 ${myName} WON ROUND ${g.round}`);
+
+      // MATCH WIN (BEST OF 3)
+      if (g.scores[myIdx] >= 2) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          {
+            ...encodeGame(g),
+            discard: card,
+            status: "finished",
+            winnerId: userId
+          }
+        );
+        return;
+      }
+
+      // NEXT ROUND
+      g.round += 1;
+
+      const next = startNextRound(g);
+
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId,
         {
-          ...encodeGame(g),
-          discard: card,
-          status: "finished",
-          winnerId: userId
+          ...encodeGame(next),
+          discard: next.discard,
+          deck: next.deck.join(","),
+          turn: next.turn
         }
       );
+
       return;
     }
 
@@ -277,10 +290,7 @@ export default function WhotGame({ gameId, goHome }) {
       )
     );
 
-    if (g.turn !== userId) {
-      setInvalidMove("Not your turn");
-      return;
-    }
+    if (g.turn !== userId) return;
 
     let count = g.pendingPick || 1;
 
@@ -290,8 +300,6 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
-
-    g.history.push(`${myName}: 📦 DREW ${count}`);
 
     await databases.updateDocument(
       DATABASE_ID,
@@ -312,15 +320,15 @@ export default function WhotGame({ gameId, goHome }) {
       <div style={styles.box}>
         <h2>🎮 WHOT GAME</h2>
 
+        <p>Score: {game.scores[0]} - {game.scores[1]}</p>
+        <p>Round: {game.round}</p>
+
         {invalidMove && (
           <p style={{ color: "red" }}>{invalidMove}</p>
         )}
 
         <p>
-          Turn:{" "}
-          {game.turn === userId
-            ? "🟢 YOU"
-            : "⏳ OPPONENT"}
+          Turn: {game.turn === userId ? "🟢 YOU" : "⏳ OPPONENT"}
         </p>
 
         <p>Top: {top?.shape} {top?.number}</p>
