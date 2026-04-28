@@ -198,7 +198,6 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const payoutRef = useRef(false);
 
   useEffect(() => {
     account.get().then(u => setUserId(u.$id)).catch(() => {});
@@ -211,8 +210,6 @@ export default function WhotGame({ gameId, goHome }) {
       try {
         const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
         const parsed = parseGame(g);
-
-        // 🚨 fix invalid player index
         if (!parsed.players.includes(userId)) return;
 
         setGame(parsed);
@@ -228,10 +225,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
-      }
+      (res) => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
@@ -242,8 +236,6 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   const myIdx = game.players.indexOf(userId);
-  if (myIdx === -1) return <div>Loading...</div>;
-
   const oppIdx = myIdx === 0 ? 1 : 0;
 
   const hand = game.hands[myIdx] || [];
@@ -264,6 +256,15 @@ export default function WhotGame({ gameId, goHome }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
+    // 🚨 PICK 2 FORCE
+    if (g.pendingPick > 0 && current.number !== 2) {
+      beep(200, 400);
+      g.history.push("🔴 MUST PLAY 2 OR DRAW");
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
+      return;
+    }
+
+    // INVALID
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
@@ -279,10 +280,9 @@ export default function WhotGame({ gameId, goHome }) {
 
     let nextTurn = g.players[oppIdx];
 
-    // RULES
     if (current.number === 2) {
       g.pendingPick += 2;
-      g.history.push("🔥 PICK 2");
+      g.history.push(`🔥 PICK 2 → ${g.pendingPick}`);
     }
 
     if (current.number === 8) {
@@ -301,6 +301,8 @@ export default function WhotGame({ gameId, goHome }) {
       g.history.push("🛒 MARKET");
     }
 
+    setGame({ ...g });
+
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
       discard: card,
@@ -309,13 +311,13 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW MARKET (FIX PICK 2)
+  // DRAW MARKET
   // =========================
   async function drawMarket() {
     const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
     if (g.turn !== userId) return;
 
-    let count = g.pendingPick || 1;
+    let count = g.pendingPick > 0 ? g.pendingPick : 1;
 
     for (let i = 0; i < count; i++) {
       if (!g.deck.length) break;
@@ -323,7 +325,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
-    g.history.push(`📦 DREW ${count}`);
+    g.history.push(`📦 DRAW ${count}`);
 
     setGame({ ...g });
 
@@ -346,7 +348,14 @@ export default function WhotGame({ gameId, goHome }) {
 
         <div style={{ textAlign: "center" }}>
           {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
+            <img
+              key={i}
+              src={drawBack()}
+              style={{
+                width: 40,
+                animation: oppCards === 1 ? "blink 0.6s infinite" : "none"
+              }}
+            />
           ))}
           <div>{oppName}: {oppCards} cards</div>
         </div>
@@ -389,6 +398,15 @@ export default function WhotGame({ gameId, goHome }) {
 
         <button onClick={goHome}>Exit</button>
       </div>
+
+      {/* BLINK ANIMATION */}
+      <style>
+        {`@keyframes blink {
+          0% { opacity: 1; }
+          50% { opacity: 0.2; }
+          100% { opacity: 1; }
+        }`}
+      </style>
     </div>
   );
 }
