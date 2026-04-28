@@ -33,7 +33,7 @@ function createDeck() {
 }
 
 // =========================
-// CREATE GAME (SIMPLE)
+// CREATE GAME (FIXED)
 // =========================
 async function createGame(match, opponentId) {
   const deck = createDeck();
@@ -49,19 +49,21 @@ async function createGame(match, opponentId) {
     {
       matchId: match.$id,
 
-      // ✅ SIMPLE STRING
       players: `${match.hostId},${opponentId}`,
 
       hands: `${hand1.join(",")}|${hand2.join(",")}`,
       deck: deck.join(","),
       discard: top,
 
-      // 🔥 opponent starts
       turn: opponentId,
 
       status: "running",
       round: "1",
       winnerId: "",
+
+      // ✅ NEW: financials
+      stake: String(match.stake),
+      pot: String(match.pot || match.stake * 2),
 
       turnStartTime: new Date().toISOString()
     }
@@ -109,7 +111,7 @@ export default function Lobby({ goGame, back }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      (res) => {
+      async (res) => {
         const m = res.payload;
 
         refresh(user.$id);
@@ -121,6 +123,27 @@ export default function Lobby({ goGame, back }) {
           m.gameId
         ) {
           goGame(m.gameId, m.stake);
+        }
+
+        // 🔥 AUTO MARK FINISHED
+        if (m.gameId) {
+          try {
+            const game = await databases.getDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              m.gameId
+            );
+
+            if (game.status === "finished" && m.status !== "finished") {
+              await databases.updateDocument(
+                DATABASE_ID,
+                MATCH_COLLECTION,
+                m.$id,
+                { status: "finished" }
+              );
+            }
+
+          } catch {}
         }
       }
     );
@@ -134,7 +157,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD AVAILABLE MATCHES
+  // LOAD MATCHES
   // =========================
   async function loadMatches() {
     const res = await databases.listDocuments(
@@ -147,7 +170,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD ACTIVE MATCHES
+  // LOAD ACTIVE
   // =========================
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
@@ -202,10 +225,9 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // 🔥 CREATE GAME
+      // 🔥 CREATE GAME WITH POT
       const game = await createGame(updated, user.$id);
 
-      // 🔥 SAVE GAME ID
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -215,7 +237,6 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // 🔥 GO GAME IMMEDIATELY
       goGame(game.$id, updated.stake);
 
     } catch (err) {
@@ -285,10 +306,9 @@ export default function Lobby({ goGame, back }) {
           <button
             onClick={() => {
               if (!m.gameId) {
-                alert("Not ready");
+                alert("Game not ready");
                 return;
               }
-
               goGame(m.gameId, m.stake);
             }}
           >
