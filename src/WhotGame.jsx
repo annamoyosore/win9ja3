@@ -57,6 +57,26 @@ function createDeck() {
 }
 
 // =========================
+// 🎴 SHAPE UI
+// =========================
+function getShapeSymbol(shape) {
+  switch (shape) {
+    case "circle":
+      return "⚪";
+    case "triangle":
+      return "🔺";
+    case "square":
+      return "🟥";
+    case "cross":
+      return "❌";
+    case "star":
+      return "⭐";
+    default:
+      return "?";
+  }
+}
+
+// =========================
 // CARD DECODE
 // =========================
 function decodeCard(str) {
@@ -153,11 +173,10 @@ export default function WhotGame({ gameId, goHome }) {
   }, [gameId, userId]);
 
   // =========================
-  // 💰 PAYOUT (WITH ADMIN CUT)
+  // 💰 PAYOUT
   // =========================
   useEffect(() => {
     if (!game || !game.winnerId || game.payoutDone) return;
-
     handlePayout(game);
   }, [game]);
 
@@ -165,75 +184,56 @@ export default function WhotGame({ gameId, goHome }) {
     if (payoutRef.current) return;
     payoutRef.current = true;
 
-    try {
-      const total = Number(g.pot || 0);
+    const total = Number(g.pot || 0);
+    const adminCut = total * 0.1;
+    const winnerAmount = total - adminCut;
 
-      const adminCut = total * 0.1;
-      const winnerAmount = total - adminCut;
+    // Winner
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", g.winnerId)]
+    );
 
-      // 💰 WINNER
-      const wallets = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", g.winnerId)]
-      );
-
-      if (wallets.documents.length) {
-        const w = wallets.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          w.$id,
-          {
-            balance: Number(w.balance || 0) + winnerAmount
-          }
-        );
-      }
-
-      // 👑 ADMIN CUT
-      const adminWallet = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", ADMIN_ID)]
-      );
-
-      if (adminWallet.documents.length) {
-        const w = adminWallet.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          w.$id,
-          {
-            balance: Number(w.balance || 0) + adminCut
-          }
-        );
-      }
-
-      // 🏁 CLOSE MATCH
-      if (g.matchId) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          g.matchId,
-          {
-            status: "finished",
-            winnerId: g.winnerId
-          }
-        );
-      }
-
+    if (w.documents.length) {
       await databases.updateDocument(
         DATABASE_ID,
-        GAME_COLLECTION,
-        g.$id,
-        { payoutDone: true }
+        WALLET_COLLECTION,
+        w.documents[0].$id,
+        {
+          balance:
+            Number(w.documents[0].balance || 0) +
+            winnerAmount
+        }
       );
-
-    } catch (err) {
-      console.error(err.message);
     }
+
+    // Admin
+    const a = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", ADMIN_ID)]
+    );
+
+    if (a.documents.length) {
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        a.documents[0].$id,
+        {
+          balance:
+            Number(a.documents[0].balance || 0) +
+            adminCut
+        }
+      );
+    }
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      g.$id,
+      { payoutDone: true }
+    );
   }
 
   if (!game || !userId) return <div>Loading...</div>;
@@ -251,7 +251,7 @@ export default function WhotGame({ gameId, goHome }) {
     myIdx === 0 ? game.opponentName : game.hostName;
 
   // =========================
-  // PLAY CARD (RULES ONLY FIXED)
+  // PLAY
   // =========================
   async function playCard(i) {
     if (processing) return;
@@ -289,7 +289,6 @@ export default function WhotGame({ gameId, goHome }) {
 
     let nextTurn = g.players[oppIdx];
 
-    // 🔥 RULES ONLY
     if (current.number === 2) g.pendingPick += 2;
     else if (current.number === 8) nextTurn = userId;
     else if (current.number === 1) nextTurn = userId;
@@ -316,7 +315,6 @@ export default function WhotGame({ gameId, goHome }) {
         return;
       }
 
-      // NEXT ROUND
       let deck = createDeck();
       g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
       g.discard = deck.pop();
@@ -351,9 +349,6 @@ export default function WhotGame({ gameId, goHome }) {
     setProcessing(false);
   }
 
-  // =========================
-  // DRAW
-  // =========================
   async function drawMarket() {
     const g = parseGame(
       await databases.getDocument(
@@ -386,7 +381,7 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // UI (UNCHANGED STYLE)
+  // UI (CARD FIXED)
   // =========================
   return (
     <div style={styles.bg}>
@@ -418,9 +413,19 @@ export default function WhotGame({ gameId, goHome }) {
           {hand.map((c, i) => {
             const d = decodeCard(c);
             return (
-              <button key={i} onClick={() => playCard(i)}>
-                {d.shape} {d.number}
-              </button>
+              <div
+                key={i}
+                style={styles.card}
+                onClick={() => playCard(i)}
+              >
+                <div style={styles.numTop}>{d.number}</div>
+                <div style={styles.shape}>
+                  {getShapeSymbol(d.shape)}
+                </div>
+                <div style={styles.numBottom}>
+                  {d.number}
+                </div>
+              </div>
             );
           })}
         </div>
@@ -432,7 +437,7 @@ export default function WhotGame({ gameId, goHome }) {
 }
 
 // =========================
-// STYLES (UNCHANGED)
+// STYLES
 // =========================
 const styles = {
   bg: {
@@ -456,5 +461,30 @@ const styles = {
     gap: 6,
     justifyContent: "center",
     marginTop: 10
+  },
+  card: {
+    width: 60,
+    height: 90,
+    background: "#fff",
+    color: "#000",
+    borderRadius: 8,
+    padding: 6,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    cursor: "pointer",
+    fontWeight: "bold"
+  },
+  numTop: {
+    fontSize: 12,
+    textAlign: "left"
+  },
+  numBottom: {
+    fontSize: 12,
+    textAlign: "right"
+  },
+  shape: {
+    fontSize: 24,
+    textAlign: "center"
   }
 };
