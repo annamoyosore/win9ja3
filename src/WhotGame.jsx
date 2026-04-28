@@ -77,7 +77,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 CANVAS CARD
+// 🎨 CANVAS CARD (UNCHANGED)
 // =========================
 const cache = new Map();
 
@@ -146,6 +146,8 @@ function parseGame(g) {
     history: g.history?.split("||").filter(Boolean) || [],
     scores: g.scores?.split(",").map(Number) || [0, 0],
     round: Number(g.round || 1),
+    hostName: g.hostName || "Player 1",
+    opponentName: g.opponentName || "Player 2",
     payoutDone: Boolean(g.payoutDone)
   };
 }
@@ -156,7 +158,7 @@ function encodeGame(g) {
     deck: g.deck.join(","),
     discard: g.discard,
     pendingPick: String(g.pendingPick),
-    history: g.history.slice(-12).join("||"),
+    history: g.history.slice(-20).join("||"),
     scores: g.scores.join(","),
     round: String(g.round)
   };
@@ -208,7 +210,7 @@ export default function WhotGame({ gameId, goHome }) {
   }, [gameId, userId]);
 
   // =========================
-  // 💰 PAYOUT
+  // 💰 PAYOUT (UNCHANGED)
   // =========================
   async function handlePayout(g) {
     const total = Number(match?.pot || 0);
@@ -261,11 +263,11 @@ export default function WhotGame({ gameId, goHome }) {
   const hand = game.hands[myIdx];
   const top = decodeCard(game.discard);
 
-  const playerName =
-    myIdx === 0 ? match?.hostName : match?.opponentName;
+  const myName = myIdx === 0 ? game.hostName : game.opponentName;
+  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
   // =========================
-  // PLAY CARD + HISTORY
+  // PLAY CARD (RULES + HISTORY FIXED)
   // =========================
   async function playCard(i) {
     const g = parseGame(
@@ -288,26 +290,26 @@ export default function WhotGame({ gameId, goHome }) {
 
     let nextTurn = g.players[oppIdx];
 
-    // RULES + HISTORY
+    // ✅ RULES RESTORED
     if (current.number === 2) {
       g.pendingPick += 2;
-      g.history.push(`${playerName}: 🔥 PICK 2`);
+      g.history.push(`${myName}: 🔥 PICK 2`);
     }
     else if (current.number === 8) {
       nextTurn = userId;
-      g.history.push(`${playerName}: ⛔ SUSPENSION`);
+      g.history.push(`${myName}: ⛔ SUSPENSION`);
     }
     else if (current.number === 1) {
       nextTurn = userId;
-      g.history.push(`${playerName}: 🔁 HOLD ON`);
+      g.history.push(`${myName}: 🔁 HOLD ON`);
     }
     else if (current.number === 14) {
       g.pendingPick += 1;
       nextTurn = userId;
-      g.history.push(`${playerName}: 🛒 MARKET`);
+      g.history.push(`${myName}: 🛒 MARKET`);
     }
     else {
-      g.history.push(`${playerName}: ${current.shape} ${current.number}`);
+      g.history.push(`${myName}: ${current.shape} ${current.number}`);
     }
 
     // ROUND WIN
@@ -346,7 +348,7 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW + HISTORY
+  // DRAW
   // =========================
   async function drawMarket() {
     const g = parseGame(
@@ -363,7 +365,8 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
-    g.history.push(`${playerName}: 📦 DRAW ${count}`);
+
+    g.history.push(`${myName}: 📦 DREW ${count}`);
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
@@ -380,9 +383,9 @@ export default function WhotGame({ gameId, goHome }) {
         <h2>🎮 WHOT GAME</h2>
 
         <div style={styles.row}>
-          <span>{match?.hostName}</span>
+          <span>{myName}</span>
           <span>VS</span>
-          <span>{match?.opponentName}</span>
+          <span>{oppName}</span>
         </div>
 
         <div style={styles.row}>
@@ -415,7 +418,7 @@ export default function WhotGame({ gameId, goHome }) {
           ))}
         </div>
 
-        {/* ✅ HISTORY */}
+        {/* ✅ HISTORY WITH PLAYER NAMES */}
         <div style={styles.history}>
           {game.history.slice().reverse().map((h, i) => (
             <div key={i}>{h}</div>
@@ -429,7 +432,7 @@ export default function WhotGame({ gameId, goHome }) {
 }
 
 // =========================
-// STYLES
+// STYLES (UNCHANGED)
 // =========================
 const styles = {
   bg: {
