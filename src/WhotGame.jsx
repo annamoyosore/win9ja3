@@ -77,7 +77,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 CANVAS CARD (UNCHANGED)
+// 🎨 CANVAS CARD
 // =========================
 const cache = new Map();
 
@@ -209,9 +209,6 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  // =========================
-  // 💰 PAYOUT (UNCHANGED)
-  // =========================
   async function handlePayout(g) {
     const total = Number(match?.pot || 0);
     const adminCut = total * 0.1;
@@ -267,7 +264,7 @@ export default function WhotGame({ gameId, goHome }) {
   const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
   // =========================
-  // PLAY CARD (RULES + HISTORY FIXED)
+  // PLAY CARD (FIXED)
   // =========================
   async function playCard(i) {
     const g = parseGame(
@@ -280,17 +277,25 @@ export default function WhotGame({ gameId, goHome }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
+    // ❌ INVALID MOVE
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
-    ) return;
+    ) {
+      beep(120, 300);
+      g.history.push(`${myName}: ❌ INVALID MOVE`);
+
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g)
+      });
+      return;
+    }
 
     g.hands[myIdx].splice(i, 1);
 
     let nextTurn = g.players[oppIdx];
 
-    // ✅ RULES RESTORED
     if (current.number === 2) {
       g.pendingPick += 2;
       g.history.push(`${myName}: 🔥 PICK 2`);
@@ -312,7 +317,6 @@ export default function WhotGame({ gameId, goHome }) {
       g.history.push(`${myName}: ${current.shape} ${current.number}`);
     }
 
-    // ROUND WIN
     if (g.hands[myIdx].length === 0) {
       g.scores[myIdx] += 1;
 
@@ -348,7 +352,7 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW
+  // DRAW (FIXED)
   // =========================
   async function drawMarket() {
     const g = parseGame(
@@ -364,8 +368,47 @@ export default function WhotGame({ gameId, goHome }) {
       g.hands[myIdx].push(g.deck.pop());
     }
 
-    g.pendingPick = 0;
+    // 🚨 MARKET EMPTY
+    if (!g.deck.length) {
+      beep(800, 400);
 
+      const myCards = g.hands[myIdx].length;
+      const oppCards = g.hands[oppIdx].length;
+
+      let winnerIdx;
+      if (myCards < oppCards) winnerIdx = myIdx;
+      else if (oppCards < myCards) winnerIdx = oppIdx;
+      else winnerIdx = null;
+
+      if (winnerIdx !== null) g.scores[winnerIdx] += 1;
+
+      g.history.push("⚠️ MARKET EMPTY → ROUND ENDED");
+
+      if (winnerIdx !== null && g.scores[winnerIdx] >= 2) {
+        await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+          ...encodeGame(g),
+          status: "finished",
+          winnerId: g.players[winnerIdx]
+        });
+        return;
+      }
+
+      let deck = createDeck();
+      g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
+      g.discard = deck.pop();
+      g.deck = deck;
+      g.pendingPick = 0;
+      g.round += 1;
+
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g),
+        turn: g.players[1]
+      });
+
+      return;
+    }
+
+    g.pendingPick = 0;
     g.history.push(`${myName}: 📦 DREW ${count}`);
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
@@ -374,9 +417,6 @@ export default function WhotGame({ gameId, goHome }) {
     });
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
@@ -418,7 +458,6 @@ export default function WhotGame({ gameId, goHome }) {
           ))}
         </div>
 
-        {/* ✅ HISTORY WITH PLAYER NAMES */}
         <div style={styles.history}>
           {game.history.slice().reverse().map((h, i) => (
             <div key={i}>{h}</div>
@@ -431,9 +470,6 @@ export default function WhotGame({ gameId, goHome }) {
   );
 }
 
-// =========================
-// STYLES (UNCHANGED)
-// =========================
 const styles = {
   bg: {
     minHeight: "100vh",
