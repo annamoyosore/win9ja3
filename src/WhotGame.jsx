@@ -69,63 +69,6 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 CANVAS CARD
-// =========================
-const cache = new Map();
-
-function drawCard(card) {
-  if (!card) return null;
-
-  const key = `${card.shape}_${card.number}`;
-  if (cache.has(key)) return cache.get(key);
-
-  const c = document.createElement("canvas");
-  c.width = 70;
-  c.height = 100;
-  const ctx = c.getContext("2d");
-
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, 70, 100);
-
-  ctx.strokeStyle = "#e11d48";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(2, 2, 66, 96);
-
-  ctx.fillStyle = "#e11d48";
-  ctx.font = "bold 12px Arial";
-  ctx.fillText(card.number, 5, 15);
-
-  const cx = 35, cy = 50;
-
-  if (card.shape === "circle") {
-    ctx.beginPath();
-    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  if (card.shape === "square") ctx.fillRect(cx - 10, cy - 10, 20, 20);
-
-  if (card.shape === "triangle") {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - 10);
-    ctx.lineTo(cx - 10, cy + 10);
-    ctx.lineTo(cx + 10, cy + 10);
-    ctx.fill();
-  }
-
-  if (card.shape === "star") ctx.fillText("★", cx - 6, cy + 5);
-
-  if (card.shape === "cross") {
-    ctx.fillRect(cx - 2, cy - 10, 4, 20);
-    ctx.fillRect(cx - 10, cy - 2, 20, 4);
-  }
-
-  const img = c.toDataURL();
-  cache.set(key, img);
-  return img;
-}
-
-// =========================
 // PARSE GAME
 // =========================
 function parseGame(g) {
@@ -138,8 +81,6 @@ function parseGame(g) {
     history: g.history?.split("||").filter(Boolean) || [],
     scores: g.scores?.split(",").map(Number) || [0, 0],
     round: Number(g.round || 1),
-    pot: Number(g.pot || 0),
-    stake: Number(g.stake || 0),
     hostName: g.hostName || "Player 1",
     opponentName: g.opponentName || "Player 2",
     payoutDone: Boolean(g.payoutDone)
@@ -166,8 +107,10 @@ function encodeGame(g) {
 // =========================
 export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
+  const [matchData, setMatchData] = useState(null); // ✅ FIX
   const [userId, setUserId] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(""); // ✅ FIX
 
   const payoutRef = useRef(false);
 
@@ -181,6 +124,16 @@ export default function WhotGame({ gameId, goHome }) {
     const load = async () => {
       const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
       setGame(parseGame(g));
+
+      // ✅ FETCH MATCH (stake + pot)
+      if (g.matchId) {
+        const m = await databases.getDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          g.matchId
+        );
+        setMatchData(m);
+      }
     };
 
     load();
@@ -213,11 +166,11 @@ export default function WhotGame({ gameId, goHome }) {
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
 
   // =========================
-  // 💰 PAYOUT (UNCHANGED)
+  // 💰 PAYOUT
   // =========================
   async function handlePayout(g) {
-    const adminFee = Math.floor(g.pot * 0.1);
-    const winnerAmount = g.pot - adminFee;
+    const adminFee = Math.floor((matchData?.pot || 0) * 0.1);
+    const winnerAmount = (matchData?.pot || 0) - adminFee;
 
     const wallets = await databases.listDocuments(DATABASE_ID, WALLET_COLLECTION);
 
@@ -254,11 +207,17 @@ export default function WhotGame({ gameId, goHome }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
+    // ✅ INVALID MOVE FIX
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
-    ) return setProcessing(false);
+    ) {
+      beep(150, 200);
+      setError("Invalid move ❌");
+      setTimeout(() => setError(""), 1500);
+      return setProcessing(false);
+    }
 
     g.hands[myIdx].splice(i, 1);
 
@@ -266,7 +225,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     beep(500, 80);
 
-    // RULES + HISTORY
+    // RULES
     if (current.number === 2) {
       g.pendingPick += 2;
       g.history.push(`${myName}: 🔥 PICK 2`);
@@ -282,41 +241,6 @@ export default function WhotGame({ gameId, goHome }) {
       g.history.push(`${myName}: 🛒 MARKET`);
     } else {
       g.history.push(`${myName}: ${current.shape} ${current.number}`);
-    }
-
-    // 🏆 ROUND WIN
-    if (g.hands[myIdx].length === 0) {
-      g.scores[myIdx]++;
-      g.history.push(`🏆 ${myName} won round`);
-
-      // FINAL WIN
-      if (g.scores[myIdx] >= 2) {
-        await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-          ...encodeGame(g),
-          discard: card,
-          status: "finished",
-          winnerId: userId
-        });
-        return;
-      }
-
-      // 🔁 NEW ROUND
-      const deck = createDeck();
-      const h1 = deck.splice(0, 6);
-      const h2 = deck.splice(0, 6);
-      const top = deck.pop();
-
-      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-        hands: `${h1.join(",")}|${h2.join(",")}`,
-        deck: deck.join(","),
-        discard: top,
-        pendingPick: "0",
-        round: String(g.round + 1),
-        turn: g.players[oppIdx],
-        history: g.history.slice(-10).join("||")
-      });
-
-      return;
     }
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
@@ -373,10 +297,14 @@ export default function WhotGame({ gameId, goHome }) {
           <span>{game.scores[0]} - {game.scores[1]}</span>
         </div>
 
+        {/* ✅ FIXED STAKE + POT */}
         <div style={styles.row}>
-          <span>₦{game.stake}</span>
-          <span>🏦 ₦{game.pot}</span>
+          <span>₦{matchData?.stake || 0}</span>
+          <span>🏦 ₦{matchData?.pot || 0}</span>
         </div>
+
+        {/* ✅ ERROR DISPLAY */}
+        {error && <p style={{ color: "red" }}>{error}</p>}
 
         <p style={{ color: game.turn === userId ? "#22c55e" : "#f87171" }}>
           {game.turn === userId ? "YOUR TURN" : "OPPONENT"}
@@ -405,7 +333,6 @@ export default function WhotGame({ gameId, goHome }) {
           })}
         </div>
 
-        {/* ✅ HISTORY */}
         <div style={styles.history}>
           {game.history.slice().reverse().map((h, i) => (
             <div key={i}>{h}</div>
