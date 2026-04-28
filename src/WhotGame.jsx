@@ -77,7 +77,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 CANVAS CARD (INTACT)
+// 🎨 CANVAS CARD
 // =========================
 const cache = new Map();
 
@@ -197,7 +197,6 @@ export default function WhotGame({ gameId, goHome }) {
         const parsed = parseGame(res.payload);
         setGame(parsed);
 
-        // ✅ PAYOUT TRIGGER
         if (parsed.status === "finished" && !parsed.payoutDone && !payoutRef.current) {
           payoutRef.current = true;
           handlePayout(parsed);
@@ -209,14 +208,13 @@ export default function WhotGame({ gameId, goHome }) {
   }, [gameId, userId]);
 
   // =========================
-  // 💰 PAYOUT (10% ADMIN)
+  // 💰 PAYOUT
   // =========================
   async function handlePayout(g) {
     const total = Number(match?.pot || 0);
     const adminCut = total * 0.1;
     const winnerAmount = total - adminCut;
 
-    // winner
     const w = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
@@ -232,7 +230,6 @@ export default function WhotGame({ gameId, goHome }) {
       );
     }
 
-    // admin
     const a = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
@@ -264,8 +261,11 @@ export default function WhotGame({ gameId, goHome }) {
   const hand = game.hands[myIdx];
   const top = decodeCard(game.discard);
 
+  const playerName =
+    myIdx === 0 ? match?.hostName : match?.opponentName;
+
   // =========================
-  // PLAY CARD (RULES + ROUND FIX)
+  // PLAY CARD + HISTORY
   // =========================
   async function playCard(i) {
     const g = parseGame(
@@ -288,20 +288,32 @@ export default function WhotGame({ gameId, goHome }) {
 
     let nextTurn = g.players[oppIdx];
 
-    // RULES
-    if (current.number === 2) g.pendingPick += 2;
-    else if (current.number === 8) nextTurn = userId;
-    else if (current.number === 1) nextTurn = userId;
+    // RULES + HISTORY
+    if (current.number === 2) {
+      g.pendingPick += 2;
+      g.history.push(`${playerName}: 🔥 PICK 2`);
+    }
+    else if (current.number === 8) {
+      nextTurn = userId;
+      g.history.push(`${playerName}: ⛔ SUSPENSION`);
+    }
+    else if (current.number === 1) {
+      nextTurn = userId;
+      g.history.push(`${playerName}: 🔁 HOLD ON`);
+    }
     else if (current.number === 14) {
       g.pendingPick += 1;
       nextTurn = userId;
+      g.history.push(`${playerName}: 🛒 MARKET`);
+    }
+    else {
+      g.history.push(`${playerName}: ${current.shape} ${current.number}`);
     }
 
     // ROUND WIN
     if (g.hands[myIdx].length === 0) {
       g.scores[myIdx] += 1;
 
-      // FINAL WIN
       if (g.scores[myIdx] >= 2) {
         await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
           ...encodeGame(g),
@@ -311,7 +323,6 @@ export default function WhotGame({ gameId, goHome }) {
         return;
       }
 
-      // NEXT ROUND
       let deck = createDeck();
       g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
       g.discard = deck.pop();
@@ -335,7 +346,7 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW
+  // DRAW + HISTORY
   // =========================
   async function drawMarket() {
     const g = parseGame(
@@ -352,6 +363,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
+    g.history.push(`${playerName}: 📦 DRAW ${count}`);
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
@@ -403,6 +415,13 @@ export default function WhotGame({ gameId, goHome }) {
           ))}
         </div>
 
+        {/* ✅ HISTORY */}
+        <div style={styles.history}>
+          {game.history.slice().reverse().map((h, i) => (
+            <div key={i}>{h}</div>
+          ))}
+        </div>
+
         <button onClick={goHome}>Exit</button>
       </div>
     </div>
@@ -410,7 +429,7 @@ export default function WhotGame({ gameId, goHome }) {
 }
 
 // =========================
-// STYLES (UNCHANGED)
+// STYLES
 // =========================
 const styles = {
   bg: {
@@ -447,6 +466,12 @@ const styles = {
     display: "flex",
     justifyContent: "center",
     gap: 10
+  },
+  history: {
+    marginTop: 10,
+    maxHeight: 120,
+    overflow: "auto",
+    fontSize: 12
   },
   marketBtn: {
     background: "gold",
