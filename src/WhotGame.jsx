@@ -16,30 +16,28 @@ const ADMIN_ID = "69ef9fe863a02a7490b4";
 // 🔊 SOUND
 // =========================
 function beep(freq = 400, duration = 120) {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
 
-    osc.frequency.value = freq;
-    osc.type = "square";
+  osc.frequency.value = freq;
+  osc.type = "square";
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
 
-    osc.start();
+  osc.start();
 
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(
-      0.001,
-      ctx.currentTime + duration / 1000
-    );
+  gain.gain.setValueAtTime(0.2, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(
+    0.001,
+    ctx.currentTime + duration / 1000
+  );
 
-    setTimeout(() => {
-      osc.stop();
-      ctx.close();
-    }, duration);
-  } catch {}
+  setTimeout(() => {
+    osc.stop();
+    ctx.close();
+  }, duration);
 }
 
 // =========================
@@ -79,7 +77,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 CARD DRAW
+// 🎨 DRAW CARD
 // =========================
 const cache = new Map();
 
@@ -173,7 +171,6 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const payoutRef = useRef(false);
 
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
@@ -183,20 +180,25 @@ export default function WhotGame({ gameId, goHome }) {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      try {
-        const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-        setGame(parseGame(g));
+      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
+      setGame(parseGame(g));
 
-        if (g.matchId) {
-          const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
-          setMatch(m);
-        }
-      } catch (e) {
-        console.error("LOAD ERROR", e);
+      if (g.matchId) {
+        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
+        setMatch(m);
       }
     };
 
     load();
+
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+      (res) => {
+        setGame(parseGame(res.payload));
+      }
+    );
+
+    return () => unsub();
   }, [gameId, userId]);
 
   if (!game || !userId) return <div>Loading...</div>;
@@ -214,9 +216,7 @@ export default function WhotGame({ gameId, goHome }) {
   // PLAY CARD
   // =========================
   async function playCard(i) {
-    const g = parseGame(
-      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
-    );
+    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
 
     if (g.turn !== userId) return;
 
@@ -224,62 +224,50 @@ export default function WhotGame({ gameId, goHome }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    // ❌ INVALID MOVE
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
     ) {
-      beep(150, 300);
+      beep(120, 300);
       g.history.push(`${myName}: ❌ INVALID MOVE`);
-
-      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-        ...encodeGame(g)
-      });
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
       return;
     }
 
     g.hands[myIdx].splice(i, 1);
-
-    if (g.hands[myIdx].length === 1) {
-      beep(900, 200); // last card alert
-    }
-
-    let nextTurn = g.players[oppIdx];
-
-    if (current.number === 2) g.pendingPick += 2;
-    else if (current.number === 8) nextTurn = userId;
-    else if (current.number === 1) nextTurn = userId;
-    else if (current.number === 14) {
-      g.pendingPick += 1;
-      nextTurn = userId;
-    }
+    g.history.push(`${myName}: PLAYED`);
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
       discard: card,
-      turn: nextTurn
+      turn: g.players[oppIdx]
     });
   }
 
   // =========================
-  // DRAW MARKET (RESTORED)
+  // DRAW MARKET (FIXED)
   // =========================
   async function drawMarket() {
-    const g = parseGame(
-      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
-    );
+    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
 
     if (g.turn !== userId) return;
 
-    let count = g.pendingPick || 1;
+    if (!g.deck.length) {
+      beep(800, 400);
+      g.history.push("⚠️ MARKET EMPTY");
 
-    for (let i = 0; i < count; i++) {
-      if (!g.deck.length) break;
-      g.hands[myIdx].push(g.deck.pop());
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
+      return;
     }
 
-    g.pendingPick = 0;
+    const drawn = g.deck.pop();
+    g.hands[myIdx].push(drawn);
+
+    g.history.push(`${myName}: 📦 DREW 1`);
+
+    // ✅ INSTANT UI UPDATE
+    setGame({ ...g });
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
@@ -340,6 +328,9 @@ export default function WhotGame({ gameId, goHome }) {
   );
 }
 
+// =========================
+// STYLES (UNCHANGED)
+// =========================
 const styles = {
   bg: {
     minHeight: "100vh",
