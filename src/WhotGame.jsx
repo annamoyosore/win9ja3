@@ -63,7 +63,7 @@ function createDeck() {
 }
 
 // =========================
-// 🎴 DECODE CARD
+// 🎴 DECODE
 // =========================
 function decodeCard(str) {
   if (!str) return null;
@@ -83,7 +83,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎴 DRAW CARD (FIXED BLANK BUG)
+// 🎴 DRAW CARD
 // =========================
 const cache = new Map();
 
@@ -98,7 +98,6 @@ function drawCard(card) {
   c.height = 100;
   const ctx = c.getContext("2d");
 
-  // background
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, 70, 100);
 
@@ -230,45 +229,11 @@ export default function WhotGame({ gameId, goHome }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      async (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
-
-        // 💰 PAYOUT
-        if (parsed.status === "finished" && !parsed.payoutDone && !payoutRef.current) {
-          payoutRef.current = true;
-
-          const total = Number(match?.pot || 0);
-          const adminCut = total * 0.1;
-          const winnerAmount = total - adminCut;
-
-          const w = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", parsed.winnerId)]
-          );
-
-          if (w.documents.length) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              w.documents[0].$id,
-              { balance: Number(w.documents[0].balance || 0) + winnerAmount }
-            );
-          }
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id,
-            { payoutDone: true }
-          );
-        }
-      }
+      (res) => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
-  }, [gameId, userId, match]);
+  }, [gameId, userId]);
 
   if (!game || !userId) return <div>Loading...</div>;
 
@@ -281,6 +246,44 @@ export default function WhotGame({ gameId, goHome }) {
 
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
   const oppName = myIdx === 0 ? game.opponentName : game.hostName;
+
+  // =========================
+  // DRAW MARKET
+  // =========================
+  async function drawMarket() {
+    if (game.status === "finished") return;
+
+    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
+    if (g.turn !== userId) return;
+
+    let drawCount = g.pendingPick > 0 ? g.pendingPick : 1;
+
+    if (!g.deck.length) {
+      const myCards = g.hands[myIdx].length;
+      const oppCards = g.hands[oppIdx].length;
+
+      if (myCards !== oppCards) {
+        const winner = myCards < oppCards ? myIdx : oppIdx;
+        await endRound(g, winner);
+      }
+      return;
+    }
+
+    for (let i = 0; i < drawCount; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
+    }
+
+    g.pendingPick = 0;
+    g.history.push(`📦 DRAW ${drawCount}`);
+
+    setGame({ ...g });
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      turn: g.players[oppIdx]
+    });
+  }
 
   // =========================
   // END ROUND
@@ -323,6 +326,8 @@ export default function WhotGame({ gameId, goHome }) {
       await endRound(g, myIdx);
       return;
     }
+
+    setGame({ ...g });
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
@@ -369,7 +374,19 @@ export default function WhotGame({ gameId, goHome }) {
         <p>{game.turn === userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}</p>
 
         <div style={styles.center}>
-          {top && <img src={drawCard(top)} />}
+          <div style={styles.pile}>
+            {top && <img src={drawCard(top)} style={styles.topCard} />}
+          </div>
+
+          <button
+            style={{
+              ...styles.marketBtn,
+              opacity: game.turn === userId ? 1 : 0.5
+            }}
+            onClick={drawMarket}
+          >
+            🃏 {game.deck.length}
+          </button>
         </div>
 
         <div style={styles.hand}>
@@ -398,7 +415,7 @@ export default function WhotGame({ gameId, goHome }) {
 }
 
 // =========================
-// STYLES (UNCHANGED)
+// STYLES
 // =========================
 const styles = {
   bg: {
@@ -434,6 +451,26 @@ const styles = {
   center: {
     display: "flex",
     justifyContent: "center",
-    gap: 10
+    gap: 12,
+    alignItems: "center",
+    marginTop: 10
+  },
+  pile: {
+    width: 70,
+    height: 100,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  topCard: {
+    width: 65,
+    height: 95
+  },
+  marketBtn: {
+    background: "gold",
+    padding: 10,
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer"
   }
 };
