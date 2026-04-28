@@ -313,29 +313,112 @@ export default function WhotGame({ gameId, goHome }) {
   // =========================
   // PLAY CARD
   // =========================
-  async function playCard(i) {
-    if (game.status === "finished") return;
+async function playCard(i) {
+  if (game.status === "finished") return;
 
-    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
-    if (g.turn !== userId) return;
+  const g = parseGame(
+    await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
+  );
 
-    const card = g.hands[myIdx][i];
-    g.hands[myIdx].splice(i, 1);
-
-    if (g.hands[myIdx].length === 0) {
-      await endRound(g, myIdx);
-      return;
-    }
-
-    setGame({ ...g });
-
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-      ...encodeGame(g),
-      discard: card,
-      turn: g.players[oppIdx]
-    });
+  if (g.turn !== userId) {
+    beep(150, 200);
+    return;
   }
 
+  const card = g.hands[myIdx][i];
+  const current = decodeCard(card);
+  const topDecoded = decodeCard(g.discard);
+
+  // =========================
+  // 🚨 PICK 2 STRICT RULE
+  // =========================
+  if (g.pendingPick > 0 && current.number !== 2) {
+    beep(200, 400);
+    g.history.push("🔴 MUST PLAY 2 OR DRAW");
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      encodeGame(g)
+    );
+    return;
+  }
+
+  // =========================
+  // 🚫 INVALID MOVE CHECK
+  // =========================
+  if (
+    current.number !== topDecoded.number &&
+    current.shape !== topDecoded.shape &&
+    current.number !== 14
+  ) {
+    beep(120, 300);
+    g.history.push("🔴 INVALID MOVE");
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      encodeGame(g)
+    );
+    return;
+  }
+
+  // =========================
+  // ✅ VALID PLAY
+  // =========================
+  g.hands[myIdx].splice(i, 1);
+
+  let nextTurn = g.players[oppIdx];
+
+  // =========================
+  // 🎯 RULES
+  // =========================
+  if (current.number === 2) {
+    g.pendingPick += 2;
+    g.history.push(`🔥 PICK 2 → ${g.pendingPick}`);
+  }
+
+  if (current.number === 8) {
+    nextTurn = userId;
+    g.history.push("⛔ SUSPENSION");
+  }
+
+  if (current.number === 1) {
+    nextTurn = userId;
+    g.history.push("🔁 HOLD ON");
+  }
+
+  if (current.number === 14) {
+    nextTurn = userId;
+    g.history.push("🛒 MARKET");
+  }
+
+  // =========================
+  // 🏁 LAST CARD → END ROUND
+  // =========================
+  if (g.hands[myIdx].length === 0) {
+    await endRound(g, myIdx);
+    return;
+  }
+
+  // =========================
+  // ⚡ INSTANT UI UPDATE
+  // =========================
+  setGame({ ...g });
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    gameId,
+    {
+      ...encodeGame(g),
+      discard: card,
+      turn: nextTurn
+    }
+  );
+}
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
