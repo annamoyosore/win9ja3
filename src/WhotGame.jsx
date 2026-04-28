@@ -77,7 +77,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 DRAW CARD
+// 🎨 CARD DRAW
 // =========================
 const cache = new Map();
 
@@ -131,6 +131,28 @@ function drawCard(card) {
   const img = c.toDataURL();
   cache.set(key, img);
   return img;
+}
+
+// =========================
+// 🎴 CARD BACK
+// =========================
+function drawBack() {
+  const c = document.createElement("canvas");
+  c.width = 65;
+  c.height = 100;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, 65, 100);
+
+  ctx.strokeStyle = "#fff";
+  ctx.strokeRect(2, 2, 61, 96);
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 20px Arial";
+  ctx.fillText("🂠", 18, 60);
+
+  return c.toDataURL();
 }
 
 // =========================
@@ -193,9 +215,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        setGame(parseGame(res.payload));
-      }
+      (res) => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
@@ -207,103 +227,39 @@ export default function WhotGame({ gameId, goHome }) {
   const oppIdx = myIdx === 0 ? 1 : 0;
 
   const hand = game.hands[myIdx];
+  const oppCards = game.hands[oppIdx].length;
   const top = decodeCard(game.discard);
 
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
   const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
   // =========================
-  // PLAY CARD
+  // MARKET EMPTY HANDLER
   // =========================
-  async function playCard(i) {
-  const g = parseGame(
-    await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
-  );
+  async function handleMarketEmpty(g) {
+    beep(800, 400);
 
-  if (g.turn !== userId) return;
+    const myCards = g.hands[myIdx].length;
+    const oppCards = g.hands[oppIdx].length;
 
-  const card = g.hands[myIdx][i];
-  const current = decodeCard(card);
-  const topDecoded = decodeCard(g.discard);
+    let winnerIdx = null;
 
-  // ❌ INVALID MOVE
-  if (
-    current.number !== topDecoded.number &&
-    current.shape !== topDecoded.shape &&
-    current.number !== 14
-  ) {
-    beep(120, 300);
-    g.history.push(`${myName}: ❌ INVALID MOVE`);
+    if (myCards < oppCards) winnerIdx = myIdx;
+    else if (oppCards < myCards) winnerIdx = oppIdx;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame(g)
-    );
-    return;
-  }
+    if (winnerIdx !== null) g.scores[winnerIdx] += 1;
 
-  // ✅ REMOVE CARD
-  g.hands[myIdx].splice(i, 1);
+    g.history.push("⚠️ MARKET EMPTY → ROUND ENDED");
 
-  let nextTurn = g.players[oppIdx];
-
-  // =========================
-  // 🎯 RULES
-  // =========================
-  if (current.number === 2) {
-    g.pendingPick += 2;
-    g.history.push(`${myName}: 🔥 PICK 2`);
-  }
-
-  else if (current.number === 8) {
-    // ⛔ SUSPENSION FIXED
-    nextTurn = userId;
-    beep(900, 200); // sharp alert
-    g.history.push(`${myName}: ⛔ SUSPENSION (PLAY AGAIN)`);
-  }
-
-  else if (current.number === 1) {
-    nextTurn = userId;
-    g.history.push(`${myName}: 🔁 HOLD ON`);
-  }
-
-  else if (current.number === 14) {
-    g.pendingPick += 1;
-    nextTurn = userId;
-    g.history.push(`${myName}: 🛒 MARKET`);
-  }
-
-  else {
-    g.history.push(`${myName}: ${current.shape} ${current.number}`);
-  }
-
-  // =========================
-  // 🏆 ROUND WIN FIX
-  // =========================
-  if (g.hands[myIdx].length === 0) {
-    beep(1200, 400); // win sound
-    g.scores[myIdx] += 1;
-
-    g.history.push(`${myName}: 🏆 WON ROUND`);
-
-    // 🎯 GAME WIN
-    if (g.scores[myIdx] >= 2) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(g),
-          status: "finished",
-          winnerId: userId
-        }
-      );
+    if (winnerIdx !== null && g.scores[winnerIdx] >= 2) {
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g),
+        status: "finished",
+        winnerId: g.players[winnerIdx]
+      });
       return;
     }
 
-    // 🔄 NEW ROUND
     let deck = createDeck();
     g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
     g.discard = deck.pop();
@@ -311,47 +267,65 @@ export default function WhotGame({ gameId, goHome }) {
     g.pendingPick = 0;
     g.round += 1;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        turn: g.players[1]
-      }
-    );
-
-    return;
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      turn: g.players[1]
+    });
   }
 
   // =========================
-  // UPDATE TURN
+  // PLAY CARD
   // =========================
-  await databases.updateDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    gameId,
-    {
+  async function playCard(i) {
+    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
+    if (g.turn !== userId) return;
+
+    const card = g.hands[myIdx][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
+
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) {
+      beep(120, 300);
+      g.history.push(`${myName}: ❌ INVALID MOVE`);
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
+      return;
+    }
+
+    g.hands[myIdx].splice(i, 1);
+
+    let nextTurn = g.players[oppIdx];
+
+    if (current.number === 8) {
+      nextTurn = userId;
+      beep(900, 200);
+      g.history.push(`${myName}: ⛔ SUSPENSION`);
+    }
+
+    if (!g.deck.length) {
+      await handleMarketEmpty(g);
+      return;
+    }
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
       discard: card,
       turn: nextTurn
-    }
-  );
-}
+    });
+  }
 
   // =========================
-  // DRAW MARKET (FIXED)
+  // DRAW MARKET
   // =========================
   async function drawMarket() {
     const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
-
     if (g.turn !== userId) return;
 
     if (!g.deck.length) {
-      beep(800, 400);
-      g.history.push("⚠️ MARKET EMPTY");
-
-      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
+      await handleMarketEmpty(g);
       return;
     }
 
@@ -360,7 +334,6 @@ export default function WhotGame({ gameId, goHome }) {
 
     g.history.push(`${myName}: 📦 DREW 1`);
 
-    // ✅ INSTANT UI UPDATE
     setGame({ ...g });
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
@@ -378,6 +351,13 @@ export default function WhotGame({ gameId, goHome }) {
           <span>{myName}</span>
           <span>VS</span>
           <span>{oppName}</span>
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          {Array.from({ length: oppCards }).map((_, i) => (
+            <img key={i} src={drawBack()} style={{ width: 40 }} />
+          ))}
+          <div>{oppName}: {oppCards} cards</div>
         </div>
 
         <div style={styles.row}>
@@ -422,9 +402,6 @@ export default function WhotGame({ gameId, goHome }) {
   );
 }
 
-// =========================
-// STYLES (UNCHANGED)
-// =========================
 const styles = {
   bg: {
     minHeight: "100vh",
