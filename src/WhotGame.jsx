@@ -16,32 +16,34 @@ const ADMIN_ID = "69ef9fe863a02a7490b4";
 // 🔊 SOUND
 // =========================
 function beep(freq = 400, duration = 120) {
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
-  osc.frequency.value = freq;
-  osc.type = "square";
+    osc.frequency.value = freq;
+    osc.type = "square";
 
-  osc.connect(gain);
-  gain.connect(ctx.destination);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
 
-  osc.start();
+    osc.start();
 
-  gain.gain.setValueAtTime(0.2, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(
-    0.001,
-    ctx.currentTime + duration / 1000
-  );
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      ctx.currentTime + duration / 1000
+    );
 
-  setTimeout(() => {
-    osc.stop();
-    ctx.close();
-  }, duration);
+    setTimeout(() => {
+      osc.stop();
+      ctx.close();
+    }, duration);
+  } catch {}
 }
 
 // =========================
-// 🎴 VALID WHOT DECK
+// 🎴 VALID DECK
 // =========================
 function createDeck() {
   const valid = {
@@ -159,7 +161,7 @@ function drawBack() {
 }
 
 // =========================
-// PARSE / ENCODE
+// PARSE
 // =========================
 function parseGame(g) {
   return {
@@ -199,94 +201,60 @@ export default function WhotGame({ gameId, goHome }) {
   const payoutRef = useRef(false);
 
   useEffect(() => {
-    account.get().then(u => setUserId(u.$id));
+    account.get().then(u => setUserId(u.$id)).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      setGame(parseGame(g));
+      try {
+        const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
+        const parsed = parseGame(g);
 
-      if (g.matchId) {
-        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
-        setMatch(m);
-      }
+        // 🚨 fix invalid player index
+        if (!parsed.players.includes(userId)) return;
+
+        setGame(parsed);
+
+        if (g.matchId) {
+          const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
+          setMatch(m);
+        }
+      } catch {}
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      async (res) => {
+      (res) => {
         const parsed = parseGame(res.payload);
         setGame(parsed);
-
-        if (parsed.status === "finished" && !parsed.payoutDone && !payoutRef.current) {
-          payoutRef.current = true;
-
-          const total = Number(match?.pot || 0);
-          const adminCut = total * 0.1;
-          const winnerAmount = total - adminCut;
-
-          const w = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", parsed.winnerId)]
-          );
-
-          if (w.documents.length) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              w.documents[0].$id,
-              { balance: Number(w.documents[0].balance || 0) + winnerAmount }
-            );
-          }
-
-          const a = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", ADMIN_ID)]
-          );
-
-          if (a.documents.length) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              a.documents[0].$id,
-              { balance: Number(a.documents[0].balance || 0) + adminCut }
-            );
-          }
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id,
-            { payoutDone: true }
-          );
-        }
       }
     );
 
     return () => unsub();
   }, [gameId, userId]);
 
-  if (!game || !userId) return <div>Loading...</div>;
+  if (!game || !userId || game.players.length < 2) {
+    return <div>Loading...</div>;
+  }
 
   const myIdx = game.players.indexOf(userId);
+  if (myIdx === -1) return <div>Loading...</div>;
+
   const oppIdx = myIdx === 0 ? 1 : 0;
 
-  const hand = game.hands[myIdx];
-  const oppCards = game.hands[oppIdx].length;
+  const hand = game.hands[myIdx] || [];
+  const oppCards = game.hands[oppIdx]?.length || 0;
   const top = decodeCard(game.discard);
 
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
   const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
   // =========================
-  // PLAY CARD (FINAL FIX)
+  // PLAY CARD
   // =========================
   async function playCard(i) {
     const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
@@ -295,13 +263,6 @@ export default function WhotGame({ gameId, goHome }) {
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
-
-    if (g.pendingPick > 0 && current.number !== 2) {
-      beep(150, 300);
-      g.history.push("🔴 MUST PLAY 2 OR DRAW");
-      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
-      return;
-    }
 
     if (
       current.number !== topDecoded.number &&
@@ -318,11 +279,26 @@ export default function WhotGame({ gameId, goHome }) {
 
     let nextTurn = g.players[oppIdx];
 
-    if ([1,8,14].includes(current.number)) nextTurn = userId;
-
+    // RULES
     if (current.number === 2) {
       g.pendingPick += 2;
-      g.history.push(`🔥 PICK ${g.pendingPick}`);
+      g.history.push("🔥 PICK 2");
+    }
+
+    if (current.number === 8) {
+      nextTurn = userId;
+      beep(900, 200);
+      g.history.push("⛔ SUSPENSION");
+    }
+
+    if (current.number === 1) {
+      nextTurn = userId;
+      g.history.push("🔁 HOLD ON");
+    }
+
+    if (current.number === 14) {
+      nextTurn = userId;
+      g.history.push("🛒 MARKET");
     }
 
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
@@ -333,13 +309,13 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-  // DRAW MARKET (FINAL FIX)
+  // DRAW MARKET (FIX PICK 2)
   // =========================
   async function drawMarket() {
     const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
     if (g.turn !== userId) return;
 
-    let count = g.pendingPick > 0 ? g.pendingPick : 1;
+    let count = g.pendingPick || 1;
 
     for (let i = 0; i < count; i++) {
       if (!g.deck.length) break;
@@ -347,6 +323,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
+    g.history.push(`📦 DREW ${count}`);
 
     setGame({ ...g });
 
@@ -366,12 +343,6 @@ export default function WhotGame({ gameId, goHome }) {
           <span>VS</span>
           <span>{oppName}</span>
         </div>
-
-        {game.pendingPick > 0 && (
-          <p style={{ color: "red", fontWeight: "bold" }}>
-            🔥 PICK {game.pendingPick}
-          </p>
-        )}
 
         <div style={{ textAlign: "center" }}>
           {Array.from({ length: oppCards }).map((_, i) => (
@@ -421,3 +392,56 @@ export default function WhotGame({ gameId, goHome }) {
     </div>
   );
 }
+
+// =========================
+// STYLES (UNCHANGED)
+// =========================
+const styles = {
+  bg: {
+    minHeight: "100vh",
+    background: "green",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  box: {
+    width: "95%",
+    maxWidth: 450,
+    background: "#000000cc",
+    padding: 12,
+    color: "#fff",
+    borderRadius: 10
+  },
+  row: {
+    display: "flex",
+    justifyContent: "space-between"
+  },
+  hand: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
+    marginTop: 10
+  },
+  card: {
+    width: 65,
+    cursor: "pointer"
+  },
+  center: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10
+  },
+  history: {
+    marginTop: 10,
+    maxHeight: 120,
+    overflow: "auto",
+    fontSize: 12
+  },
+  marketBtn: {
+    background: "gold",
+    padding: 10,
+    borderRadius: 8,
+    border: "none"
+  }
+};
