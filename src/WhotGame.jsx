@@ -42,12 +42,6 @@ function beep(freq = 400, duration = 120) {
   } catch {}
 }
 
-// 🔔 last card
-function lastCardSound() {
-  beep(1000, 120);
-  setTimeout(() => beep(1200, 120), 150);
-}
-
 // =========================
 // 🎴 DECK
 // =========================
@@ -65,7 +59,7 @@ function createDeck() {
 }
 
 // =========================
-// CARD
+// CARD DECODE
 // =========================
 function decodeCard(str) {
   if (!str) return null;
@@ -85,7 +79,7 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎨 DRAW CARD
+// 🎨 CARD DRAW
 // =========================
 const cache = new Map();
 
@@ -142,7 +136,7 @@ function drawCard(card) {
 }
 
 // =========================
-// PARSE
+// PARSE / ENCODE
 // =========================
 function parseGame(g) {
   return {
@@ -179,11 +173,7 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [countdown, setCountdown] = useState(0);
-
   const payoutRef = useRef(false);
-  const lastLen = useRef(null);
-  const lastRound = useRef(null);
 
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
@@ -193,104 +183,21 @@ export default function WhotGame({ gameId, goHome }) {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      const parsed = parseGame(g);
-      setGame(parsed);
+      try {
+        const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
+        setGame(parseGame(g));
 
-      if (g.matchId) {
-        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
-        setMatch(m);
+        if (g.matchId) {
+          const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
+          setMatch(m);
+        }
+      } catch (e) {
+        console.error("LOAD ERROR", e);
       }
     };
 
     load();
-
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        const parsed = parseGame(res.payload);
-
-        // ⏳ only trigger when round changes
-        if (lastRound.current !== parsed.round) {
-          lastRound.current = parsed.round;
-
-          setCountdown(3);
-          let t = 3;
-          const timer = setInterval(() => {
-            t--;
-            setCountdown(t);
-            if (t <= 0) clearInterval(timer);
-          }, 1000);
-        }
-
-        setGame(parsed);
-
-        if (parsed.status === "finished" && !parsed.payoutDone && !payoutRef.current) {
-          payoutRef.current = true;
-          handlePayout(parsed);
-        }
-      }
-    );
-
-    return () => unsub();
   }, [gameId, userId]);
-
-  // 🔔 LAST CARD SOUND
-  useEffect(() => {
-    if (!game || !userId) return;
-
-    const myIdx = game.players.indexOf(userId);
-    const hand = game.hands[myIdx];
-
-    if (hand && hand.length === 1 && lastLen.current !== 1) {
-      lastCardSound();
-    }
-
-    lastLen.current = hand?.length;
-  }, [game, userId]);
-
-  async function handlePayout(g) {
-    const total = Number(match?.pot || 0);
-    const adminCut = total * 0.1;
-    const winnerAmount = total - adminCut;
-
-    const w = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", g.winnerId)]
-    );
-
-    if (w.documents.length) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        w.documents[0].$id,
-        { balance: Number(w.documents[0].balance || 0) + winnerAmount }
-      );
-    }
-
-    const a = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", ADMIN_ID)]
-    );
-
-    if (a.documents.length) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        a.documents[0].$id,
-        { balance: Number(a.documents[0].balance || 0) + adminCut }
-      );
-    }
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      g.$id,
-      { payoutDone: true }
-    );
-  }
 
   if (!game || !userId) return <div>Loading...</div>;
 
@@ -298,11 +205,87 @@ export default function WhotGame({ gameId, goHome }) {
   const oppIdx = myIdx === 0 ? 1 : 0;
 
   const hand = game.hands[myIdx];
-  const oppCount = game.hands[oppIdx]?.length || 0;
   const top = decodeCard(game.discard);
 
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
   const oppName = myIdx === 0 ? game.opponentName : game.hostName;
+
+  // =========================
+  // PLAY CARD
+  // =========================
+  async function playCard(i) {
+    const g = parseGame(
+      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
+    );
+
+    if (g.turn !== userId) return;
+
+    const card = g.hands[myIdx][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
+
+    // ❌ INVALID MOVE
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) {
+      beep(150, 300);
+      g.history.push(`${myName}: ❌ INVALID MOVE`);
+
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g)
+      });
+      return;
+    }
+
+    g.hands[myIdx].splice(i, 1);
+
+    if (g.hands[myIdx].length === 1) {
+      beep(900, 200); // last card alert
+    }
+
+    let nextTurn = g.players[oppIdx];
+
+    if (current.number === 2) g.pendingPick += 2;
+    else if (current.number === 8) nextTurn = userId;
+    else if (current.number === 1) nextTurn = userId;
+    else if (current.number === 14) {
+      g.pendingPick += 1;
+      nextTurn = userId;
+    }
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      discard: card,
+      turn: nextTurn
+    });
+  }
+
+  // =========================
+  // DRAW MARKET (RESTORED)
+  // =========================
+  async function drawMarket() {
+    const g = parseGame(
+      await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
+    );
+
+    if (g.turn !== userId) return;
+
+    let count = g.pendingPick || 1;
+
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
+    }
+
+    g.pendingPick = 0;
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      turn: g.players[oppIdx]
+    });
+  }
 
   return (
     <div style={styles.bg}>
@@ -320,15 +303,18 @@ export default function WhotGame({ gameId, goHome }) {
           <span>{game.scores[0]} - {game.scores[1]}</span>
         </div>
 
-        {/* 🂠 opponent count (non-intrusive) */}
-        <div style={{ textAlign: "center", fontSize: 12 }}>
-          {oppName} cards: {oppCount}
+        <div style={styles.row}>
+          <span>₦{match?.stake || 0}</span>
+          <span>🏦 ₦{match?.pot || 0}</span>
         </div>
 
         <p>{game.turn === userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}</p>
 
         <div style={styles.center}>
           {top && <img src={drawCard(top)} />}
+          <button style={styles.marketBtn} onClick={drawMarket}>
+            🃏 ({game.deck.length})
+          </button>
         </div>
 
         <div style={styles.hand}>
@@ -337,6 +323,7 @@ export default function WhotGame({ gameId, goHome }) {
               key={i}
               src={drawCard(decodeCard(c))}
               style={styles.card}
+              onClick={() => playCard(i)}
             />
           ))}
         </div>
@@ -347,19 +334,12 @@ export default function WhotGame({ gameId, goHome }) {
           ))}
         </div>
 
-        {countdown > 0 && (
-          <div style={styles.countdown}>{countdown}</div>
-        )}
-
         <button onClick={goHome}>Exit</button>
       </div>
     </div>
   );
 }
 
-// =========================
-// STYLES (UNCHANGED)
-// =========================
 const styles = {
   bg: {
     minHeight: "100vh",
@@ -402,12 +382,10 @@ const styles = {
     overflow: "auto",
     fontSize: 12
   },
-  countdown: {
-    position: "fixed",
-    top: "45%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    fontSize: 60,
-    fontWeight: "bold"
+  marketBtn: {
+    background: "gold",
+    padding: 10,
+    borderRadius: 8,
+    border: "none"
   }
 };
