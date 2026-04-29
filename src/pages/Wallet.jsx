@@ -25,6 +25,7 @@ export default function Wallet() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [bank, setBank] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
 
   const [processing, setProcessing] = useState(false);
@@ -68,7 +69,6 @@ export default function Wallet() {
       const user = await account.get();
       const ref = "DEP-" + Date.now();
 
-      // save request
       await databases.createDocument(
         DATABASE_ID,
         "deposit_requests",
@@ -83,7 +83,7 @@ export default function Wallet() {
         }
       );
 
-      // redirect to flutterwave
+      // 🔗 Redirect to Flutterwave
       window.location.href = `https://pay.flutterwave.com/YOUR-LINK?tx_ref=${ref}`;
 
     } catch (err) {
@@ -99,16 +99,22 @@ export default function Wallet() {
   async function requestWithdraw() {
     if (processing) return;
 
-    if (!withdrawAmount || withdrawAmount < 100) {
+    if (!withdrawAmount || Number(withdrawAmount) < 100) {
       return alert("Minimum withdrawal ₦100");
     }
 
-    if (!bank || !accountName) {
-      return alert("Enter bank details");
+    if (Number(withdrawAmount) > (wallet?.balance || 0)) {
+      return alert("Insufficient balance");
     }
 
-    if (withdrawAmount > (wallet?.balance || 0)) {
-      return alert("Insufficient balance");
+    if (!bank) return alert("Enter bank name");
+
+    if (!accountNumber || accountNumber.length < 10) {
+      return alert("Enter valid account number");
+    }
+
+    if (!accountName) {
+      return alert("Enter account name");
     }
 
     setProcessing(true);
@@ -124,6 +130,7 @@ export default function Wallet() {
           userId: user.$id,
           amount: Number(withdrawAmount),
           bank,
+          accountNumber,
           accountName,
           status: "pending",
           createdAt: new Date().toISOString()
@@ -132,9 +139,11 @@ export default function Wallet() {
 
       alert("Withdrawal request sent");
 
+      // reset form
       setShowWithdraw(false);
       setWithdrawAmount("");
       setBank("");
+      setAccountNumber("");
       setAccountName("");
 
     } catch (err) {
@@ -187,19 +196,21 @@ export default function Wallet() {
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
+            style={styles.input}
           />
 
           <input
-            placeholder="Full name"
+            placeholder="Full Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            style={styles.input}
           />
 
-          <button onClick={makeDeposit} disabled={processing}>
+          <button style={styles.btn} onClick={makeDeposit} disabled={processing}>
             Make Payment
           </button>
 
-          <button onClick={() => setShowDeposit(false)}>
+          <button style={styles.cancel} onClick={() => setShowDeposit(false)}>
             Cancel
           </button>
         </div>
@@ -215,25 +226,35 @@ export default function Wallet() {
             type="number"
             value={withdrawAmount}
             onChange={(e) => setWithdrawAmount(e.target.value)}
+            style={styles.input}
           />
 
           <input
-            placeholder="Bank name"
+            placeholder="Bank Name"
             value={bank}
             onChange={(e) => setBank(e.target.value)}
+            style={styles.input}
           />
 
           <input
-            placeholder="Account name"
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
+            placeholder="Account Number"
+            value={accountNumber}
+            onChange={(e) => setAccountNumber(e.target.value)}
+            style={styles.input}
           />
 
-          <button onClick={requestWithdraw} disabled={processing}>
-            Submit
+          <input
+            placeholder="Account Name"
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            style={styles.input}
+          />
+
+          <button style={styles.btn} onClick={requestWithdraw} disabled={processing}>
+            Submit Request
           </button>
 
-          <button onClick={() => setShowWithdraw(false)}>
+          <button style={styles.cancel} onClick={() => setShowWithdraw(false)}>
             Cancel
           </button>
         </div>
@@ -258,12 +279,15 @@ const styles = {
     color: "white",
     minHeight: "100vh"
   },
+
   card: {
     padding: 20,
     background: "#111827",
     borderRadius: 10,
-    marginBottom: 20
+    marginBottom: 20,
+    fontSize: 16
   },
+
   btn: {
     width: "100%",
     padding: 12,
@@ -271,27 +295,46 @@ const styles = {
     background: "gold",
     border: "none",
     borderRadius: 8,
-    fontWeight: "bold"
+    fontWeight: "bold",
+    cursor: "pointer"
   },
+
   back: {
     marginTop: 20,
     padding: 10,
-    background: "gray",
+    background: "#475569",
     border: "none",
-    borderRadius: 8
+    borderRadius: 8,
+    color: "#fff"
   },
+
   modal: {
     position: "fixed",
     top: "50%",
     left: "50%",
     transform: "translate(-50%, -50%)",
-    background: "#111",
+    background: "#111827",
     padding: 20,
     borderRadius: 10,
+    width: "85%",
+    maxWidth: 320,
     display: "flex",
     flexDirection: "column",
-    gap: 10,
-    width: "80%",
-    maxWidth: 300
+    gap: 10
+  },
+
+  input: {
+    width: "100%",
+    padding: 10,
+    borderRadius: 6,
+    border: "none"
+  },
+
+  cancel: {
+    padding: 10,
+    background: "#ef4444",
+    border: "none",
+    borderRadius: 6,
+    color: "#fff"
   }
 };
