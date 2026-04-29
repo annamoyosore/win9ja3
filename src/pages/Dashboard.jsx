@@ -13,14 +13,17 @@ import {
 // =========================
 // COMPONENT
 // =========================
-export default function Dashboard({ goLobby, goWallet, logout }) {
+export default function Dashboard({
+  goLobby,
+  goWallet,
+  goDice,
+  goTransactions,   // ✅ NEW
+  logout
+}) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // =========================
-  // LOAD USER + WALLET
-  // =========================
   useEffect(() => {
     load();
   }, []);
@@ -47,9 +50,6 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
     }
   }
 
-  // =========================
-  // LOADING STATE
-  // =========================
   if (loading) {
     return (
       <div style={styles.loading}>
@@ -59,41 +59,43 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
     );
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={styles.container}>
       <h1 style={styles.logo}>🎮 Win9ja</h1>
 
-      <h2>Welcome, {user?.name || "Player"}</h2>
+      <h2 style={styles.welcome}>
+        Welcome, {user?.name || "Player"}
+      </h2>
 
-      {/* WALLET BALANCE */}
+      {/* WALLET */}
       <div style={styles.card}>
         💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
       </div>
 
-      {/* WALLET BUTTON */}
-      <button
-        style={styles.btn}
-        onClick={() => {
-          console.log("Go Wallet clicked");
-          goWallet && goWallet();
-        }}
-      >
+      <button style={styles.btn} onClick={() => goWallet?.()}>
         💳 Wallet
       </button>
 
-      {/* PLAY WHOT BUTTON */}
+      {/* 🆕 TRANSACTIONS */}
       <button
-        style={styles.btn}
-        onClick={() => {
-          console.log("Go Lobby clicked");
-          goLobby && goLobby();
-        }}
+        style={styles.txBtn}
+        onClick={() => goTransactions?.()}
       >
-        🎲 Play WHOT
+        📊 Transactions
       </button>
+
+      {/* GAMES */}
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>🎮 Games</h3>
+
+        <button style={styles.btn} onClick={() => goLobby?.()}>
+          🎲 Play WHOT
+        </button>
+
+        <button style={styles.diceBtn} onClick={() => goDice?.()}>
+          🎲 Play Dice
+        </button>
+      </div>
 
       {/* LOGOUT */}
       <button
@@ -103,10 +105,10 @@ export default function Dashboard({ goLobby, goWallet, logout }) {
         🚪 Logout
       </button>
 
-      {/* FUTURE GAMES */}
+      {/* COMING SOON */}
       <div style={styles.games}>
         <h3>🚀 Coming Soon</h3>
-        <p>Poker • Ludo • Blackjack</p>
+        <p>Poker • Blackjack</p>
       </div>
     </div>
   );
@@ -120,19 +122,31 @@ const styles = {
     textAlign: "center",
     padding: 20,
     color: "white",
-    background: "#0f172a",
+    background: "linear-gradient(135deg,#020617,#0f172a)",
     minHeight: "100vh"
   },
   logo: {
     color: "gold",
+    marginBottom: 10,
+    fontSize: 28
+  },
+  welcome: {
     marginBottom: 10
   },
   card: {
     background: "#111827",
     padding: 20,
     margin: "15px 0",
-    borderRadius: 10,
-    fontSize: 18
+    borderRadius: 12,
+    fontSize: 18,
+    boxShadow: "0 4px 10px rgba(0,0,0,0.4)"
+  },
+  section: {
+    marginTop: 20
+  },
+  sectionTitle: {
+    color: "#facc15",
+    marginBottom: 10
   },
   btn: {
     display: "block",
@@ -141,13 +155,37 @@ const styles = {
     marginTop: 10,
     background: "gold",
     border: "none",
-    borderRadius: 8,
+    borderRadius: 10,
     fontWeight: "bold",
     cursor: "pointer"
   },
+  txBtn: {
+    display: "block",
+    width: "100%",
+    padding: 12,
+    marginTop: 10,
+    background: "#38bdf8",
+    border: "none",
+    borderRadius: 10,
+    fontWeight: "bold",
+    cursor: "pointer",
+    color: "#000"
+  },
+  diceBtn: {
+    display: "block",
+    width: "100%",
+    padding: 12,
+    marginTop: 10,
+    background: "#22c55e",
+    border: "none",
+    borderRadius: 10,
+    fontWeight: "bold",
+    cursor: "pointer",
+    color: "#fff"
+  },
   games: {
-    marginTop: 25,
-    opacity: 0.7
+    marginTop: 30,
+    opacity: 0.6
   },
   loading: {
     minHeight: "100vh",
