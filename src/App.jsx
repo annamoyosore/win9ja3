@@ -3,7 +3,7 @@
 // =========================
 import { useEffect, useState } from "react";
 import {
-  HashRouter,   // 🔥 CHANGED
+  HashRouter,
   Routes,
   Route,
   Navigate,
@@ -17,6 +17,8 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
+import DiceLobby from "./pages/DiceLobby";          // ✅ NEW
+import Transactions from "./pages/Transactions";    // ✅ NEW
 import WhotGame from "./WhotGame";
 
 // =========================
@@ -59,7 +61,7 @@ function PublicRoute({ children }) {
 }
 
 // =========================
-// GAME WRAPPER
+// WHOT GAME WRAPPER
 // =========================
 function GameWrapper() {
   const { gameId, stake } = useParams();
@@ -71,6 +73,25 @@ function GameWrapper() {
       stake={Number(stake)}
       goHome={() => navigate("/dashboard")}
     />
+  );
+}
+
+// =========================
+// DICE GAME PLACEHOLDER
+// =========================
+function DiceGameWrapper() {
+  const { gameId, stake } = useParams();
+  const navigate = useNavigate();
+
+  return (
+    <div style={{ color: "white", padding: 20 }}>
+      🎲 Dice Game Coming Soon <br />
+      Game ID: {gameId} <br />
+      Stake: ₦{stake} <br /><br />
+      <button onClick={() => navigate("/dashboard")}>
+        Back to Dashboard
+      </button>
+    </div>
   );
 }
 
@@ -101,6 +122,8 @@ function AppRoutes() {
             <Dashboard
               goLobby={() => navigate("/lobby")}
               goWallet={() => navigate("/wallet")}
+              goTransactions={() => navigate("/transactions")} // ✅ FIXED
+              goDice={() => navigate("/dice")}                 // ✅ FIXED
               logout={async () => {
                 await account.deleteSession("current");
                 navigate("/auth");
@@ -120,7 +143,17 @@ function AppRoutes() {
         }
       />
 
-      {/* LOBBY */}
+      {/* TRANSACTIONS */}
+      <Route
+        path="/transactions"
+        element={
+          <ProtectedRoute>
+            <Transactions back={() => navigate("/dashboard")} />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* WHOT LOBBY */}
       <Route
         path="/lobby"
         element={
@@ -135,12 +168,37 @@ function AppRoutes() {
         }
       />
 
-      {/* GAME */}
+      {/* DICE LOBBY */}
+      <Route
+        path="/dice"
+        element={
+          <ProtectedRoute>
+            <DiceLobby
+              goGame={(id, stake) =>
+                navigate(`/dice-game/${id}/${stake}`)
+              }
+              back={() => navigate("/dashboard")}
+            />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* WHOT GAME */}
       <Route
         path="/game/:gameId/:stake"
         element={
           <ProtectedRoute>
             <GameWrapper />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* DICE GAME */}
+      <Route
+        path="/dice-game/:gameId/:stake"
+        element={
+          <ProtectedRoute>
+            <DiceGameWrapper />
           </ProtectedRoute>
         }
       />
@@ -157,7 +215,7 @@ function AppRoutes() {
 // =========================
 export default function App() {
   return (
-    <HashRouter> {/* 🔥 KEY FIX */}
+    <HashRouter>
       <AppRoutes />
     </HashRouter>
   );
