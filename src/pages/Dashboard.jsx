@@ -16,7 +16,6 @@ import {
 export default function Dashboard({
   goLobby,
   goWallet,
-  goDice,
   goTransactions,
   logout
 }) {
@@ -84,21 +83,15 @@ export default function Dashboard({
       {/* WALLET */}
       <button
         style={styles.btn}
-        onClick={() => {
-          console.log("Go Wallet clicked");
-          goWallet && goWallet();
-        }}
+        onClick={() => goWallet?.()}
       >
         💳 Wallet
       </button>
 
-      {/* TRANSACTIONS ✅ FIXED */}
+      {/* TRANSACTIONS */}
       <button
         style={styles.txBtn}
-        onClick={() => {
-          console.log("Go Transactions clicked");
-          goTransactions && goTransactions();
-        }}
+        onClick={() => goTransactions?.()}
       >
         📊 Transactions
       </button>
@@ -106,23 +99,9 @@ export default function Dashboard({
       {/* WHOT */}
       <button
         style={styles.btn}
-        onClick={() => {
-          console.log("Go Lobby clicked");
-          goLobby && goLobby();
-        }}
+        onClick={() => goLobby?.()}
       >
         🎲 Play WHOT
-      </button>
-
-      {/* DICE */}
-      <button
-        style={styles.diceBtn}
-        onClick={() => {
-          console.log("Go Dice clicked");
-          goDice && goDice();
-        }}
-      >
-        🎲 Play Dice
       </button>
 
       {/* LOGOUT */}
@@ -136,7 +115,7 @@ export default function Dashboard({
       {/* COMING SOON */}
       <div style={styles.games}>
         <h3>🚀 Coming Soon</h3>
-        <p>Poker • Blackjack</p>
+        <p>Poker • Blackjack • Dice</p>
       </div>
     </div>
   );
@@ -190,18 +169,6 @@ const styles = {
     fontWeight: "bold",
     cursor: "pointer",
     color: "#000"
-  },
-  diceBtn: {
-    display: "block",
-    width: "100%",
-    padding: 12,
-    marginTop: 10,
-    background: "#22c55e",
-    border: "none",
-    borderRadius: 10,
-    fontWeight: "bold",
-    cursor: "pointer",
-    color: "#fff"
   },
   games: {
     marginTop: 30,
