@@ -229,41 +229,8 @@ export default function WhotGame({ gameId, goHome }) {
         const parsed = parseGame(res.payload);
         setGame(parsed);
 
-        // ✅ SAFE PAYOUT
+        // ⚡ instant UI, background payout
         if (parsed.status === "finished") {
-          if (parsed.payoutDone || payoutRef.current) return;
-
-          payoutRef.current = true;
-
-          const freshMatch = parsed.matchId
-            ? await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, parsed.matchId)
-            : null;
-
-          const total = Number(freshMatch?.pot || 0);
-
-          const w = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", parsed.winnerId)]
-          );
-
-          if (w.documents.length) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              w.documents[0].$id,
-              {
-                balance: Number(w.documents[0].balance || 0) + total
-              }
-            );
-          }
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id,
-            { payoutDone: true }
-          );
 
           if (parsed.winnerId === userId) {
             setShowWin(true);
@@ -271,6 +238,45 @@ export default function WhotGame({ gameId, goHome }) {
           } else {
             setTimeout(goHome, 2500);
           }
+
+          if (parsed.payoutDone || payoutRef.current) return;
+          payoutRef.current = true;
+
+          (async () => {
+            try {
+              const freshMatch = parsed.matchId
+                ? await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, parsed.matchId)
+                : null;
+
+              const total = Number(freshMatch?.pot || 0);
+
+              const w = await databases.listDocuments(
+                DATABASE_ID,
+                WALLET_COLLECTION,
+                [Query.equal("userId", parsed.winnerId)]
+              );
+
+              if (w.documents.length) {
+                await databases.updateDocument(
+                  DATABASE_ID,
+                  WALLET_COLLECTION,
+                  w.documents[0].$id,
+                  {
+                    balance: Number(w.documents[0].balance || 0) + total
+                  }
+                );
+              }
+
+              await databases.updateDocument(
+                DATABASE_ID,
+                GAME_COLLECTION,
+                parsed.$id,
+                { payoutDone: true }
+              );
+            } catch (e) {
+              console.log("payout error", e);
+            }
+          })();
         }
       }
     );
@@ -312,10 +318,11 @@ export default function WhotGame({ gameId, goHome }) {
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
   }
 
+  // ⚡ FAST PLAY (NO FETCH)
   async function playCard(i) {
-    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
+    if (game.turn !== userId) return;
 
-    if (g.turn !== userId) return;
+    const g = { ...game };
 
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
@@ -338,21 +345,25 @@ export default function WhotGame({ gameId, goHome }) {
     if (current.number === 1) nextTurn = userId;
     if (current.number === 14) nextTurn = userId;
 
+    setGame({ ...g, discard: card, turn: nextTurn });
+
     if (g.hands[myIdx].length === 0) {
       await endRound(g, myIdx);
       return;
     }
 
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+    databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
       discard: card,
       turn: nextTurn
     });
   }
 
+  // ⚡ FAST DRAW
   async function drawMarket() {
-    const g = parseGame(await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId));
-    if (g.turn !== userId) return;
+    if (game.turn !== userId) return;
+
+    const g = { ...game };
 
     let count = g.pendingPick > 0 ? g.pendingPick : 1;
 
@@ -363,7 +374,9 @@ export default function WhotGame({ gameId, goHome }) {
 
     g.pendingPick = 0;
 
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+    setGame({ ...g, turn: g.players[oppIdx] });
+
+    databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
       ...encodeGame(g),
       turn: g.players[oppIdx]
     });
