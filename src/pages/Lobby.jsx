@@ -15,7 +15,6 @@ import {
 import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
-const ADMIN_ID = "69ef9fe863a02a7490b4"; // ✅ your admin
 
 // =========================
 // CREATE DECK
@@ -104,53 +103,21 @@ export default function Lobby({ goGame, back }) {
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      async () => {
+      async (res) => {
+        const m = res.payload;
+
         refresh(user.$id);
-      }
-    );
 
-    return () => unsub();
-  }, [user]);
+        // AUTO ENTER GAME
+        if (
+          (m.hostId === user.$id || m.opponentId === user.$id) &&
+          m.status === "matched" &&
+          m.gameId
+        ) {
+          goGame(m.gameId, m.stake);
+        }
 
-  async function refresh(userId) {
-    await loadMatches();
-    await loadActiveMatches(userId);
-  }
-
-  // =========================
-  // LOAD MATCHES
-  // =========================
-  async function loadMatches() {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        [Query.equal("status", "waiting")]
-      );
-
-      setMatches(res.documents || []);
-    } catch (e) {
-      console.log("loadMatches error", e);
-      setMatches([]);
-    }
-  }
-
-  // =========================
-  // ACTIVE MATCHES (FIXED)
-  // =========================
-  async function loadActiveMatches(userId) {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION
-      );
-
-      const updated = [];
-
-      for (let m of res.documents) {
-        if (!(m.hostId === userId || m.opponentId === userId)) continue;
-
-        // ✅ check game status
+        // AUTO MARK FINISHED MATCH
         if (m.gameId) {
           try {
             const g = await databases.getDocument(
@@ -159,53 +126,88 @@ export default function Lobby({ goGame, back }) {
               m.gameId
             );
 
-            if (g.status === "finished") {
-              // ✅ force match finished
-              if (m.status !== "finished") {
-                await databases.updateDocument(
-                  DATABASE_ID,
-                  MATCH_COLLECTION,
-                  m.$id,
-                  { status: "finished" }
-                );
-              }
-              continue; // ❌ don't show
+            if (g.status === "finished" && m.status !== "finished") {
+              await databases.updateDocument(
+                DATABASE_ID,
+                MATCH_COLLECTION,
+                m.$id,
+                { status: "finished" }
+              );
             }
           } catch {}
         }
-
-        if (m.status !== "finished") {
-          updated.push(m);
-        }
       }
+    );
 
-      setActiveMatches(updated);
+    return () => unsub();
+  }, [user]);
 
+  async function refresh(userId) {
+    await loadMatches(userId);
+    await loadActiveMatches(userId);
+  }
+
+  // =========================
+  // LOAD MATCHES (AVAILABLE)
+  // =========================
+  async function loadMatches(userId) {
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [Query.equal("status", "waiting")]
+      );
+
+      // ❌ prevent joining own match
+      const filtered = res.documents.filter(
+        (m) => m.hostId !== userId
+      );
+
+      setMatches(filtered);
     } catch (e) {
-      console.log("active error", e);
-      setActiveMatches([]);
+      console.log("loadMatches error", e);
     }
   }
 
   // =========================
-  // JOIN MATCH (ADMIN CUT + BLOCK SELF JOIN)
+  // ACTIVE MATCHES
+  // =========================
+  async function loadActiveMatches(userId) {
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION
+      );
+
+      const mine = res.documents.filter(
+        (m) =>
+          (m.hostId === userId || m.opponentId === userId)
+      );
+
+      setActiveMatches(mine);
+    } catch (e) {
+      console.log("activeMatches error", e);
+    }
+  }
+
+  // =========================
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loading) return;
     setLoading(true);
 
     try {
+      if (match.hostId === user.$id) {
+        alert("You cannot join your own match");
+        return;
+      }
+
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id
       );
-
-      // ❌ prevent self join
-      if (fresh.hostId === user.$id) {
-        alert("You cannot join your own match");
-        return;
-      }
 
       if (fresh.opponentId) {
         alert("Already taken");
@@ -213,25 +215,11 @@ export default function Lobby({ goGame, back }) {
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
-        alert("No balance");
+        alert("Insufficient balance");
         return;
       }
 
-      // ✅ lock full stake
       await lockFunds(user.$id, fresh.stake);
-
-      // ✅ admin 10% cut
-      const adminCut = fresh.stake * 0.1;
-
-      await databases.createDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        ID.unique(),
-        {
-          userId: ADMIN_ID,
-          balance: adminCut
-        }
-      );
 
       const updated = await databases.updateDocument(
         DATABASE_ID,
@@ -240,7 +228,7 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          pot: fresh.stake * 2 - adminCut
+          pot: fresh.stake * 2
         }
       );
 
@@ -277,7 +265,7 @@ export default function Lobby({ goGame, back }) {
     }
 
     if ((wallet?.balance || 0) < amount) {
-      return alert("No balance");
+      return alert("Insufficient balance");
     }
 
     setLoading(true);
@@ -299,6 +287,8 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
+      setStake("");
+
     } catch (err) {
       alert(err.message);
     }
@@ -315,29 +305,38 @@ export default function Lobby({ goGame, back }) {
 
       {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
-      {/* ACTIVE */}
+      {/* ACTIVE MATCHES */}
       <h2 style={styles.section}>🔥 Your Matches</h2>
 
       {activeMatches.length === 0 && (
-        <p style={styles.empty}>No active matches</p>
+        <p style={styles.empty}>No matches</p>
       )}
 
-      {activeMatches.map(m => (
+      {activeMatches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <div>
             <p style={styles.amount}>₦{m.stake}</p>
             <p style={styles.status}>{m.status}</p>
           </div>
 
-          <button
-            style={styles.resumeBtn}
-            onClick={() => {
-              if (!m.gameId) return alert("Game not ready");
-              goGame(m.gameId, m.stake);
-            }}
-          >
-            ▶ Resume
-          </button>
+          {m.status === "finished" ? (
+            <button style={styles.finishedBtn} disabled>
+              ✅ Finished
+            </button>
+          ) : (
+            <button
+              style={styles.resumeBtn}
+              onClick={() => {
+                if (!m.gameId) {
+                  alert("Game not ready");
+                  return;
+                }
+                goGame(m.gameId, m.stake);
+              }}
+            >
+              ▶ Resume
+            </button>
+          )}
         </div>
       ))}
 
@@ -348,7 +347,7 @@ export default function Lobby({ goGame, back }) {
         <p style={styles.empty}>No matches available</p>
       )}
 
-      {matches.map(m => (
+      {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <span style={styles.amount}>₦{m.stake}</span>
 
@@ -367,7 +366,7 @@ export default function Lobby({ goGame, back }) {
           type="number"
           placeholder="Enter stake ₦"
           value={stake}
-          onChange={e => setStake(e.target.value)}
+          onChange={(e) => setStake(e.target.value)}
           style={styles.input}
         />
 
@@ -390,7 +389,7 @@ const styles = {
   container: {
     padding: 20,
     minHeight: "100vh",
-    background: "linear-gradient(135deg,#020617,#0f172a)",
+    background: "#020617",
     color: "#fff"
   },
   title: { fontSize: 28, fontWeight: "bold" },
@@ -401,16 +400,18 @@ const styles = {
     background: "#111827",
     padding: 15,
     margin: "10px 0",
-    borderRadius: 12,
+    borderRadius: 10,
     display: "flex",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    alignItems: "center"
   },
   amount: { fontWeight: "bold" },
-  status: { fontSize: 12 },
-  joinBtn: { background: "#facc15", padding: 8, borderRadius: 6 },
-  resumeBtn: { background: "#22c55e", padding: 8, borderRadius: 6 },
+  status: { fontSize: 12, opacity: 0.7 },
+  joinBtn: { background: "gold", padding: 8, border: "none" },
+  resumeBtn: { background: "green", padding: 8, color: "#fff", border: "none" },
+  finishedBtn: { background: "#444", padding: 8, color: "#fff", border: "none" },
   createBox: { marginTop: 20 },
   input: { width: "100%", padding: 10 },
-  createBtn: { width: "100%", padding: 10, background: "#3b82f6" },
-  back: { marginTop: 20 }
+  createBtn: { width: "100%", padding: 10, background: "blue", color: "#fff" },
+  back: { marginTop: 20, padding: 10 }
 };
