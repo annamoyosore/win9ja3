@@ -6,17 +6,15 @@ import {
   account,
   databases,
   DATABASE_ID,
-  MATCH_COLLECTION,
   Query
 } from "../lib/appwrite";
 
-const GAME_COLLECTION = "games"; // change to "dice_games" if needed
+const TRANSACTION_COLLECTION = "transactions";
 
 // =========================
 // COMPONENT
 // =========================
 export default function Transactions({ back }) {
-  const [user, setUser] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,74 +24,56 @@ export default function Transactions({ back }) {
 
   async function init() {
     try {
-      const u = await account.get();
-      setUser(u);
+      const user = await account.get();
 
+      // 🔒 Fetch ONLY current user transactions
       const res = await databases.listDocuments(
         DATABASE_ID,
-        MATCH_COLLECTION
+        TRANSACTION_COLLECTION,
+        [
+          Query.equal("userId", user.$id),
+          Query.orderDesc("createdAt"),
+          Query.limit(100)
+        ]
       );
 
-      const myMatches = res.documents.filter(
-        (m) =>
-          m.hostId === u.$id || m.opponentId === u.$id
-      );
-
-      const enriched = await Promise.all(
-        myMatches.map(async (m) => {
-          let winnerId = null;
-
-          if (m.gameId) {
-            try {
-              const g = await databases.getDocument(
-                DATABASE_ID,
-                GAME_COLLECTION,
-                m.gameId
-              );
-              winnerId = g.winnerId;
-            } catch {}
-          }
-
-          const isWinner = winnerId === u.$id;
-          const isFinished = m.status === "finished";
-
-          let result = "Pending";
-          let amount = 0;
-
-          if (isFinished) {
-            if (isWinner) {
-              result = "Won";
-              amount = m.pot;
-            } else {
-              result = "Lost";
-              amount = -m.stake;
-            }
-          }
-
-          return {
-            id: m.$id,
-            stake: m.stake,
-            pot: m.pot,
-            result,
-            amount,
-            status: m.status,
-            createdAt: m.$createdAt
-          };
-        })
-      );
-
-      // sort newest first
-      enriched.sort(
-        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-      );
-
-      setTransactions(enriched);
+      setTransactions(res.documents);
 
     } catch (err) {
-      console.log("tx error", err);
+      console.error("Transaction load error:", err);
     } finally {
       setLoading(false);
     }
+  }
+
+  // =========================
+  // HELPERS
+  // =========================
+  function formatType(type) {
+    switch (type) {
+      case "deposit":
+        return "Deposit";
+      case "withdrawal":
+        return "Withdrawal";
+      case "game_win":
+        return "Game Win";
+      case "game_loss":
+        return "Game Loss";
+      default:
+        return "Transaction";
+    }
+  }
+
+  function getColor(type) {
+    if (type === "deposit" || type === "game_win") return "#22c55e"; // green
+    if (type === "withdrawal" || type === "game_loss") return "#ef4444"; // red
+    return "#facc15"; // yellow
+  }
+
+  function getSign(type) {
+    if (type === "deposit" || type === "game_win") return "+";
+    if (type === "withdrawal" || type === "game_loss") return "-";
+    return "";
   }
 
   // =========================
@@ -120,36 +100,35 @@ export default function Transactions({ back }) {
       )}
 
       {transactions.map((t) => (
-        <div key={t.id} style={styles.card}>
+        <div key={t.$id} style={styles.card}>
+          {/* LEFT */}
           <div>
-            <p style={styles.amount}>₦{t.stake}</p>
+            <p style={styles.type}>{formatType(t.type)}</p>
             <p style={styles.date}>
               {new Date(t.createdAt).toLocaleString()}
             </p>
           </div>
 
+          {/* RIGHT */}
           <div style={styles.right}>
             <p
               style={{
-                color:
-                  t.result === "Won"
-                    ? "#22c55e"
-                    : t.result === "Lost"
-                    ? "#ef4444"
-                    : "#facc15"
+                color: getColor(t.type),
+                fontWeight: "bold",
+                fontSize: 16
               }}
             >
-              {t.result}
+              {getSign(t.type)}₦{Number(t.amount).toLocaleString()}
             </p>
 
-            <p style={styles.value}>
-              {t.amount > 0 ? "+" : ""}
-              ₦{t.amount}
+            <p style={styles.status}>
+              {t.status || "completed"}
             </p>
           </div>
         </div>
       ))}
 
+      {/* BACK */}
       <button style={styles.back} onClick={back}>
         ← Back
       </button>
@@ -168,23 +147,27 @@ const styles = {
     color: "#fff"
   },
   title: {
-    fontSize: 24,
-    marginBottom: 15
+    fontSize: 26,
+    marginBottom: 15,
+    color: "gold"
   },
   empty: {
-    opacity: 0.6
+    opacity: 0.6,
+    textAlign: "center",
+    marginTop: 20
   },
   card: {
     background: "#111827",
     padding: 15,
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 10,
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center"
   },
-  amount: {
-    fontWeight: "bold"
+  type: {
+    fontWeight: "bold",
+    fontSize: 15
   },
   date: {
     fontSize: 12,
@@ -193,16 +176,18 @@ const styles = {
   right: {
     textAlign: "right"
   },
-  value: {
-    fontWeight: "bold"
+  status: {
+    fontSize: 12,
+    opacity: 0.7
   },
   back: {
     marginTop: 20,
-    padding: 10,
+    padding: 12,
     background: "#475569",
     border: "none",
-    borderRadius: 8,
-    color: "#fff"
+    borderRadius: 10,
+    color: "#fff",
+    width: "100%"
   },
   loading: {
     minHeight: "100vh",
