@@ -17,7 +17,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
-import DiceLobby from "./pages/DiceLobby";          // ✅ NEW
+import DiceLobby from "./pages/Dicelobby";          // ✅ NEW
 import Transactions from "./pages/Transactions";    // ✅ NEW
 import WhotGame from "./WhotGame";
 
@@ -173,7 +173,7 @@ function AppRoutes() {
         path="/dice"
         element={
           <ProtectedRoute>
-            <DiceLobby
+            <Dicelobby
               goGame={(id, stake) =>
                 navigate(`/dice-game/${id}/${stake}`)
               }
