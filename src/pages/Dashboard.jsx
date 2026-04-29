@@ -24,6 +24,9 @@ export default function Dashboard({
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // =========================
+  // LOAD USER + WALLET
+  // =========================
   useEffect(() => {
     load();
   }, []);
@@ -51,36 +54,7 @@ export default function Dashboard({
   }
 
   // =========================
-  // SAFE NAVIGATION HANDLERS
-  // =========================
-  function handleTransactions() {
-    console.log("📊 Transactions clicked");
-
-    if (goTransactions) {
-      goTransactions();
-    } else {
-      // 🔥 fallback (prevents silent failure)
-      window.location.hash = "#/transactions";
-    }
-  }
-
-  function handleWallet() {
-    if (goWallet) goWallet();
-    else window.location.hash = "#/wallet";
-  }
-
-  function handleLobby() {
-    if (goLobby) goLobby();
-    else window.location.hash = "#/lobby";
-  }
-
-  function handleDice() {
-    if (goDice) goDice();
-    else window.location.hash = "#/dice";
-  }
-
-  // =========================
-  // LOADING
+  // LOADING STATE
   // =========================
   if (loading) {
     return (
@@ -108,27 +82,48 @@ export default function Dashboard({
       </div>
 
       {/* WALLET */}
-      <button style={styles.btn} onClick={handleWallet}>
+      <button
+        style={styles.btn}
+        onClick={() => {
+          console.log("Go Wallet clicked");
+          goWallet && goWallet();
+        }}
+      >
         💳 Wallet
       </button>
 
-      {/* ✅ TRANSACTIONS (FIXED) */}
-      <button style={styles.txBtn} onClick={handleTransactions}>
+      {/* TRANSACTIONS ✅ FIXED */}
+      <button
+        style={styles.txBtn}
+        onClick={() => {
+          console.log("Go Transactions clicked");
+          goTransactions && goTransactions();
+        }}
+      >
         📊 Transactions
       </button>
 
-      {/* GAMES */}
-      <div style={styles.section}>
-        <h3 style={styles.sectionTitle}>🎮 Games</h3>
+      {/* WHOT */}
+      <button
+        style={styles.btn}
+        onClick={() => {
+          console.log("Go Lobby clicked");
+          goLobby && goLobby();
+        }}
+      >
+        🎲 Play WHOT
+      </button>
 
-        <button style={styles.btn} onClick={handleLobby}>
-          🎲 Play WHOT
-        </button>
-
-        <button style={styles.diceBtn} onClick={handleDice}>
-          🎲 Play Dice
-        </button>
-      </div>
+      {/* DICE */}
+      <button
+        style={styles.diceBtn}
+        onClick={() => {
+          console.log("Go Dice clicked");
+          goDice && goDice();
+        }}
+      >
+        🎲 Play Dice
+      </button>
 
       {/* LOGOUT */}
       <button
@@ -171,15 +166,7 @@ const styles = {
     padding: 20,
     margin: "15px 0",
     borderRadius: 12,
-    fontSize: 18,
-    boxShadow: "0 4px 10px rgba(0,0,0,0.4)"
-  },
-  section: {
-    marginTop: 20
-  },
-  sectionTitle: {
-    color: "#facc15",
-    marginBottom: 10
+    fontSize: 18
   },
   btn: {
     display: "block",
