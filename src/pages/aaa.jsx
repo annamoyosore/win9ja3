@@ -7,15 +7,16 @@ import {
   databases,
   DATABASE_ID,
   WALLET_COLLECTION,
-  Query
+  Query,
+  ID
 } from "../lib/appwrite";
 
-const DEPOSIT_COLLECTION = "deposits";
-const WITHDRAW_COLLECTION = "withdrawals";
+const DEPOSIT_COLLECTION = "deposit_requests";
+const WITHDRAW_COLLECTION = "withdrawal_requests";
 const MATCH_COLLECTION = "matches";
 const TRANSACTION_COLLECTION = "transactions";
 
-// 🔒 YOUR ADMIN ID
+// 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
@@ -44,7 +45,6 @@ export default function AdminDashboard({ back }) {
     }
 
     setUser(u);
-
     loadAll();
   }
 
@@ -65,7 +65,6 @@ export default function AdminDashboard({ back }) {
       DEPOSIT_COLLECTION,
       [Query.equal("status", "pending")]
     );
-
     setDeposits(res.documents);
   }
 
@@ -75,7 +74,6 @@ export default function AdminDashboard({ back }) {
       WITHDRAW_COLLECTION,
       [Query.equal("status", "pending")]
     );
-
     setWithdrawals(res.documents);
   }
 
@@ -83,10 +81,7 @@ export default function AdminDashboard({ back }) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       MATCH_COLLECTION,
-      [
-        Query.orderDesc("$createdAt"),
-        Query.limit(6)
-      ]
+      [Query.orderDesc("$createdAt"), Query.limit(6)]
     );
 
     const active = res.documents.filter(
@@ -119,10 +114,14 @@ export default function AdminDashboard({ back }) {
     setLoading(true);
 
     try {
-      if (d.status !== "pending") return alert("Already processed");
+      if (d.status !== "pending") {
+        alert("Already processed");
+        return;
+      }
 
       const wallet = await getWallet(d.userId);
 
+      // 💰 CREDIT USER
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -132,23 +131,25 @@ export default function AdminDashboard({ back }) {
         }
       );
 
+      // ✅ UPDATE STATUS
       await databases.updateDocument(
         DATABASE_ID,
         DEPOSIT_COLLECTION,
         d.$id,
-        { status: "approved" }
+        { status: "completed" }
       );
 
-      // log transaction
+      // 🧾 LOG TRANSACTION
       await databases.createDocument(
         DATABASE_ID,
         TRANSACTION_COLLECTION,
-        "unique()",
+        ID.unique(),
         {
           userId: d.userId,
           type: "deposit",
           amount: d.amount,
-          status: "success"
+          status: "completed",
+          createdAt: new Date().toISOString()
         }
       );
 
@@ -183,25 +184,47 @@ export default function AdminDashboard({ back }) {
     setLoading(true);
 
     try {
-      if (w.status !== "pending") return alert("Already processed");
+      if (w.status !== "pending") {
+        alert("Already processed");
+        return;
+      }
 
+      const wallet = await getWallet(w.userId);
+
+      if (wallet.balance < w.amount) {
+        alert("Insufficient balance");
+        return;
+      }
+
+      // 💸 DEDUCT USER BALANCE
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: Number(wallet.balance || 0) - Number(w.amount)
+        }
+      );
+
+      // ✅ UPDATE STATUS
       await databases.updateDocument(
         DATABASE_ID,
         WITHDRAW_COLLECTION,
         w.$id,
-        { status: "approved" }
+        { status: "paid" }
       );
 
-      // log transaction
+      // 🧾 LOG TRANSACTION
       await databases.createDocument(
         DATABASE_ID,
         TRANSACTION_COLLECTION,
-        "unique()",
+        ID.unique(),
         {
           userId: w.userId,
           type: "withdrawal",
           amount: w.amount,
-          status: "completed"
+          status: "completed",
+          createdAt: new Date().toISOString()
         }
       );
 
@@ -218,36 +241,14 @@ export default function AdminDashboard({ back }) {
   // REJECT WITHDRAWAL
   // =========================
   async function rejectWithdrawal(w) {
-    if (loading) return;
-    setLoading(true);
+    await databases.updateDocument(
+      DATABASE_ID,
+      WITHDRAW_COLLECTION,
+      w.$id,
+      { status: "rejected" }
+    );
 
-    try {
-      const wallet = await getWallet(w.userId);
-
-      // refund
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: Number(wallet.balance || 0) + Number(w.amount)
-        }
-      );
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        WITHDRAW_COLLECTION,
-        w.$id,
-        { status: "rejected" }
-      );
-
-      loadWithdrawals();
-
-    } catch (e) {
-      alert(e.message);
-    }
-
-    setLoading(false);
+    loadWithdrawals();
   }
 
   // =========================
@@ -286,17 +287,13 @@ export default function AdminDashboard({ back }) {
       ))}
 
       {/* MATCHES */}
-      <h2>🎮 Latest Active Matches</h2>
+      <h2>🎮 Active Matches</h2>
       {matches.map(m => (
         <div key={m.$id} style={styles.card}>
           <div>
             <p>Stake: ₦{m.stake}</p>
             <p>Pot: ₦{m.pot}</p>
             <p>Status: {m.status}</p>
-          </div>
-          <div style={{ fontSize: 12 }}>
-            Host: {m.hostId}<br />
-            Opp: {m.opponentId || "—"}
           </div>
         </div>
       ))}
@@ -322,9 +319,10 @@ const styles = {
   },
   card: {
     background: "#111827",
-    padding: 10,
+    padding: 12,
     marginTop: 10,
     display: "flex",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    borderRadius: 8
   }
 };
