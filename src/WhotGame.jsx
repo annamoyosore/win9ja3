@@ -229,7 +229,6 @@ export default function WhotGame({ gameId, goHome }) {
         const parsed = parseGame(res.payload);
         setGame(parsed);
 
-        // ⚡ instant UI, background payout
         if (parsed.status === "finished") {
 
           if (parsed.winnerId === userId) {
@@ -318,9 +317,12 @@ export default function WhotGame({ gameId, goHome }) {
     await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
   }
 
-  // ⚡ FAST PLAY (NO FETCH)
+  // ✅ FAST PLAY + HISTORY
   async function playCard(i) {
-    if (game.turn !== userId) return;
+    if (game.turn !== userId) {
+      beep(150);
+      return;
+    }
 
     const g = { ...game };
 
@@ -328,22 +330,47 @@ export default function WhotGame({ gameId, goHome }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    if (g.pendingPick > 0 && current.number !== 2) return;
+    if (g.pendingPick > 0 && current.number !== 2) {
+      beep(200, 400);
+      g.history.push("🔴 MUST PLAY 2 OR DRAW");
+      setGame({ ...g });
+      return;
+    }
 
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
-    ) return;
+    ) {
+      beep(120);
+      g.history.push("🔴 INVALID MOVE");
+      setGame({ ...g });
+      return;
+    }
 
     g.hands[myIdx].splice(i, 1);
 
     let nextTurn = g.players[oppIdx];
 
-    if (current.number === 2) g.pendingPick += 2;
-    if (current.number === 8) nextTurn = userId;
-    if (current.number === 1) nextTurn = userId;
-    if (current.number === 14) nextTurn = userId;
+    if (current.number === 2) {
+      g.pendingPick += 2;
+      g.history.push(`🔥 PICK 2 → ${g.pendingPick}`);
+    }
+
+    if (current.number === 8) {
+      nextTurn = userId;
+      g.history.push("⛔ SUSPENSION");
+    }
+
+    if (current.number === 1) {
+      nextTurn = userId;
+      g.history.push("🔁 HOLD ON");
+    }
+
+    if (current.number === 14) {
+      nextTurn = userId;
+      g.history.push("🛒 MARKET");
+    }
 
     setGame({ ...g, discard: card, turn: nextTurn });
 
@@ -359,7 +386,7 @@ export default function WhotGame({ gameId, goHome }) {
     });
   }
 
-  // ⚡ FAST DRAW
+  // ✅ FAST DRAW + HISTORY
   async function drawMarket() {
     if (game.turn !== userId) return;
 
@@ -373,6 +400,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
+    g.history.push(`📦 DRAW ${count}`);
 
     setGame({ ...g, turn: g.players[oppIdx] });
 
