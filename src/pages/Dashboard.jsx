@@ -10,20 +10,23 @@ import {
   Query
 } from "../lib/appwrite";
 
+// 🔒 ADMIN ID
+const ADMIN_ID = "69ef9fe863a02a7490b4";
+
 // =========================
 // FAKE ACTIVITY DATA
 // =========================
 const names = [
-  "Emeka", "Tunde", "Blessing", "Chioma", "Ibrahim",
-  "Sadiq", "Zainab", "Kelvin", "Uche", "Mary",
-  "Aisha", "David", "Samuel", "Joy", "Paul",
-  "Esther", "Yusuf", "Musa", "Favour", "Henry",
-  "Olamide", "Chinedu", "Ngozi", "Bola", "Sule"
+  "Emeka","Tunde","Blessing","Chioma","Ibrahim",
+  "Sadiq","Zainab","Kelvin","Uche","Mary",
+  "Aisha","David","Samuel","Joy","Paul",
+  "Esther","Yusuf","Musa","Favour","Henry",
+  "Olamide","Chinedu","Ngozi","Bola","Sule"
 ];
 
 const cities = [
-  "Lagos", "Abuja", "Port Harcourt", "Ibadan", "Kano",
-  "Enugu", "Benin", "Jos", "Owerri", "Abeokuta"
+  "Lagos","Abuja","Port Harcourt","Ibadan","Kano",
+  "Enugu","Benin","Jos","Owerri","Abeokuta"
 ];
 
 // =========================
@@ -57,12 +60,12 @@ export default function Dashboard({
   goLobby,
   goWallet,
   goTransactions,
+  goAdmin,   // ✅ NEW
   logout
 }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
-
   const [notifications, setNotifications] = useState([]);
 
   // =========================
@@ -95,14 +98,13 @@ export default function Dashboard({
   }
 
   // =========================
-  // RANDOM POPUPS ENGINE
+  // RANDOM POPUPS
   // =========================
   useEffect(() => {
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
       const amount = (Math.floor(Math.random() * 50000) + 2000);
-
       const type = Math.random() > 0.5 ? "won" : "withdrew";
 
       const message =
@@ -114,12 +116,8 @@ export default function Dashboard({
 
       playPop();
 
-      setNotifications((prev) => [
-        ...prev,
-        { id, message }
-      ]);
+      setNotifications((prev) => [...prev, { id, message }]);
 
-      // remove after 4 sec
       setTimeout(() => {
         setNotifications((prev) =>
           prev.filter((n) => n.id !== id)
@@ -169,6 +167,16 @@ export default function Dashboard({
         🎲 Play WHOT
       </button>
 
+      {/* ✅ ADMIN BUTTON (ONLY ADMIN SEES THIS) */}
+      {user?.$id === ADMIN_ID && (
+        <button
+          style={{ ...styles.btn, background: "#9333ea" }}
+          onClick={() => goAdmin?.()}
+        >
+          🛠 Admin Panel
+        </button>
+      )}
+
       <button
         style={{ ...styles.btn, background: "#ef4444" }}
         onClick={logout}
@@ -176,7 +184,7 @@ export default function Dashboard({
         🚪 Logout
       </button>
 
-      {/* FLOATING NOTIFICATIONS */}
+      {/* NOTIFICATIONS */}
       <div style={styles.toastContainer}>
         {notifications.map((n) => (
           <div key={n.id} style={styles.toast}>
@@ -246,8 +254,7 @@ const styles = {
     padding: "10px 15px",
     marginTop: 8,
     borderRadius: 8,
-    fontSize: 14,
-    animation: "fadeSlide 4s ease forwards"
+    fontSize: 14
   },
   games: {
     marginTop: 30,
