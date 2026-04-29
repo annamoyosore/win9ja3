@@ -17,8 +17,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
-import DiceLobby from "./pages/Dicelobby";          // ✅ NEW
-import Transactions from "./pages/Transactions";    // ✅ NEW
+import Transactions from "./pages/Transactions";
 import WhotGame from "./WhotGame";
 
 // =========================
@@ -77,25 +76,6 @@ function GameWrapper() {
 }
 
 // =========================
-// DICE GAME PLACEHOLDER
-// =========================
-function DiceGameWrapper() {
-  const { gameId, stake } = useParams();
-  const navigate = useNavigate();
-
-  return (
-    <div style={{ color: "white", padding: 20 }}>
-      🎲 Dice Game Coming Soon <br />
-      Game ID: {gameId} <br />
-      Stake: ₦{stake} <br /><br />
-      <button onClick={() => navigate("/dashboard")}>
-        Back to Dashboard
-      </button>
-    </div>
-  );
-}
-
-// =========================
 // ROUTES
 // =========================
 function AppRoutes() {
@@ -122,8 +102,7 @@ function AppRoutes() {
             <Dashboard
               goLobby={() => navigate("/lobby")}
               goWallet={() => navigate("/wallet")}
-              goTransactions={() => navigate("/transactions")} // ✅ FIXED
-              goDice={() => navigate("/dice")}                 // ✅ FIXED
+              goTransactions={() => navigate("/transactions")}
               logout={async () => {
                 await account.deleteSession("current");
                 navigate("/auth");
@@ -168,37 +147,12 @@ function AppRoutes() {
         }
       />
 
-      {/* DICE LOBBY */}
-      <Route
-        path="/dice"
-        element={
-          <ProtectedRoute>
-            <Dicelobby
-              goGame={(id, stake) =>
-                navigate(`/dice-game/${id}/${stake}`)
-              }
-              back={() => navigate("/dashboard")}
-            />
-          </ProtectedRoute>
-        }
-      />
-
       {/* WHOT GAME */}
       <Route
         path="/game/:gameId/:stake"
         element={
           <ProtectedRoute>
             <GameWrapper />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* DICE GAME */}
-      <Route
-        path="/dice-game/:gameId/:stake"
-        element={
-          <ProtectedRoute>
-            <DiceGameWrapper />
           </ProtectedRoute>
         }
       />
