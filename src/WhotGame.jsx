@@ -347,18 +347,19 @@ export default function WhotGame({ gameId, goHome }) {
 
         <div style={styles.center}>
           {top && <img src={drawCard(top)} style={styles.card} />}
-          <button style={styles.marketBtn}>
-            🃏 {game.deck.length}
-          </button>
+         <button style={styles.marketBtn} onClick={drawMarket}>
+  🃏 {game.deck.length}
+</button>
         </div>
 
         <div style={styles.hand}>
           {hand.map((c, i) => (
             <img
-              key={i}
-              src={drawCard(decodeCard(c))}
-              style={styles.card}
-            />
+  key={i}
+  src={drawCard(decodeCard(c))}
+  style={styles.card}
+  onClick={() => playCard(i)}
+/>
           ))}
         </div>
 
