@@ -17,7 +17,7 @@ export default function Dashboard({
   goLobby,
   goWallet,
   goDice,
-  goTransactions,   // ✅ NEW
+  goTransactions,
   logout
 }) {
   const [user, setUser] = useState(null);
@@ -50,6 +50,38 @@ export default function Dashboard({
     }
   }
 
+  // =========================
+  // SAFE NAVIGATION HANDLERS
+  // =========================
+  function handleTransactions() {
+    console.log("📊 Transactions clicked");
+
+    if (goTransactions) {
+      goTransactions();
+    } else {
+      // 🔥 fallback (prevents silent failure)
+      window.location.hash = "#/transactions";
+    }
+  }
+
+  function handleWallet() {
+    if (goWallet) goWallet();
+    else window.location.hash = "#/wallet";
+  }
+
+  function handleLobby() {
+    if (goLobby) goLobby();
+    else window.location.hash = "#/lobby";
+  }
+
+  function handleDice() {
+    if (goDice) goDice();
+    else window.location.hash = "#/dice";
+  }
+
+  // =========================
+  // LOADING
+  // =========================
   if (loading) {
     return (
       <div style={styles.loading}>
@@ -59,6 +91,9 @@ export default function Dashboard({
     );
   }
 
+  // =========================
+  // UI
+  // =========================
   return (
     <div style={styles.container}>
       <h1 style={styles.logo}>🎮 Win9ja</h1>
@@ -67,20 +102,18 @@ export default function Dashboard({
         Welcome, {user?.name || "Player"}
       </h2>
 
-      {/* WALLET */}
+      {/* WALLET BALANCE */}
       <div style={styles.card}>
         💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
       </div>
 
-      <button style={styles.btn} onClick={() => goWallet?.()}>
+      {/* WALLET */}
+      <button style={styles.btn} onClick={handleWallet}>
         💳 Wallet
       </button>
 
-      {/* 🆕 TRANSACTIONS */}
-      <button
-        style={styles.txBtn}
-        onClick={() => goTransactions?.()}
-      >
+      {/* ✅ TRANSACTIONS (FIXED) */}
+      <button style={styles.txBtn} onClick={handleTransactions}>
         📊 Transactions
       </button>
 
@@ -88,11 +121,11 @@ export default function Dashboard({
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>🎮 Games</h3>
 
-        <button style={styles.btn} onClick={() => goLobby?.()}>
+        <button style={styles.btn} onClick={handleLobby}>
           🎲 Play WHOT
         </button>
 
-        <button style={styles.diceBtn} onClick={() => goDice?.()}>
+        <button style={styles.diceBtn} onClick={handleDice}>
           🎲 Play Dice
         </button>
       </div>
