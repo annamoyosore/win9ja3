@@ -67,28 +67,26 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // 🔥 MATCH REALTIME
+  // MATCH REALTIME
   // =========================
   useEffect(() => {
     if (!user) return;
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      async () => {
-        refresh(user.$id);
-      }
+      () => refresh(user.$id)
     );
 
     return () => unsub();
   }, [user]);
 
   // =========================
-  // 🔥 GAME REALTIME (FIXED)
+  // GAME REALTIME (SYNC)
   // =========================
   useEffect(() => {
     if (!user) return;
 
-    const unsubGame = databases.client.subscribe(
+    const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
       async (res) => {
         const g = res.payload;
@@ -96,29 +94,19 @@ export default function Lobby({ goGame, back }) {
         if (g.status !== "finished") return;
 
         try {
-          const match = await databases.getDocument(
+          await databases.updateDocument(
             DATABASE_ID,
             MATCH_COLLECTION,
-            g.matchId
+            g.matchId,
+            { status: "finished" }
           );
-
-          if (match.status !== "finished") {
-            await databases.updateDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              match.$id,
-              { status: "finished" }
-            );
-          }
-        } catch (e) {
-          console.log("finish sync error", e);
-        }
+        } catch {}
 
         refresh(user.$id);
       }
     );
 
-    return () => unsubGame();
+    return () => unsub();
   }, [user]);
 
   async function refresh(userId) {
@@ -128,7 +116,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // AUTO REFUND
+  // AUTO REFUND (78 HOURS)
   // =========================
   async function autoRefund(userId) {
     const res = await databases.listDocuments(
@@ -163,7 +151,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD MATCHES
+  // LOAD AVAILABLE MATCHES
   // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
@@ -171,17 +159,13 @@ export default function Lobby({ goGame, back }) {
       MATCH_COLLECTION
     );
 
-    const filtered = res.documents.filter((m) => {
-      if (m.status === "waiting") return m.hostId !== userId;
+    const available = res.documents.filter(
+      (m) =>
+        m.status === "waiting" &&
+        m.hostId !== userId
+    );
 
-      if (m.status === "matched") {
-        return m.hostId === userId || m.opponentId === userId;
-      }
-
-      return false;
-    });
-
-    setMatches(filtered);
+    setMatches(available);
   }
 
   // =========================
@@ -212,7 +196,6 @@ export default function Lobby({ goGame, back }) {
     try {
       if (match.hostId === user.$id) {
         alert("Cannot join your own match");
-        setLoading(false);
         return;
       }
 
@@ -224,13 +207,11 @@ export default function Lobby({ goGame, back }) {
 
       if (fresh.opponentId) {
         alert("Already taken");
-        setLoading(false);
         return;
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
         alert("Insufficient balance");
-        setLoading(false);
         return;
       }
 
@@ -240,7 +221,6 @@ export default function Lobby({ goGame, back }) {
       const adminCut = Math.floor(total * 0.1);
       const pot = total - adminCut;
 
-      // PAY ADMIN ONCE
       if (!fresh.adminPaid) {
         const adminWallet = await databases.listDocuments(
           DATABASE_ID,
@@ -342,6 +322,33 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
+  // SAFE NAVIGATION (CRITICAL FIX)
+  // =========================
+  async function safeOpenGame(match) {
+    if (!match.gameId) {
+      alert("Game not ready");
+      return;
+    }
+
+    try {
+      const g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        match.gameId
+      );
+
+      if (g.status === "finished") {
+        alert("Game already finished");
+        return;
+      }
+
+      goGame(match.gameId, match.stake);
+    } catch {
+      alert("Unable to open game");
+    }
+  }
+
+  // =========================
   // UI
   // =========================
   return (
@@ -366,10 +373,7 @@ export default function Lobby({ goGame, back }) {
           ) : (
             <button
               style={styles.resumeBtn}
-              onClick={() => {
-                if (!m.gameId) return alert("Game not ready");
-                goGame(m.gameId, m.stake);
-              }}
+              onClick={() => safeOpenGame(m)} // 🔥 FIXED
             >
               ▶ Resume
             </button>
@@ -383,11 +387,12 @@ export default function Lobby({ goGame, back }) {
         <div key={m.$id} style={styles.card}>
           <span>₦{m.stake}</span>
 
-          {m.status === "waiting" && (
-            <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
-              Join
-            </button>
-          )}
+          <button
+            onClick={() => joinMatch(m)}
+            style={styles.joinBtn}
+          >
+            Join
+          </button>
         </div>
       ))}
 
