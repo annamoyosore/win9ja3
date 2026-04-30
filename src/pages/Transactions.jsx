@@ -59,7 +59,7 @@ export default function Transactions({ back }) {
       const user = await account.get();
 
       // =========================
-      // LOAD MATCHES (FILTER SERVER SIDE)
+      // MATCHES
       // =========================
       const matches = await fetchAll(MATCH_COLLECTION, [
         Query.or([
@@ -76,7 +76,7 @@ export default function Transactions({ back }) {
 
           let winnerId = m.winnerId || null;
 
-          // fallback if not stored in match
+          // fallback if winner not saved in match
           if (!winnerId && m.gameId) {
             try {
               const g = await databases.getDocument(
@@ -90,9 +90,7 @@ export default function Transactions({ back }) {
             }
           }
 
-          // =========================
-          // STATUS LOGIC (FIXED)
-          // =========================
+          // STATUS LOGIC
           switch (m.status) {
             case "waiting":
               title = "Waiting for opponent";
@@ -138,36 +136,60 @@ export default function Transactions({ back }) {
       );
 
       // =========================
-      // LOAD DEPOSITS
+      // DEPOSITS
       // =========================
       const deposits = await fetchAll(DEPOSIT_COLLECTION, [
         Query.equal("userId", user.$id)
       ]);
 
-      const depositList = deposits.map(d => ({
-        id: "dep_" + d.$id,
-        title: "Deposit",
-        amount: Number(d.amount || 0),
-        color: d.status === "approved" ? "#22c55e" : "#facc15",
-        status: d.status || "pending",
-        createdAt: d.$createdAt
-      }));
+      const depositList = deposits.map(d => {
+        let color = "#facc15";
+
+        if (d.status === "approved") color = "#22c55e";
+        if (d.status === "rejected") color = "#ef4444";
+
+        return {
+          id: "dep_" + d.$id,
+          title:
+            d.status === "approved"
+              ? "Deposit Successful"
+              : d.status === "rejected"
+              ? "Deposit Failed"
+              : "Deposit Pending",
+          amount: Number(d.amount || 0),
+          color,
+          status: d.status || "pending",
+          createdAt: d.$createdAt
+        };
+      });
 
       // =========================
-      // LOAD WITHDRAWALS
+      // WITHDRAWALS
       // =========================
       const withdrawals = await fetchAll(WITHDRAW_COLLECTION, [
         Query.equal("userId", user.$id)
       ]);
 
-      const withdrawalList = withdrawals.map(w => ({
-        id: "wd_" + w.$id,
-        title: "Withdrawal",
-        amount: -Number(w.amount || 0),
-        color: w.status === "approved" ? "#ef4444" : "#facc15",
-        status: w.status || "pending",
-        createdAt: w.$createdAt
-      }));
+      const withdrawalList = withdrawals.map(w => {
+        let color = "#facc15";
+
+        if (w.status === "approved") color = "#ef4444";
+        if (w.status === "rejected") color = "#22c55e";
+
+        return {
+          id: "wd_" + w.$id,
+          title:
+            w.status === "approved"
+              ? "Withdrawal Sent"
+              : w.status === "rejected"
+              ? "Withdrawal Reversed"
+              : "Withdrawal Pending",
+          amount: -Number(w.amount || 0),
+          color,
+          status: w.status || "pending",
+          createdAt: w.$createdAt
+        };
+      });
 
       // =========================
       // MERGE + SORT
@@ -202,7 +224,7 @@ export default function Transactions({ back }) {
   }
 
   // =========================
-  // MAIN UI
+  // UI
   // =========================
   return (
     <div style={styles.container}>
