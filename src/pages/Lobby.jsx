@@ -67,7 +67,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // MATCH REALTIME
+  // REALTIME MATCHES
   // =========================
   useEffect(() => {
     if (!user) return;
@@ -81,7 +81,7 @@ export default function Lobby({ goGame, back }) {
   }, [user]);
 
   // =========================
-  // GAME REALTIME (SYNC)
+  // REALTIME GAME SYNC
   // =========================
   useEffect(() => {
     if (!user) return;
@@ -187,7 +187,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN MATCH
+  // JOIN MATCH (FIXED)
   // =========================
   async function joinMatch(match) {
     if (loading) return;
@@ -196,9 +196,11 @@ export default function Lobby({ goGame, back }) {
     try {
       if (match.hostId === user.$id) {
         alert("Cannot join your own match");
+        setLoading(false);
         return;
       }
 
+      // 🔥 REFRESH MATCH
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -206,21 +208,31 @@ export default function Lobby({ goGame, back }) {
       );
 
       if (fresh.opponentId) {
-        alert("Already taken");
+        alert("Match already taken");
+        setLoading(false);
+        return;
+      }
+
+      if (fresh.status !== "waiting") {
+        alert("Match not available");
+        setLoading(false);
         return;
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
         alert("Insufficient balance");
+        setLoading(false);
         return;
       }
 
+      // 🔒 Lock funds
       await lockFunds(user.$id, fresh.stake);
 
-      const total = fresh.stake * 2;
+      const total = Number(fresh.stake) * 2;
       const adminCut = Math.floor(total * 0.1);
       const pot = total - adminCut;
 
+      // 💰 PAY ADMIN ONCE
       if (!fresh.adminPaid) {
         const adminWallet = await databases.listDocuments(
           DATABASE_ID,
@@ -229,18 +241,20 @@ export default function Lobby({ goGame, back }) {
         );
 
         if (adminWallet.documents.length) {
+          const admin = adminWallet.documents[0];
+
           await databases.updateDocument(
             DATABASE_ID,
             WALLET_COLLECTION,
-            adminWallet.documents[0].$id,
+            admin.$id,
             {
-              balance:
-                Number(adminWallet.documents[0].balance || 0) + adminCut
+              balance: Number(admin.balance || 0) + adminCut
             }
           );
         }
       }
 
+      // 🔥 UPDATE MATCH (NO STRING ERRORS)
       const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -248,8 +262,8 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          pot,
-          adminCut,
+          pot: pot,
+          adminCut: adminCut,
           adminPaid: true
         }
       );
@@ -322,7 +336,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // SAFE NAVIGATION (CRITICAL FIX)
+  // SAFE OPEN GAME
   // =========================
   async function safeOpenGame(match) {
     if (!match.gameId) {
@@ -373,7 +387,7 @@ export default function Lobby({ goGame, back }) {
           ) : (
             <button
               style={styles.resumeBtn}
-              onClick={() => safeOpenGame(m)} // 🔥 FIXED
+              onClick={() => safeOpenGame(m)}
             >
               ▶ Resume
             </button>
