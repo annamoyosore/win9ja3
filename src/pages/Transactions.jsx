@@ -26,7 +26,7 @@ export default function Transactions({ back }) {
   }, []);
 
   // =========================
-  // PAGINATION HELPER
+  // FETCH ALL WITH PAGINATION
   // =========================
   async function fetchAll(collection, queries = []) {
     let all = [];
@@ -57,16 +57,27 @@ export default function Transactions({ back }) {
       setLoading(true);
 
       const user = await account.get();
+      console.log("USER:", user.$id);
 
       // =========================
-      // MATCHES
+      // MATCHES (FIXED QUERY)
       // =========================
-      const matches = await fetchAll(MATCH_COLLECTION, [
-        Query.or([
-          Query.equal("hostId", user.$id),
-          Query.equal("opponentId", user.$id)
-        ])
+      const hostMatches = await fetchAll(MATCH_COLLECTION, [
+        Query.equal("hostId", user.$id)
       ]);
+
+      const opponentMatches = await fetchAll(MATCH_COLLECTION, [
+        Query.equal("opponentId", user.$id)
+      ]);
+
+      // merge + remove duplicates
+      const matchMap = new Map();
+      [...hostMatches, ...opponentMatches].forEach(m => {
+        matchMap.set(m.$id, m);
+      });
+
+      const matches = Array.from(matchMap.values());
+      console.log("MATCHES:", matches);
 
       const matchList = await Promise.all(
         matches.map(async (m) => {
@@ -76,7 +87,7 @@ export default function Transactions({ back }) {
 
           let winnerId = m.winnerId || null;
 
-          // fallback if winner not saved in match
+          // fallback (not recommended but safe)
           if (!winnerId && m.gameId) {
             try {
               const g = await databases.getDocument(
@@ -90,7 +101,6 @@ export default function Transactions({ back }) {
             }
           }
 
-          // STATUS LOGIC
           switch (m.status) {
             case "waiting":
               title = "Waiting for opponent";
@@ -142,6 +152,8 @@ export default function Transactions({ back }) {
         Query.equal("userId", user.$id)
       ]);
 
+      console.log("DEPOSITS:", deposits);
+
       const depositList = deposits.map(d => {
         let color = "#facc15";
 
@@ -169,6 +181,8 @@ export default function Transactions({ back }) {
       const withdrawals = await fetchAll(WITHDRAW_COLLECTION, [
         Query.equal("userId", user.$id)
       ]);
+
+      console.log("WITHDRAWALS:", withdrawals);
 
       const withdrawalList = withdrawals.map(w => {
         let color = "#facc15";
@@ -212,7 +226,7 @@ export default function Transactions({ back }) {
   }
 
   // =========================
-  // LOADING UI
+  // LOADING
   // =========================
   if (loading) {
     return (
