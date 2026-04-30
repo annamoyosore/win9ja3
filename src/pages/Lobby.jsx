@@ -30,8 +30,7 @@ async function createGame(match, opponentId) {
       players: `${match.hostId},${opponentId}`,
       status: "running",
       winnerId: "",
-      payoutDone: false,
-      createdAt: new Date().toISOString()
+      payoutDone: false
     }
   );
 }
@@ -81,7 +80,7 @@ export default function Lobby({ goGame, back }) {
   }, [user]);
 
   // =========================
-  // REALTIME GAME SYNC
+  // REALTIME GAME → MARK MATCH FINISHED
   // =========================
   useEffect(() => {
     if (!user) return;
@@ -116,7 +115,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // AUTO REFUND (78 HOURS)
+  // AUTO REFUND (78 HOURS USING $createdAt)
   // =========================
   async function autoRefund(userId) {
     const res = await databases.listDocuments(
@@ -130,11 +129,10 @@ export default function Lobby({ goGame, back }) {
       if (
         m.status === "waiting" &&
         m.hostId === userId &&
-        m.createdAt &&
         !m.refunded
       ) {
         const diff =
-          (now - new Date(m.createdAt).getTime()) / (1000 * 60 * 60);
+          (now - new Date(m.$createdAt).getTime()) / (1000 * 60 * 60);
 
         if (diff >= 78) {
           await unlockFunds(userId, m.stake);
@@ -195,7 +193,9 @@ export default function Lobby({ goGame, back }) {
 
     try {
       if (match.hostId === user.$id) {
-        throw new Error("Cannot join your own match");
+        alert("Cannot join your own match");
+        setLoading(false);
+        return;
       }
 
       const fresh = await databases.getDocument(
@@ -204,27 +204,25 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      // 🚫 Prevent duplicates
-      if (fresh.opponentId || fresh.gameId) {
-        throw new Error("Match already started");
-      }
-
-      if (fresh.status !== "waiting") {
-        throw new Error("Match not available");
+      if (fresh.opponentId || fresh.status !== "waiting") {
+        alert("Match not available");
+        setLoading(false);
+        return;
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
-        throw new Error("Insufficient balance");
+        alert("Insufficient balance");
+        setLoading(false);
+        return;
       }
 
-      // 🔒 Lock funds
       await lockFunds(user.$id, fresh.stake);
 
       const total = Number(fresh.stake) * 2;
       const adminCut = Math.floor(total * 0.1);
       const pot = total - adminCut;
 
-      // 💰 Admin payment
+      // PAY ADMIN ONCE
       if (!fresh.adminPaid) {
         const adminWallet = await databases.listDocuments(
           DATABASE_ID,
@@ -246,25 +244,29 @@ export default function Lobby({ goGame, back }) {
         }
       }
 
-      // 🔥 CREATE GAME FIRST
-      const game = await createGame(fresh, user.$id);
-
-      // 🔥 SINGLE UPDATE
-      await databases.updateDocument(
+      const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
         {
           opponentId: user.$id,
           status: "matched",
-          pot,
-          adminCut,
-          adminPaid: true,
-          gameId: game.$id
+          pot: pot,
+          adminCut: adminCut,
+          adminPaid: true
         }
       );
 
-      goGame(game.$id, fresh.stake);
+      const game = await createGame(updated, user.$id);
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        updated.$id,
+        { gameId: game.$id }
+      );
+
+      goGame(game.$id, updated.stake);
 
     } catch (err) {
       alert(err.message);
@@ -308,8 +310,7 @@ export default function Lobby({ goGame, back }) {
           status: "waiting",
           gameId: "",
           adminPaid: false,
-          refunded: false,
-          createdAt: new Date().toISOString()
+          refunded: false
         }
       );
 
@@ -323,51 +324,22 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // SAFE OPEN GAME (RECOVERY)
+  // SAFE OPEN GAME
   // =========================
   async function safeOpenGame(match) {
+    if (!match.gameId) return;
+
     try {
-      let gameId = match.gameId;
-
-      // 🔥 Auto-repair missing gameId
-      if (!gameId) {
-        const games = await databases.listDocuments(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          [Query.equal("matchId", match.$id)]
-        );
-
-        if (games.documents.length) {
-          const game = games.documents[0];
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            match.$id,
-            { gameId: game.$id }
-          );
-
-          gameId = game.$id;
-        } else {
-          throw new Error("Game not ready yet");
-        }
-      }
-
       const g = await databases.getDocument(
         DATABASE_ID,
         GAME_COLLECTION,
-        gameId
+        match.gameId
       );
 
-      if (g.status === "finished") {
-        throw new Error("Game already finished");
-      }
+      if (g.status === "finished") return;
 
-      goGame(gameId, match.stake);
-
-    } catch (err) {
-      alert(err.message);
-    }
+      goGame(match.gameId, match.stake);
+    } catch {}
   }
 
   // =========================
@@ -392,12 +364,16 @@ export default function Lobby({ goGame, back }) {
             <button disabled style={styles.finishedBtn}>
               ✅ Finished
             </button>
-          ) : (
+          ) : m.gameId ? (
             <button
               style={styles.resumeBtn}
               onClick={() => safeOpenGame(m)}
             >
               ▶ Resume
+            </button>
+          ) : (
+            <button disabled style={styles.waitingBtn}>
+              ⏳ Preparing...
             </button>
           )}
         </div>
@@ -463,6 +439,7 @@ const styles = {
   joinBtn: { background: "gold", padding: 8 },
   resumeBtn: { background: "green", padding: 8, color: "#fff" },
   finishedBtn: { background: "#444", padding: 8, color: "#fff" },
+  waitingBtn: { background: "#555", padding: 8, color: "#ccc" },
   input: { width: "100%", padding: 10 },
   createBtn: { width: "100%", padding: 10, background: "blue", color: "#fff" },
   back: { marginTop: 20, padding: 10 }
