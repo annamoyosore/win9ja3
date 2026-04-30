@@ -10,7 +10,9 @@ import {
   Query
 } from "../lib/appwrite";
 
-const TRANSACTION_COLLECTION = "transactions";
+const GAME_COLLECTION = "games";
+const DEPOSIT_COLLECTION = "deposits";
+const WITHDRAW_COLLECTION = "withdrawals";
 
 // =========================
 // COMPONENT
@@ -28,29 +30,7 @@ export default function Transactions({ back }) {
       const user = await account.get();
 
       // =========================
-      // 1. LOAD TRANSACTIONS
-      // =========================
-      const txRes = await databases.listDocuments(
-        DATABASE_ID,
-        TRANSACTION_COLLECTION,
-        [
-          Query.equal("userId", user.$id),
-          Query.orderDesc("createdAt")
-        ]
-      );
-
-      const txList = txRes.documents.map((t) => ({
-        id: "tx_" + t.$id,
-        title: formatType(t.type),
-        amount: Number(t.amount),
-        status: t.status,
-        createdAt: t.createdAt,
-        color: getColor(t.type),
-        sign: getSign(t.type)
-      }));
-
-      // =========================
-      // 2. LOAD MATCHES (LIVE STATE)
+      // LOAD MATCHES
       // =========================
       const matchRes = await databases.listDocuments(
         DATABASE_ID,
@@ -58,50 +38,110 @@ export default function Transactions({ back }) {
       );
 
       const myMatches = matchRes.documents.filter(
-        (m) =>
-          m.hostId === user.$id ||
-          m.opponentId === user.$id
+        m => m.hostId === user.$id || m.opponentId === user.$id
       );
 
-      const matchList = myMatches.map((m) => {
-        let title = "";
-        let amount = 0;
-        let color = "#facc15";
+      const matchList = await Promise.all(
+        myMatches.map(async (m) => {
+          let winnerId = null;
 
-        if (m.status === "waiting") {
-          title = "Waiting for opponent";
-          amount = -m.stake;
-        }
+          if (m.gameId) {
+            try {
+              const g = await databases.getDocument(
+                DATABASE_ID,
+                GAME_COLLECTION,
+                m.gameId
+              );
+              winnerId = g.winnerId;
+            } catch {}
+          }
 
-        else if (m.status === "matched") {
-          title = "Opponent joined";
-          amount = -m.stake;
-        }
+          let title = "";
+          let amount = 0;
+          let color = "#facc15";
 
-        else if (m.status === "running") {
-          title = "Game in progress";
-          amount = -m.stake;
-        }
+          if (m.status === "waiting") {
+            title = "Waiting for opponent";
+            amount = -m.stake;
+          }
 
-        else {
-          return null; // ❌ skip finished (already in transactions)
-        }
+          else if (m.status === "matched") {
+            title = "Opponent joined";
+            amount = -m.stake;
+          }
 
-        return {
-          id: "match_" + m.$id,
-          title,
-          amount,
-          status: m.status,
-          createdAt: m.$createdAt,
-          color,
-          sign: ""
-        };
-      }).filter(Boolean);
+          else if (m.status === "running") {
+            title = "Game in progress";
+            amount = -m.stake;
+          }
+
+          else if (m.status === "finished") {
+            if (winnerId === user.$id) {
+              title = "Game Won";
+              amount = m.pot;
+              color = "#22c55e";
+            } else {
+              title = "Game Lost";
+              amount = -m.stake;
+              color = "#ef4444";
+            }
+          }
+
+          return {
+            id: "match_" + m.$id,
+            title,
+            amount,
+            color,
+            status: m.status,
+            createdAt: m.$createdAt
+          };
+        })
+      );
 
       // =========================
-      // 3. MERGE + SORT
+      // LOAD DEPOSITS
       // =========================
-      const merged = [...txList, ...matchList].sort(
+      const depRes = await databases.listDocuments(
+        DATABASE_ID,
+        DEPOSIT_COLLECTION,
+        [Query.equal("userId", user.$id)]
+      );
+
+      const depositList = depRes.documents.map(d => ({
+        id: "dep_" + d.$id,
+        title: "Deposit",
+        amount: Number(d.amount),
+        color: d.status === "approved" ? "#22c55e" : "#facc15",
+        status: d.status,
+        createdAt: d.$createdAt
+      }));
+
+      // =========================
+      // LOAD WITHDRAWALS
+      // =========================
+      const wdRes = await databases.listDocuments(
+        DATABASE_ID,
+        WITHDRAW_COLLECTION,
+        [Query.equal("userId", user.$id)]
+      );
+
+      const withdrawalList = wdRes.documents.map(w => ({
+        id: "wd_" + w.$id,
+        title: "Withdrawal",
+        amount: -Number(w.amount),
+        color: w.status === "approved" ? "#ef4444" : "#facc15",
+        status: w.status,
+        createdAt: w.$createdAt
+      }));
+
+      // =========================
+      // MERGE ALL
+      // =========================
+      const merged = [
+        ...matchList,
+        ...depositList,
+        ...withdrawalList
+      ].sort(
         (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
       );
 
@@ -112,36 +152,6 @@ export default function Transactions({ back }) {
     } finally {
       setLoading(false);
     }
-  }
-
-  // =========================
-  // HELPERS
-  // =========================
-  function formatType(type) {
-    switch (type) {
-      case "deposit":
-        return "Deposit";
-      case "withdrawal":
-        return "Withdrawal";
-      case "game_win":
-        return "Game Win";
-      case "game_loss":
-        return "Game Loss";
-      default:
-        return "Transaction";
-    }
-  }
-
-  function getColor(type) {
-    if (type === "deposit" || type === "game_win") return "#22c55e";
-    if (type === "withdrawal" || type === "game_loss") return "#ef4444";
-    return "#facc15";
-  }
-
-  function getSign(type) {
-    if (type === "deposit" || type === "game_win") return "+";
-    if (type === "withdrawal" || type === "game_loss") return "-";
-    return "";
   }
 
   // =========================
@@ -169,7 +179,6 @@ export default function Transactions({ back }) {
 
       {data.map((t) => (
         <div key={t.id} style={styles.card}>
-          {/* LEFT */}
           <div>
             <p style={styles.titleText}>{t.title}</p>
             <p style={styles.date}>
@@ -177,17 +186,11 @@ export default function Transactions({ back }) {
             </p>
           </div>
 
-          {/* RIGHT */}
           <div style={styles.right}>
-            <p
-              style={{
-                color: t.color,
-                fontWeight: "bold"
-              }}
-            >
-              {t.sign}₦{Number(t.amount).toLocaleString()}
+            <p style={{ color: t.color, fontWeight: "bold" }}>
+              {t.amount > 0 ? "+" : ""}
+              ₦{Number(t.amount).toLocaleString()}
             </p>
-
             <p style={styles.status}>{t.status}</p>
           </div>
         </div>
@@ -217,8 +220,7 @@ const styles = {
   },
   empty: {
     opacity: 0.6,
-    textAlign: "center",
-    marginTop: 20
+    textAlign: "center"
   },
   card: {
     background: "#111827",
@@ -226,8 +228,7 @@ const styles = {
     borderRadius: 12,
     marginBottom: 10,
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center"
+    justifyContent: "space-between"
   },
   titleText: {
     fontWeight: "bold"
@@ -255,7 +256,6 @@ const styles = {
   loading: {
     minHeight: "100vh",
     display: "flex",
-    flexDirection: "column",
     justifyContent: "center",
     alignItems: "center",
     background: "#020617",
