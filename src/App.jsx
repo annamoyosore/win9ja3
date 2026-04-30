@@ -19,6 +19,10 @@ import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
 import Transactions from "./pages/Transactions";
 import WhotGame from "./WhotGame";
+import AdminDashboard from "./pages/aaa"; // ✅ ADMIN FILE
+
+// 🔒 ADMIN ID
+const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
 // AUTH HOOK
@@ -38,6 +42,23 @@ function useAuth() {
 }
 
 // =========================
+// GET USER HOOK
+// =========================
+function useUser() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    account.get()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { user, loading };
+}
+
+// =========================
 // PROTECTED ROUTE
 // =========================
 function ProtectedRoute({ children }) {
@@ -46,6 +67,26 @@ function ProtectedRoute({ children }) {
   if (loading) return <p style={{ color: "white" }}>Loading...</p>;
 
   return authed ? children : <Navigate to="/auth" replace />;
+}
+
+// =========================
+// ADMIN ROUTE
+// =========================
+function AdminRoute({ children }) {
+  const { user, loading } = useUser();
+
+  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+
+  // ❌ not logged in
+  if (!user) return <Navigate to="/auth" replace />;
+
+  // ❌ not admin
+  if (user.$id !== ADMIN_ID) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // ✅ admin
+  return children;
 }
 
 // =========================
@@ -154,6 +195,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <GameWrapper />
           </ProtectedRoute>
+        }
+      />
+
+      {/* ✅ ADMIN PANEL */}
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminDashboard back={() => navigate("/dashboard")} />
+          </AdminRoute>
         }
       />
 
