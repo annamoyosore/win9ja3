@@ -195,34 +195,26 @@ export default function Lobby({ goGame, back }) {
 
     try {
       if (match.hostId === user.$id) {
-        alert("Cannot join your own match");
-        setLoading(false);
-        return;
+        throw new Error("Cannot join your own match");
       }
 
-      // 🔥 REFRESH MATCH
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id
       );
 
-      if (fresh.opponentId) {
-        alert("Match already taken");
-        setLoading(false);
-        return;
+      // 🚫 Prevent duplicates
+      if (fresh.opponentId || fresh.gameId) {
+        throw new Error("Match already started");
       }
 
       if (fresh.status !== "waiting") {
-        alert("Match not available");
-        setLoading(false);
-        return;
+        throw new Error("Match not available");
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
-        alert("Insufficient balance");
-        setLoading(false);
-        return;
+        throw new Error("Insufficient balance");
       }
 
       // 🔒 Lock funds
@@ -232,7 +224,7 @@ export default function Lobby({ goGame, back }) {
       const adminCut = Math.floor(total * 0.1);
       const pot = total - adminCut;
 
-      // 💰 PAY ADMIN ONCE
+      // 💰 Admin payment
       if (!fresh.adminPaid) {
         const adminWallet = await databases.listDocuments(
           DATABASE_ID,
@@ -254,30 +246,25 @@ export default function Lobby({ goGame, back }) {
         }
       }
 
-      // 🔥 UPDATE MATCH (NO STRING ERRORS)
-      const updated = await databases.updateDocument(
+      // 🔥 CREATE GAME FIRST
+      const game = await createGame(fresh, user.$id);
+
+      // 🔥 SINGLE UPDATE
+      await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
         {
           opponentId: user.$id,
           status: "matched",
-          pot: pot,
-          adminCut: adminCut,
-          adminPaid: true
+          pot,
+          adminCut,
+          adminPaid: true,
+          gameId: game.$id
         }
       );
 
-      const game = await createGame(updated, user.$id);
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        updated.$id,
-        { gameId: game.$id }
-      );
-
-      goGame(game.$id, updated.stake);
+      goGame(game.$id, fresh.stake);
 
     } catch (err) {
       alert(err.message);
@@ -336,29 +323,50 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // SAFE OPEN GAME
+  // SAFE OPEN GAME (RECOVERY)
   // =========================
   async function safeOpenGame(match) {
-    if (!match.gameId) {
-      alert("Game not ready");
-      return;
-    }
-
     try {
+      let gameId = match.gameId;
+
+      // 🔥 Auto-repair missing gameId
+      if (!gameId) {
+        const games = await databases.listDocuments(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          [Query.equal("matchId", match.$id)]
+        );
+
+        if (games.documents.length) {
+          const game = games.documents[0];
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            MATCH_COLLECTION,
+            match.$id,
+            { gameId: game.$id }
+          );
+
+          gameId = game.$id;
+        } else {
+          throw new Error("Game not ready yet");
+        }
+      }
+
       const g = await databases.getDocument(
         DATABASE_ID,
         GAME_COLLECTION,
-        match.gameId
+        gameId
       );
 
       if (g.status === "finished") {
-        alert("Game already finished");
-        return;
+        throw new Error("Game already finished");
       }
 
-      goGame(match.gameId, match.stake);
-    } catch {
-      alert("Unable to open game");
+      goGame(gameId, match.stake);
+
+    } catch (err) {
+      alert(err.message);
     }
   }
 
