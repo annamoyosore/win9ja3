@@ -6,6 +6,7 @@ import {
   account,
   databases,
   DATABASE_ID,
+  MATCH_COLLECTION,
   Query
 } from "../lib/appwrite";
 
@@ -15,7 +16,7 @@ const TRANSACTION_COLLECTION = "transactions";
 // COMPONENT
 // =========================
 export default function Transactions({ back }) {
-  const [transactions, setTransactions] = useState([]);
+  const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,21 +27,88 @@ export default function Transactions({ back }) {
     try {
       const user = await account.get();
 
-      // 🔒 Fetch ONLY current user transactions
-      const res = await databases.listDocuments(
+      // =========================
+      // 1. LOAD TRANSACTIONS
+      // =========================
+      const txRes = await databases.listDocuments(
         DATABASE_ID,
         TRANSACTION_COLLECTION,
         [
           Query.equal("userId", user.$id),
-          Query.orderDesc("createdAt"),
-          Query.limit(100)
+          Query.orderDesc("createdAt")
         ]
       );
 
-      setTransactions(res.documents);
+      const txList = txRes.documents.map((t) => ({
+        id: "tx_" + t.$id,
+        title: formatType(t.type),
+        amount: Number(t.amount),
+        status: t.status,
+        createdAt: t.createdAt,
+        color: getColor(t.type),
+        sign: getSign(t.type)
+      }));
+
+      // =========================
+      // 2. LOAD MATCHES (LIVE STATE)
+      // =========================
+      const matchRes = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION
+      );
+
+      const myMatches = matchRes.documents.filter(
+        (m) =>
+          m.hostId === user.$id ||
+          m.opponentId === user.$id
+      );
+
+      const matchList = myMatches.map((m) => {
+        let title = "";
+        let amount = 0;
+        let color = "#facc15";
+
+        if (m.status === "waiting") {
+          title = "Waiting for opponent";
+          amount = -m.stake;
+        }
+
+        else if (m.status === "matched") {
+          title = "Opponent joined";
+          amount = -m.stake;
+        }
+
+        else if (m.status === "running") {
+          title = "Game in progress";
+          amount = -m.stake;
+        }
+
+        else {
+          return null; // ❌ skip finished (already in transactions)
+        }
+
+        return {
+          id: "match_" + m.$id,
+          title,
+          amount,
+          status: m.status,
+          createdAt: m.$createdAt,
+          color,
+          sign: ""
+        };
+      }).filter(Boolean);
+
+      // =========================
+      // 3. MERGE + SORT
+      // =========================
+      const merged = [...txList, ...matchList].sort(
+        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      );
+
+      setData(merged);
 
     } catch (err) {
-      console.error("Transaction load error:", err);
+      console.log("tx error", err);
     } finally {
       setLoading(false);
     }
@@ -65,9 +133,9 @@ export default function Transactions({ back }) {
   }
 
   function getColor(type) {
-    if (type === "deposit" || type === "game_win") return "#22c55e"; // green
-    if (type === "withdrawal" || type === "game_loss") return "#ef4444"; // red
-    return "#facc15"; // yellow
+    if (type === "deposit" || type === "game_win") return "#22c55e";
+    if (type === "withdrawal" || type === "game_loss") return "#ef4444";
+    return "#facc15";
   }
 
   function getSign(type) {
@@ -82,7 +150,7 @@ export default function Transactions({ back }) {
   if (loading) {
     return (
       <div style={styles.loading}>
-        <h2>📊 Transactions</h2>
+        <h2>📊 Activity</h2>
         <p>Loading...</p>
       </div>
     );
@@ -93,17 +161,17 @@ export default function Transactions({ back }) {
   // =========================
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>📊 Transactions</h1>
+      <h1 style={styles.title}>📊 Activity</h1>
 
-      {transactions.length === 0 && (
-        <p style={styles.empty}>No transactions yet</p>
+      {data.length === 0 && (
+        <p style={styles.empty}>No activity yet</p>
       )}
 
-      {transactions.map((t) => (
-        <div key={t.$id} style={styles.card}>
+      {data.map((t) => (
+        <div key={t.id} style={styles.card}>
           {/* LEFT */}
           <div>
-            <p style={styles.type}>{formatType(t.type)}</p>
+            <p style={styles.titleText}>{t.title}</p>
             <p style={styles.date}>
               {new Date(t.createdAt).toLocaleString()}
             </p>
@@ -113,22 +181,18 @@ export default function Transactions({ back }) {
           <div style={styles.right}>
             <p
               style={{
-                color: getColor(t.type),
-                fontWeight: "bold",
-                fontSize: 16
+                color: t.color,
+                fontWeight: "bold"
               }}
             >
-              {getSign(t.type)}₦{Number(t.amount).toLocaleString()}
+              {t.sign}₦{Number(t.amount).toLocaleString()}
             </p>
 
-            <p style={styles.status}>
-              {t.status || "completed"}
-            </p>
+            <p style={styles.status}>{t.status}</p>
           </div>
         </div>
       ))}
 
-      {/* BACK */}
       <button style={styles.back} onClick={back}>
         ← Back
       </button>
@@ -165,9 +229,8 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center"
   },
-  type: {
-    fontWeight: "bold",
-    fontSize: 15
+  titleText: {
+    fontWeight: "bold"
   },
   date: {
     fontSize: 12,
