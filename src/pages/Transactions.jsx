@@ -25,27 +25,59 @@ export default function Transactions({ back }) {
     init();
   }, []);
 
+  // =========================
+  // PAGINATION HELPER
+  // =========================
+  async function fetchAll(collection, queries = []) {
+    let all = [];
+    let offset = 0;
+    const limit = 100;
+
+    while (true) {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        collection,
+        [...queries, Query.limit(limit), Query.offset(offset)]
+      );
+
+      all = [...all, ...res.documents];
+
+      if (res.documents.length < limit) break;
+      offset += limit;
+    }
+
+    return all;
+  }
+
+  // =========================
+  // INIT LOAD
+  // =========================
   async function init() {
     try {
+      setLoading(true);
+
       const user = await account.get();
 
       // =========================
-      // LOAD MATCHES
+      // LOAD MATCHES (FILTER SERVER SIDE)
       // =========================
-      const matchRes = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION
-      );
-
-      const myMatches = matchRes.documents.filter(
-        m => m.hostId === user.$id || m.opponentId === user.$id
-      );
+      const matches = await fetchAll(MATCH_COLLECTION, [
+        Query.or([
+          Query.equal("hostId", user.$id),
+          Query.equal("opponentId", user.$id)
+        ])
+      ]);
 
       const matchList = await Promise.all(
-        myMatches.map(async (m) => {
-          let winnerId = null;
+        matches.map(async (m) => {
+          let title = "";
+          let amount = 0;
+          let color = "#facc15";
 
-          if (m.gameId) {
+          let winnerId = m.winnerId || null;
+
+          // fallback if not stored in match
+          if (!winnerId && m.gameId) {
             try {
               const g = await databases.getDocument(
                 DATABASE_ID,
@@ -53,38 +85,45 @@ export default function Transactions({ back }) {
                 m.gameId
               );
               winnerId = g.winnerId;
-            } catch {}
-          }
-
-          let title = "";
-          let amount = 0;
-          let color = "#facc15";
-
-          if (m.status === "waiting") {
-            title = "Waiting for opponent";
-            amount = -m.stake;
-          }
-
-          else if (m.status === "matched") {
-            title = "Opponent joined";
-            amount = -m.stake;
-          }
-
-          else if (m.status === "running") {
-            title = "Game in progress";
-            amount = -m.stake;
-          }
-
-          else if (m.status === "finished") {
-            if (winnerId === user.$id) {
-              title = "Game Won";
-              amount = m.pot;
-              color = "#22c55e";
-            } else {
-              title = "Game Lost";
-              amount = -m.stake;
-              color = "#ef4444";
+            } catch (err) {
+              console.log("game fetch failed", err);
             }
+          }
+
+          // =========================
+          // STATUS LOGIC (FIXED)
+          // =========================
+          switch (m.status) {
+            case "waiting":
+              title = "Waiting for opponent";
+              amount = -Number(m.stake || 0);
+              break;
+
+            case "matched":
+              title = "Opponent joined";
+              amount = -Number(m.stake || 0);
+              break;
+
+            case "running":
+              title = "Game in progress";
+              amount = -Number(m.stake || 0);
+              break;
+
+            case "finished":
+              if (winnerId === user.$id) {
+                title = "Game Won";
+                amount = Number(m.pot || 0);
+                color = "#22c55e";
+              } else {
+                title = "Game Lost";
+                amount = -Number(m.stake || 0);
+                color = "#ef4444";
+              }
+              break;
+
+            default:
+              title = "Match Update";
+              amount = 0;
           }
 
           return {
@@ -92,7 +131,7 @@ export default function Transactions({ back }) {
             title,
             amount,
             color,
-            status: m.status,
+            status: m.status || "unknown",
             createdAt: m.$createdAt
           };
         })
@@ -101,41 +140,37 @@ export default function Transactions({ back }) {
       // =========================
       // LOAD DEPOSITS
       // =========================
-      const depRes = await databases.listDocuments(
-        DATABASE_ID,
-        DEPOSIT_COLLECTION,
-        [Query.equal("userId", user.$id)]
-      );
+      const deposits = await fetchAll(DEPOSIT_COLLECTION, [
+        Query.equal("userId", user.$id)
+      ]);
 
-      const depositList = depRes.documents.map(d => ({
+      const depositList = deposits.map(d => ({
         id: "dep_" + d.$id,
         title: "Deposit",
-        amount: Number(d.amount),
+        amount: Number(d.amount || 0),
         color: d.status === "approved" ? "#22c55e" : "#facc15",
-        status: d.status,
+        status: d.status || "pending",
         createdAt: d.$createdAt
       }));
 
       // =========================
       // LOAD WITHDRAWALS
       // =========================
-      const wdRes = await databases.listDocuments(
-        DATABASE_ID,
-        WITHDRAW_COLLECTION,
-        [Query.equal("userId", user.$id)]
-      );
+      const withdrawals = await fetchAll(WITHDRAW_COLLECTION, [
+        Query.equal("userId", user.$id)
+      ]);
 
-      const withdrawalList = wdRes.documents.map(w => ({
+      const withdrawalList = withdrawals.map(w => ({
         id: "wd_" + w.$id,
         title: "Withdrawal",
-        amount: -Number(w.amount),
+        amount: -Number(w.amount || 0),
         color: w.status === "approved" ? "#ef4444" : "#facc15",
-        status: w.status,
+        status: w.status || "pending",
         createdAt: w.$createdAt
       }));
 
       // =========================
-      // MERGE ALL
+      // MERGE + SORT
       // =========================
       const merged = [
         ...matchList,
@@ -155,7 +190,7 @@ export default function Transactions({ back }) {
   }
 
   // =========================
-  // LOADING
+  // LOADING UI
   // =========================
   if (loading) {
     return (
@@ -167,7 +202,7 @@ export default function Transactions({ back }) {
   }
 
   // =========================
-  // UI
+  // MAIN UI
   // =========================
   return (
     <div style={styles.container}>
