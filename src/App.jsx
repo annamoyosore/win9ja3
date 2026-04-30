@@ -19,7 +19,7 @@ import Wallet from "./pages/Wallet";
 import Lobby from "./pages/Lobby";
 import Transactions from "./pages/Transactions";
 import WhotGame from "./WhotGame";
-import AdminDashboard from "./pages/aaa"; // ✅ ADMIN FILE
+import AdminDashboard from "./pages/aaa"; // ✅ ADMIN PAGE
 
 // 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
@@ -144,6 +144,7 @@ function AppRoutes() {
               goLobby={() => navigate("/lobby")}
               goWallet={() => navigate("/wallet")}
               goTransactions={() => navigate("/transactions")}
+              goAdmin={() => navigate("/admin")} // ✅ FIXED
               logout={async () => {
                 await account.deleteSession("current");
                 navigate("/auth");
@@ -173,7 +174,7 @@ function AppRoutes() {
         }
       />
 
-      {/* WHOT LOBBY */}
+      {/* LOBBY */}
       <Route
         path="/lobby"
         element={
@@ -188,7 +189,7 @@ function AppRoutes() {
         }
       />
 
-      {/* WHOT GAME */}
+      {/* GAME */}
       <Route
         path="/game/:gameId/:stake"
         element={
