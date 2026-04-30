@@ -84,7 +84,7 @@ export default function Wallet() {
       );
 
       // 🔗 Redirect to Flutterwave
-      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w?tx_ref=${ref}`;
+      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
 
     } catch (err) {
       alert(err.message);
