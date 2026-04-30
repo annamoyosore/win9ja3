@@ -16,7 +16,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
 
-// 🔴 YOUR ADMIN ID
+// 🔴 ADMIN USER ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
@@ -59,6 +59,7 @@ async function createGame(match, opponentId) {
       status: "running",
       round: "1",
       winnerId: "",
+      payoutDone: false,
       turnStartTime: new Date().toISOString()
     }
   );
@@ -80,18 +81,22 @@ export default function Lobby({ goGame, back }) {
   }, []);
 
   async function init() {
-    const u = await account.get();
-    setUser(u);
+    try {
+      const u = await account.get();
+      setUser(u);
 
-    const w = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", u.$id)]
-    );
+      const w = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", u.$id)]
+      );
 
-    if (w.documents.length) setWallet(w.documents[0]);
+      if (w.documents.length) setWallet(w.documents[0]);
 
-    refresh(u.$id);
+      refresh(u.$id);
+    } catch (e) {
+      console.log("init error", e);
+    }
   }
 
   // =========================
@@ -105,7 +110,7 @@ export default function Lobby({ goGame, back }) {
       async (res) => {
         const m = res.payload;
 
-        refresh(user.$id);
+        await refresh(user.$id);
 
         // AUTO ENTER GAME
         if (
@@ -116,7 +121,7 @@ export default function Lobby({ goGame, back }) {
           goGame(m.gameId, m.stake);
         }
 
-        // AUTO MARK FINISHED
+        // 🔥 FORCE FINISH SYNC
         if (m.gameId) {
           try {
             const g = await databases.getDocument(
@@ -125,7 +130,7 @@ export default function Lobby({ goGame, back }) {
               m.gameId
             );
 
-            if (g.status === "finished" && m.status !== "finished") {
+            if (g.status === "finished") {
               await databases.updateDocument(
                 DATABASE_ID,
                 MATCH_COLLECTION,
@@ -195,10 +200,8 @@ export default function Lobby({ goGame, back }) {
     );
 
     const filtered = res.documents.filter((m) => {
-      // SHOW WAITING TO ALL EXCEPT HOST
       if (m.status === "waiting") return m.hostId !== userId;
 
-      // SHOW MATCHED ONLY TO PLAYERS
       if (m.status === "matched") {
         return m.hostId === userId || m.opponentId === userId;
       }
@@ -256,29 +259,32 @@ export default function Lobby({ goGame, back }) {
         return;
       }
 
-      // LOCK USER FUNDS
+      // LOCK FUNDS
       await lockFunds(user.$id, fresh.stake);
 
-      // 🔥 ADMIN CUT
-      const adminCut = Math.floor(fresh.stake * 0.1);
+      const total = fresh.stake * 2;
+      const adminCut = Math.floor(total * 0.1);
+      const pot = total - adminCut;
 
-      // PAY ADMIN
-      const adminWallet = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", ADMIN_ID)]
-      );
-
-      if (adminWallet.documents.length) {
-        await databases.updateDocument(
+      // SAFE ADMIN PAYMENT (ONLY ONCE)
+      if (!fresh.adminPaid) {
+        const adminWallet = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
-          adminWallet.documents[0].$id,
-          {
-            balance:
-              Number(adminWallet.documents[0].balance || 0) + adminCut
-          }
+          [Query.equal("userId", ADMIN_ID)]
         );
+
+        if (adminWallet.documents.length) {
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            adminWallet.documents[0].$id,
+            {
+              balance:
+                Number(adminWallet.documents[0].balance || 0) + adminCut
+            }
+          );
+        }
       }
 
       const updated = await databases.updateDocument(
@@ -288,7 +294,8 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          pot: fresh.stake * 2 - adminCut,
+          pot,
+          adminCut,
           adminPaid: true
         }
       );
@@ -385,7 +392,11 @@ export default function Lobby({ goGame, back }) {
           ) : (
             <button
               style={styles.resumeBtn}
-              onClick={() => goGame(m.gameId, m.stake)}
+              onClick={() => {
+                if (!m.gameId) return alert("Game not ready");
+                if (m.status === "finished") return;
+                goGame(m.gameId, m.stake);
+              }}
             >
               ▶ Resume
             </button>
@@ -434,25 +445,64 @@ export default function Lobby({ goGame, back }) {
 const styles = {
   container: {
     padding: 20,
-    background: "#020617",
+    background: "linear-gradient(135deg,#020617,#0f172a)",
     color: "#fff",
     minHeight: "100vh"
   },
   title: { fontSize: 28, fontWeight: "bold" },
-  section: { marginTop: 20, color: "gold" },
-  loading: { color: "gold" },
+  section: { marginTop: 20, color: "#facc15" },
+  loading: { color: "#facc15" },
   card: {
     background: "#111827",
     padding: 15,
     margin: "10px 0",
     borderRadius: 10,
     display: "flex",
-    justifyContent: "space-between"
+    justifyContent: "space-between",
+    alignItems: "center"
   },
-  joinBtn: { background: "gold", padding: 8 },
-  resumeBtn: { background: "green", padding: 8, color: "#fff" },
-  finishedBtn: { background: "#444", padding: 8, color: "#fff" },
-  input: { width: "100%", padding: 10 },
-  createBtn: { width: "100%", padding: 10, background: "blue", color: "#fff" },
-  back: { marginTop: 20, padding: 10 }
+  joinBtn: {
+    background: "#facc15",
+    padding: 8,
+    borderRadius: 6,
+    border: "none"
+  },
+  resumeBtn: {
+    background: "#22c55e",
+    padding: 8,
+    borderRadius: 6,
+    color: "#fff",
+    border: "none"
+  },
+  finishedBtn: {
+    background: "#374151",
+    padding: 8,
+    borderRadius: 6,
+    color: "#fff",
+    border: "none"
+  },
+  input: {
+    width: "100%",
+    padding: 10,
+    borderRadius: 6,
+    border: "none"
+  },
+  createBtn: {
+    width: "100%",
+    padding: 10,
+    background: "#3b82f6",
+    borderRadius: 6,
+    color: "#fff",
+    border: "none",
+    marginTop: 8
+  },
+  createBox: { marginTop: 20 },
+  back: {
+    marginTop: 20,
+    padding: 10,
+    background: "#475569",
+    borderRadius: 6,
+    border: "none",
+    color: "#fff"
+  }
 };
