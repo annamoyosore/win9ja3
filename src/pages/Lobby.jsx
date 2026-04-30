@@ -15,36 +15,12 @@ import {
 import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
-
-// 🔴 ADMIN USER ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
-
-// =========================
-// CREATE DECK
-// =========================
-function createDeck() {
-  const shapes = ["c", "t", "s", "r", "x"];
-  let deck = [];
-
-  for (let s of shapes) {
-    for (let i = 1; i <= 13; i++) {
-      deck.push(s + i);
-    }
-  }
-
-  return deck.sort(() => Math.random() - 0.5);
-}
 
 // =========================
 // CREATE GAME
 // =========================
 async function createGame(match, opponentId) {
-  const deck = createDeck();
-
-  const hand1 = deck.splice(0, 6);
-  const hand2 = deck.splice(0, 6);
-  const top = deck.pop();
-
   return await databases.createDocument(
     DATABASE_ID,
     GAME_COLLECTION,
@@ -52,15 +28,10 @@ async function createGame(match, opponentId) {
     {
       matchId: match.$id,
       players: `${match.hostId},${opponentId}`,
-      hands: `${hand1.join(",")}|${hand2.join(",")}`,
-      deck: deck.join(","),
-      discard: top,
-      turn: opponentId,
       status: "running",
-      round: "1",
       winnerId: "",
       payoutDone: false,
-      turnStartTime: new Date().toISOString()
+      createdAt: new Date().toISOString()
     }
   );
 }
@@ -81,69 +52,73 @@ export default function Lobby({ goGame, back }) {
   }, []);
 
   async function init() {
-    try {
-      const u = await account.get();
-      setUser(u);
+    const u = await account.get();
+    setUser(u);
 
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id)]
+    );
 
-      if (w.documents.length) setWallet(w.documents[0]);
+    if (w.documents.length) setWallet(w.documents[0]);
 
-      refresh(u.$id);
-    } catch (e) {
-      console.log("init error", e);
-    }
+    refresh(u.$id);
   }
 
   // =========================
-  // REALTIME
+  // 🔥 MATCH REALTIME
   // =========================
   useEffect(() => {
     if (!user) return;
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      async (res) => {
-        const m = res.payload;
-
-        await refresh(user.$id);
-
-        // AUTO ENTER GAME
-        if (
-          (m.hostId === user.$id || m.opponentId === user.$id) &&
-          m.status === "matched" &&
-          m.gameId
-        ) {
-          goGame(m.gameId, m.stake);
-        }
-
-        // 🔥 FORCE FINISH SYNC
-        if (m.gameId) {
-          try {
-            const g = await databases.getDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              m.gameId
-            );
-
-            if (g.status === "finished") {
-              await databases.updateDocument(
-                DATABASE_ID,
-                MATCH_COLLECTION,
-                m.$id,
-                { status: "finished" }
-              );
-            }
-          } catch {}
-        }
+      async () => {
+        refresh(user.$id);
       }
     );
 
     return () => unsub();
+  }, [user]);
+
+  // =========================
+  // 🔥 GAME REALTIME (FIXED)
+  // =========================
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubGame = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
+      async (res) => {
+        const g = res.payload;
+
+        if (g.status !== "finished") return;
+
+        try {
+          const match = await databases.getDocument(
+            DATABASE_ID,
+            MATCH_COLLECTION,
+            g.matchId
+          );
+
+          if (match.status !== "finished") {
+            await databases.updateDocument(
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              match.$id,
+              { status: "finished" }
+            );
+          }
+        } catch (e) {
+          console.log("finish sync error", e);
+        }
+
+        refresh(user.$id);
+      }
+    );
+
+    return () => unsubGame();
   }, [user]);
 
   async function refresh(userId) {
@@ -153,7 +128,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // AUTO REFUND (78 HOURS)
+  // AUTO REFUND
   // =========================
   async function autoRefund(userId) {
     const res = await databases.listDocuments(
@@ -170,8 +145,8 @@ export default function Lobby({ goGame, back }) {
         m.createdAt &&
         !m.refunded
       ) {
-        const created = new Date(m.createdAt).getTime();
-        const diff = (now - created) / (1000 * 60 * 60);
+        const diff =
+          (now - new Date(m.createdAt).getTime()) / (1000 * 60 * 60);
 
         if (diff >= 78) {
           await unlockFunds(userId, m.stake);
@@ -180,10 +155,7 @@ export default function Lobby({ goGame, back }) {
             DATABASE_ID,
             MATCH_COLLECTION,
             m.$id,
-            {
-              status: "cancelled",
-              refunded: true
-            }
+            { status: "cancelled", refunded: true }
           );
         }
       }
@@ -240,6 +212,7 @@ export default function Lobby({ goGame, back }) {
     try {
       if (match.hostId === user.$id) {
         alert("Cannot join your own match");
+        setLoading(false);
         return;
       }
 
@@ -251,22 +224,23 @@ export default function Lobby({ goGame, back }) {
 
       if (fresh.opponentId) {
         alert("Already taken");
+        setLoading(false);
         return;
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
         alert("Insufficient balance");
+        setLoading(false);
         return;
       }
 
-      // LOCK FUNDS
       await lockFunds(user.$id, fresh.stake);
 
       const total = fresh.stake * 2;
       const adminCut = Math.floor(total * 0.1);
       const pot = total - adminCut;
 
-      // SAFE ADMIN PAYMENT (ONLY ONCE)
+      // PAY ADMIN ONCE
       if (!fresh.adminPaid) {
         const adminWallet = await databases.listDocuments(
           DATABASE_ID,
@@ -394,7 +368,6 @@ export default function Lobby({ goGame, back }) {
               style={styles.resumeBtn}
               onClick={() => {
                 if (!m.gameId) return alert("Game not ready");
-                if (m.status === "finished") return;
                 goGame(m.gameId, m.stake);
               }}
             >
@@ -445,7 +418,7 @@ export default function Lobby({ goGame, back }) {
 const styles = {
   container: {
     padding: 20,
-    background: "linear-gradient(135deg,#020617,#0f172a)",
+    background: "#020617",
     color: "#fff",
     minHeight: "100vh"
   },
@@ -458,51 +431,12 @@ const styles = {
     margin: "10px 0",
     borderRadius: 10,
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center"
+    justifyContent: "space-between"
   },
-  joinBtn: {
-    background: "#facc15",
-    padding: 8,
-    borderRadius: 6,
-    border: "none"
-  },
-  resumeBtn: {
-    background: "#22c55e",
-    padding: 8,
-    borderRadius: 6,
-    color: "#fff",
-    border: "none"
-  },
-  finishedBtn: {
-    background: "#374151",
-    padding: 8,
-    borderRadius: 6,
-    color: "#fff",
-    border: "none"
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    borderRadius: 6,
-    border: "none"
-  },
-  createBtn: {
-    width: "100%",
-    padding: 10,
-    background: "#3b82f6",
-    borderRadius: 6,
-    color: "#fff",
-    border: "none",
-    marginTop: 8
-  },
-  createBox: { marginTop: 20 },
-  back: {
-    marginTop: 20,
-    padding: 10,
-    background: "#475569",
-    borderRadius: 6,
-    border: "none",
-    color: "#fff"
-  }
+  joinBtn: { background: "gold", padding: 8 },
+  resumeBtn: { background: "green", padding: 8, color: "#fff" },
+  finishedBtn: { background: "#444", padding: 8, color: "#fff" },
+  input: { width: "100%", padding: 10 },
+  createBtn: { width: "100%", padding: 10, background: "blue", color: "#fff" },
+  back: { marginTop: 20, padding: 10 }
 };
