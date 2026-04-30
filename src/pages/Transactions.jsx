@@ -11,8 +11,8 @@ import {
 } from "../lib/appwrite";
 
 const GAME_COLLECTION = "games";
-const DEPOSIT_COLLECTION = "deposits";
-const WITHDRAW_COLLECTION = "withdrawals";
+const DEPOSIT_COLLECTION = "deposit_requests";
+const WITHDRAW_COLLECTION = "withdrawal_requests";
 
 // =========================
 // COMPONENT
