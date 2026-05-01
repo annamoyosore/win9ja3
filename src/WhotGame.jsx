@@ -206,7 +206,7 @@ function encodeGame(g) {
     discard: g.discard || "",
     turn: g.turn,
     pendingPick: String(g.pendingPick),
-    history: (g.history || []).slice(-30).join("||"),
+    history: (g.history || []).slice(-10).join("||"),
     scores: g.scores.join(","),
     round: String(g.round),
     status: g.status
