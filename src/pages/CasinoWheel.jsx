@@ -8,7 +8,7 @@ import {
   ID
 } from "../lib/appwrite";
 
-export default function CasinoWheel() {
+export default function CasinoWheel({ goBack }) {
 
   const [userId, setUserId] = useState(null);
   const [wallet, setWallet] = useState(null);
@@ -20,6 +20,8 @@ export default function CasinoWheel() {
   const [spinning, setSpinning] = useState(false);
   const [freeSpins, setFreeSpins] = useState(0);
   const [countdown, setCountdown] = useState(null);
+  const [overlay, setOverlay] = useState(null);
+  const [flowers, setFlowers] = useState([]);
 
   const audioCtxRef = useRef(null);
   const spinSoundRef = useRef(null);
@@ -45,17 +47,19 @@ export default function CasinoWheel() {
   }
 
   // =========================
-  // SEGMENTS
+  // FLOWERS
   // =========================
-  const segments = [
-    "❌ Lose","x2","🎁 Free","x3",
-    "➖ -50%","x1","🔥 x10","💎 JACKPOT ×30"
-  ];
-
-  const segmentAngle = 360 / segments.length;
+  function spawnFlowers() {
+    const items = Array.from({ length: 25 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100
+    }));
+    setFlowers(items);
+    setTimeout(() => setFlowers([]), 2500);
+  }
 
   // =========================
-  // SAFE SOUND
+  // SOUND (SAFE VOLUME)
   // =========================
   function startTickSound() {
     if (!audioCtxRef.current) {
@@ -73,16 +77,16 @@ export default function CasinoWheel() {
       const gain = ctx.createGain();
 
       osc.type = "square";
-      osc.frequency.value = 950;
+      osc.frequency.value = 900;
 
       osc.connect(gain);
       gain.connect(ctx.destination);
 
       gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
 
       osc.start();
-      osc.stop(ctx.currentTime + 0.06);
+      osc.stop(ctx.currentTime + 0.05);
 
       spinSoundRef.current = setTimeout(tick, 80);
     };
@@ -94,6 +98,16 @@ export default function CasinoWheel() {
       clearTimeout(spinSoundRef.current);
     };
   }
+
+  // =========================
+  // SEGMENTS
+  // =========================
+  const segments = [
+    "❌ Lose","x2","🎁 Free","x3",
+    "➖ -50%","x1","🔥 x10","💎 JACKPOT ×30"
+  ];
+
+  const segmentAngle = 360 / segments.length;
 
   // =========================
   // RESULT POOL
@@ -123,17 +137,19 @@ export default function CasinoWheel() {
     let t = 5;
     setCountdown(t);
 
-    const i = setInterval(()=>{
+    const i = setInterval(() => {
       t--;
       setCountdown(t);
-      if(t<=0){
+
+      if (t <= 0) {
         clearInterval(i);
         setRotation(0);
         setResult("");
         setWon(0);
+        setOverlay(null);
         setCountdown(null);
       }
-    },1000);
+    }, 1000);
   };
 
   // =========================
@@ -144,7 +160,6 @@ export default function CasinoWheel() {
 
     const numericStake = Number(stake);
 
-    // ✅ MINIMUM ₦50
     if ((!numericStake || numericStake < 50) && freeSpins <= 0) {
       setResult("⚠️ Minimum stake is ₦50");
       return;
@@ -160,6 +175,7 @@ export default function CasinoWheel() {
     setSpinning(true);
     setResult("");
     setWon(0);
+    setOverlay(null);
 
     const outcome = getResult();
 
@@ -180,30 +196,36 @@ export default function CasinoWheel() {
       let win = 0;
       let newBalance = wallet.balance;
 
-      if(outcome==="LOSE"){
-        if(freeSpins<=0) newBalance-=numericStake;
+      if (outcome === "LOSE") {
+        if (freeSpins <= 0) newBalance -= numericStake;
+        setOverlay("lose");
         setResult(`❌ Lost ₦${numericStake}`);
 
-      } else if(outcome==="HALF"){
-        const loss = numericStake/2;
-        if(freeSpins<=0) newBalance-=loss;
+      } else if (outcome === "HALF") {
+        const loss = numericStake / 2;
+        if (freeSpins <= 0) newBalance -= loss;
+        setOverlay("lose");
         setResult(`➖ Lost ₦${loss}`);
 
-      } else if(outcome==="X1"){
+      } else if (outcome === "X1") {
+        setOverlay("neutral");
         setResult("⚖️ No Gain");
 
-      } else if(outcome==="FREE"){
-        setFreeSpins(f=>f+1);
+      } else if (outcome === "FREE") {
+        setFreeSpins(f => f + 1);
+        setOverlay("win");
         setResult("🎁 Free Spin!");
 
       } else {
         const mult = parseInt(outcome.replace("X",""));
         win = numericStake * mult;
 
-        if(freeSpins<=0) newBalance-=numericStake;
-        newBalance+=win;
+        if (freeSpins <= 0) newBalance -= numericStake;
+        newBalance += win;
 
         setWon(win);
+        setOverlay("win");
+        spawnFlowers();
         setResult(`🎉 Won ₦${win}`);
       }
 
@@ -211,10 +233,10 @@ export default function CasinoWheel() {
         DATABASE_ID,
         WALLET_COLLECTION,
         wallet.$id,
-        { balance:newBalance }
+        { balance: newBalance }
       );
 
-      setWallet({...wallet,balance:newBalance});
+      setWallet({ ...wallet, balance: newBalance });
 
       await databases.createDocument(
         DATABASE_ID,
@@ -222,105 +244,144 @@ export default function CasinoWheel() {
         ID.unique(),
         {
           userId,
-          stake:numericStake,
+          stake: numericStake,
           outcome,
-          winAmount:win,
-          balanceAfter:newBalance,
-          createdAt:new Date().toISOString()
+          winAmount: win,
+          balanceAfter: newBalance,
+          createdAt: new Date().toISOString()
         }
       );
 
       setSpinning(false);
       startReset();
 
-    },3000);
+    }, 3000);
   };
 
   // =========================
   // UI
   // =========================
   return (
-    <div style={{textAlign:"center",color:"#fff",padding:20}}>
+    <div style={{ textAlign: "center", color: "#fff", padding: 20 }}>
 
       <h2>🎡 Casino Jackpot</h2>
 
+      <button onClick={goBack}>← Exit</button>
+
       {/* WALLET */}
-      <div style={{background:"#111",padding:10,borderRadius:10}}>
-        💰 ₦{Number(wallet?.balance||0).toLocaleString()}
+      <div style={{ background: "#111", padding: 10, borderRadius: 10 }}>
+        💰 ₦{Number(wallet?.balance || 0).toLocaleString()}
         <button onClick={loadWallet}>🔄</button>
       </div>
 
-      {/* STAKE */}
       <input
         type="number"
         placeholder="Minimum ₦50"
         value={stake}
-        onChange={(e)=>setStake(e.target.value)}
+        onChange={(e) => setStake(e.target.value)}
       />
 
       {/* POINTER */}
-      <div style={{
-        fontSize:24,
-        marginTop:10
-      }}>
-        🔻
-      </div>
+      <div style={{ fontSize: 26, marginTop: 8 }}>🔻</div>
 
       {/* WHEEL */}
       <div style={{
-        width:240,
-        height:240,
-        margin:"10px auto",
-        borderRadius:"50%",
-        border:"6px solid gold",
-        position:"relative",
-        overflow:"hidden",
-        transform:`rotate(${rotation}deg)`,
-        transition:"transform 3s cubic-bezier(0.25,1,0.5,1)"
+        width: 240,
+        height: 240,
+        margin: "10px auto",
+        borderRadius: "50%",
+        border: "6px solid gold",
+        overflow: "hidden",
+        transform: `rotate(${rotation}deg)`,
+        transition: "transform 3s cubic-bezier(0.25,1,0.5,1)",
+        position: "relative"
       }}>
-        {segments.map((seg,i)=>(
-          <div key={i} style={{
-            position:"absolute",
-            width:"50%",
-            height:"50%",
-            top:"50%",
-            left:"50%",
-            transformOrigin:"0% 0%",
-            transform:`rotate(${i*segmentAngle}deg)`,
-            background:`hsl(${i*45},80%,50%)`,
-            clipPath:"polygon(0% 0%, 100% 50%, 0% 100%)",
-            display:"flex",
-            alignItems:"center",
-            justifyContent:"flex-end",
-            paddingRight:10
-          }}>
-            <span style={{
-              fontWeight:"900",
-              fontSize:13,
-              color: seg.includes("JACKPOT")?"gold":"white",
-              textShadow:"0 0 6px black"
+        {segments.map((seg, i) => {
+          const angle = i * segmentAngle;
+
+          return (
+            <div key={i} style={{
+              position: "absolute",
+              width: "50%",
+              height: "50%",
+              top: "50%",
+              left: "50%",
+              transformOrigin: "0% 0%",
+              transform: `rotate(${angle}deg)`,
+              background: `hsl(${i * 45},80%,50%)`,
+              clipPath: "polygon(0% 0%, 100% 50%, 0% 100%)"
             }}>
-              {seg}
-            </span>
-          </div>
-        ))}
+              <div style={{
+                position: "absolute",
+                left: "70%",
+                top: "50%",
+                transform: `translate(-50%,-50%) rotate(${segmentAngle / 2}deg)`,
+                width: "120px",
+                textAlign: "center",
+                fontWeight: "900",
+                fontSize: seg.includes("JACKPOT") ? 14 : 13,
+                color: seg.includes("JACKPOT") ? "gold" : "white",
+                textShadow: "0 0 6px #000"
+              }}>
+                {seg}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* BUTTON */}
       <button onClick={spin} style={{
-        padding:"18px 40px",
-        fontSize:20,
-        background:"gold",
-        border:"none",
-        borderRadius:10
+        padding: "18px 40px",
+        fontSize: 20,
+        background: "gold",
+        border: "none",
+        borderRadius: 10
       }}>
-        {spinning?"Spinning...":"🎡 SPIN"}
+        {spinning ? "Spinning..." : "🎡 SPIN"}
       </button>
 
       <p>{result}</p>
       <p>🏆 ₦{won}</p>
 
-      {countdown && <p>🔄 Next spin in {countdown}s...</p>}
+      {countdown && <p>🔄 Reset in {countdown}s</p>}
+
+      {/* OVERLAY */}
+      {overlay && (
+        <div style={{
+          position: "fixed",
+          top: 0, left: 0, width: "100%", height: "100%",
+          background: "rgba(0,0,0,0.7)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 32,
+          fontWeight: "bold"
+        }}>
+          {overlay === "win" ? `🏆 ₦${won}` : "😢 LOST"}
+        </div>
+      )}
+
+      {/* FLOWERS */}
+      {flowers.map(f => (
+        <div key={f.id} style={{
+          position: "fixed",
+          top: -20,
+          left: `${f.left}%`,
+          fontSize: 18,
+          animation: "fall 2.5s linear forwards"
+        }}>
+          🌸
+        </div>
+      ))}
+
+      <style>{`
+        @keyframes fall {
+          to {
+            transform: translateY(110vh);
+            opacity: 0;
+          }
+        }
+      `}</style>
 
     </div>
   );
