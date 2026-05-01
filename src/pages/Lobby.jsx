@@ -18,20 +18,65 @@ const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
-// CREATE GAME
+// 🎴 DECK (ADDED)
+// =========================
+function createDeck() {
+  const valid = {
+    c: [1,2,3,4,5,7,8,10,11,12,13,14],
+    t: [1,2,3,4,5,7,8,10,11,12,13,14],
+    s: [1,2,3,5,7,10,11,13,14],
+    x: [1,2,3,5,7,10,11,13,14],
+    r: [1,2,3,4,5,7,8]
+  };
+
+  let deck = [];
+  Object.keys(valid).forEach(shape => {
+    valid[shape].forEach(n => deck.push(shape + n));
+  });
+
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+// =========================
+// CREATE GAME (FIXED)
 // =========================
 async function createGame(match, opponentId) {
+  const players = [match.hostId, opponentId];
+
+  const deck = createDeck();
+
+  const hands = [
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ];
+
+  const discard = deck.pop(); // ✅ critical fix
+
   return await databases.createDocument(
     DATABASE_ID,
     GAME_COLLECTION,
     ID.unique(),
     {
       matchId: match.$id,
-      players: `${match.hostId},${opponentId}`,
-      status: "running",
+      players: players.join(","),
+
+      hands: hands.map(h => h.join(",")).join("|"),
+      deck: deck.join(","),
+      discard: discard,
+
+      turn: players[0],
+      pendingPick: 0,
+      history: "",
+      scores: "0,0",
+      round: "1",
+
+      status: "playing",
       winnerId: "",
       payoutDone: false,
-      pot: match.pot || 0 // ✅ ensure correct pot
+      pot: match.pot || 0,
+
+      hostName: "Player 1",
+      opponentName: "Player 2"
     }
   );
 }
@@ -66,9 +111,6 @@ export default function Lobby({ goGame, back }) {
     refresh(u.$id);
   }
 
-  // =========================
-  // REALTIME
-  // =========================
   useEffect(() => {
     if (!user) return;
 
@@ -80,9 +122,6 @@ export default function Lobby({ goGame, back }) {
     return () => unsub();
   }, [user]);
 
-  // =========================
-  // GAME → MARK MATCH FINISHED
-  // =========================
   useEffect(() => {
     if (!user) return;
 
@@ -115,9 +154,6 @@ export default function Lobby({ goGame, back }) {
     await autoRefund(userId);
   }
 
-  // =========================
-  // AUTO REFUND (78H)
-  // =========================
   async function autoRefund(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -149,9 +185,6 @@ export default function Lobby({ goGame, back }) {
     }
   }
 
-  // =========================
-  // LOAD AVAILABLE
-  // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -167,9 +200,6 @@ export default function Lobby({ goGame, back }) {
     setMatches(available);
   }
 
-  // =========================
-  // ACTIVE MATCHES
-  // =========================
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -186,99 +216,91 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN MATCH (FINAL FIXED)
-// =========================
-async function joinMatch(match) {
-  if (loading) return;
-  setLoading(true);
-
-  try {
-    if (match.hostId === user.$id) {
-      alert("Cannot join your own match");
-      return;
-    }
-
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      match.$id
-    );
-
-    if (fresh.opponentId || fresh.status !== "waiting") {
-      alert("Match not available");
-      return;
-    }
-
-    if ((wallet?.balance || 0) < fresh.stake) {
-      alert("Insufficient balance");
-      return;
-    }
-
-    // 🔒 Lock opponent funds
-    await lockFunds(user.$id, fresh.stake);
-
-    const total = fresh.stake * 2;
-    const adminCut = Math.floor(total * 0.1);
-    const pot = total - adminCut;
-
-    // 💰 PAY ADMIN ONCE
-    if (!fresh.adminPaid) {
-      const adminWallet = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", ADMIN_ID)]
-      );
-
-      if (adminWallet.documents.length) {
-        const admin = adminWallet.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          admin.$id,
-          {
-            balance: Number(admin.balance || 0) + adminCut
-          }
-        );
-      }
-    }
-
-    // ✅ Inject correct pot BEFORE game creation
-    const tempMatch = {
-      ...fresh,
-      pot: pot
-    };
-
-    // ✅ CREATE GAME FIRST
-    const game = await createGame(tempMatch, user.$id);
-
-    // ✅ SINGLE UPDATE
-    await databases.updateDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      fresh.$id,
-      {
-        opponentId: user.$id,
-        status: "matched",
-        pot: pot,
-        adminCut: adminCut,
-        adminPaid: true,
-        gameId: game.$id
-      }
-    );
-
-    goGame(game.$id, fresh.stake);
-
-  } catch (err) {
-    alert(err.message);
+  // JOIN MATCH
+  // =========================
+  async function joinMatch(match) {
+    if (loading) return;
+    setLoading(true);
 
     try {
-      await unlockFunds(user.$id, match.stake);
-    } catch {}
-  }
+      if (match.hostId === user.$id) {
+        alert("Cannot join your own match");
+        return;
+      }
 
-  setLoading(false);
-}
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        match.$id
+      );
+
+      if (fresh.opponentId || fresh.status !== "waiting") {
+        alert("Match not available");
+        return;
+      }
+
+      if ((wallet?.balance || 0) < fresh.stake) {
+        alert("Insufficient balance");
+        return;
+      }
+
+      await lockFunds(user.$id, fresh.stake);
+
+      const total = fresh.stake * 2;
+      const adminCut = Math.floor(total * 0.1);
+      const pot = total - adminCut;
+
+      if (!fresh.adminPaid) {
+        const adminWallet = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", ADMIN_ID)]
+        );
+
+        if (adminWallet.documents.length) {
+          const admin = adminWallet.documents[0];
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            admin.$id,
+            {
+              balance: Number(admin.balance || 0) + adminCut
+            }
+          );
+        }
+      }
+
+      const tempMatch = { ...fresh, pot };
+
+      const game = await createGame(tempMatch, user.$id);
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        fresh.$id,
+        {
+          opponentId: user.$id,
+          status: "matched",
+          pot: pot,
+          adminCut: adminCut,
+          adminPaid: true,
+          gameId: game.$id
+        }
+      );
+
+      goGame(game.$id, fresh.stake);
+
+    } catch (err) {
+      alert(err.message);
+
+      try {
+        await unlockFunds(user.$id, match.stake);
+      } catch {}
+    }
+
+    setLoading(false);
+  }
 
   // =========================
   // CREATE MATCH
@@ -324,9 +346,6 @@ async function joinMatch(match) {
     setLoading(false);
   }
 
-  // =========================
-  // SAFE OPEN
-  // =========================
   async function safeOpenGame(match) {
     if (!match.gameId) {
       alert("Game still preparing...");
