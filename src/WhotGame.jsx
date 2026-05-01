@@ -236,104 +236,126 @@ export default function WhotGame({ gameId, goHome }) {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
-  useEffect(() => {
-    if (!gameId || !userId) return;
+useEffect(() => {
+  if (!gameId || !userId) return;
 
-    const load = async () => {
-      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      setGame(parseGame(g));
+  const load = async () => {
+    const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
+    setGame(parseGame(g));
 
-      if (g.matchId) {
-        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
-        setMatch(m);
-      }
-    };
+    if (g.matchId) {
+      const m = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        g.matchId
+      );
+      setMatch(m);
+    }
+  };
 
-    load();
+  load();
 
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      async (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
+  const unsub = databases.client.subscribe(
+    `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+    async (res) => {
+      const parsed = parseGame(res.payload);
+      setGame(parsed);
 
-        if (parsed.status === "finished") {
-          if (parsed.winnerId === userId) {
-            setShowWin(true);
-            setTimeout(goHome, 3000);
-          } else {
-            setTimeout(goHome, 2500);
-          }
+      if (parsed.status === "finished") {
+        if (parsed.winnerId === userId) {
+          setShowWin(true);
+          setTimeout(goHome, 3000);
+        } else {
+          setTimeout(goHome, 2500);
+        }
 
-          if (payoutRef.current) return;
+        if (payoutRef.current) return;
 
-          const fresh = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, parsed.$id);
-          if (fresh.payoutDone) return;
+        const fresh = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          parsed.$id
+        );
 
-          payoutRef.current = true;
+        if (fresh.payoutDone) return;
 
-          try {
-            const m = parsed.matchId
-              ? await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, parsed.matchId)
-              : null;
+        payoutRef.current = true;
 
-            const total = Number(m?.pot || 0);
+        try {
+          const m = parsed.matchId
+            ? await databases.getDocument(
+                DATABASE_ID,
+                MATCH_COLLECTION,
+                parsed.matchId
+              )
+            : null;
 
-            const w = await databases.listDocuments(
+          const total = Number(m?.pot || 0);
+
+          const w = await databases.listDocuments(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            [Query.equal("userId", parsed.winnerId)]
+          );
+
+          if (w.documents.length) {
+            await databases.updateDocument(
               DATABASE_ID,
               WALLET_COLLECTION,
-              [Query.equal("userId", parsed.winnerId)]
+              w.documents[0].$id,
+              {
+                balance:
+                  Number(w.documents[0].balance || 0) + total
+              }
+            );
+          }
+
+          for (let pid of parsed.players) {
+            const wallets = await databases.listDocuments(
+              DATABASE_ID,
+              WALLET_COLLECTION,
+              [Query.equal("userId", pid)]
             );
 
-            if (w.documents.length) {
+            if (wallets.documents.length) {
               await databases.updateDocument(
                 DATABASE_ID,
                 WALLET_COLLECTION,
-                w.documents[0].$id,
-                { balance: Number(w.documents[0].balance || 0) + total }
+                wallets.documents[0].$id,
+                { locked: 0 }
               );
             }
+          }
 
-            for (let pid of parsed.players) {
-              const wallets = await databases.listDocuments(
-                DATABASE_ID,
-                WALLET_COLLECTION,
-                [Query.equal("userId", pid)]
-              );
+          // ✅ mark payout done
+          await databases.updateDocument(
+            DATABASE_ID,
+            GAME_COLLECTION,
+            parsed.$id,
+            { payoutDone: true }
+          );
 
-              if (wallets.documents.length) {
-                await databases.updateDocument(
-                  DATABASE_ID,
-                  WALLET_COLLECTION,
-                  wallets.documents[0].$id,
-                  { locked: 0 }
-                );
-              }
-            }
-
+          // ✅ mark match finished
+          if (parsed.matchId) {
             await databases.updateDocument(
-  DATABASE_ID,
-  GAME_COLLECTION,
-  parsed.$id,
-  { payoutDone: true }
-);
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              parsed.matchId,
+              { status: "finished" }
+            );
+          }
 
-if (parsed.matchId) {
-  await databases.updateDocument(
-    DATABASE_ID,
-    MATCH_COLLECTION,
-    parsed.matchId,
-    { status: "finished" }
+        } catch (e) {
+          console.log("payout error", e);
+        }
+      }
+    }
   );
-} // ✅ THIS WAS MISSING
 
-} catch (e) {
-  console.log("payout error", e);
-}
+  // ✅ CORRECT PLACE (outside subscribe)
+  return () => unsub();
 
-    return () => unsub();
-  }, [gameId, userId]);
-
+}, [gameId, userId]);
   if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
