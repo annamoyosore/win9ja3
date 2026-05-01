@@ -105,7 +105,33 @@ export default function Lobby({ goGame, back }) {
 
     const unsubGame = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
-      () => refresh(user.$id)
+      async (res) => {
+        const g = res.payload;
+
+        // 🔥 SYNC GAME → MATCH
+        if (g.status === "finished" && g.matchId) {
+          try {
+            const m = await databases.getDocument(
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              g.matchId
+            );
+
+            if (m.status !== "finished") {
+              await databases.updateDocument(
+                DATABASE_ID,
+                MATCH_COLLECTION,
+                g.matchId,
+                { status: "finished" }
+              );
+            }
+          } catch (e) {
+            console.log("match sync error", e);
+          }
+        }
+
+        refresh(user.$id);
+      }
     );
 
     return () => {
@@ -121,7 +147,45 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD MATCHES (🔥 SERVER FILTER)
+  // AUTO REFUND
+  // =========================
+  async function autoRefund(userId) {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION
+    );
+
+    const now = Date.now();
+
+    for (let m of res.documents) {
+      if (
+        m.status === "waiting" &&
+        m.hostId === userId &&
+        m.createdAt &&
+        !m.refunded
+      ) {
+        const created = new Date(m.createdAt).getTime();
+        const diff = (now - created) / (1000 * 60 * 60);
+
+        if (diff >= 78) {
+          await unlockFunds(userId, m.stake);
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            MATCH_COLLECTION,
+            m.$id,
+            {
+              status: "cancelled",
+              refunded: true
+            }
+          );
+        }
+      }
+    }
+  }
+
+  // =========================
+  // LOAD MATCHES
   // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
@@ -129,7 +193,7 @@ export default function Lobby({ goGame, back }) {
       MATCH_COLLECTION,
       [
         Query.equal("status", "waiting"),
-        Query.isNull("opponentId") // 🔥 KEY FIX
+        Query.isNull("opponentId")
       ]
     );
 
@@ -152,17 +216,23 @@ export default function Lobby({ goGame, back }) {
     const mine = res.documents.filter(
       (m) =>
         (m.hostId === userId || m.opponentId === userId) &&
-        m.status !== "cancelled"
+        (m.status === "matched" || m.status === "running")
     );
 
     setActiveMatches(mine);
   }
 
   // =========================
-  // JOIN MATCH (🔥 HARD LOCK)
+  // JOIN MATCH (🔒 FULLY SECURED)
   // =========================
   async function joinMatch(match) {
     if (loadingMatchId) return;
+
+    // ❌ BLOCK SELF JOIN (UI)
+    if (match.hostId === user.$id) {
+      alert("You cannot join your own match");
+      return;
+    }
 
     setLoadingMatchId(match.$id);
 
@@ -173,22 +243,25 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      // 🔥 FINAL PROTECTION
+      // ❌ BLOCK SELF JOIN (BACKEND SAFETY)
+      if (fresh.hostId === user.$id) {
+        throw new Error("Cannot join your own match");
+      }
+
+      // 🔒 BLOCK TAKEN MATCH
       if (fresh.status !== "waiting" || fresh.opponentId) {
-        alert("Match already taken");
-        return;
+        throw new Error("Match already taken");
       }
 
       if ((wallet?.balance || 0) < fresh.stake) {
-        alert("Insufficient balance");
-        return;
+        throw new Error("Insufficient balance");
       }
 
       await lockFunds(user.$id, fresh.stake);
 
       const adminCut = Math.floor(fresh.stake * 0.1);
 
-      // 🔥 LOCK MATCH FIRST
+      // 🔥 LOCK MATCH
       const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -283,12 +356,18 @@ export default function Lobby({ goGame, back }) {
             <p>{m.status}</p>
           </div>
 
-          <button
-            style={styles.resumeBtn}
-            onClick={() => goGame(m.gameId, m.stake)}
-          >
-            ▶ Resume
-          </button>
+          {m.status === "finished" ? (
+            <button disabled style={{ background: "#444", color: "#fff" }}>
+              ✅ Finished
+            </button>
+          ) : (
+            <button
+              style={styles.resumeBtn}
+              onClick={() => goGame(m.gameId, m.stake)}
+            >
+              ▶ Resume
+            </button>
+          )}
         </div>
       ))}
 
