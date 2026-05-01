@@ -100,7 +100,6 @@ function drawCard(card) {
   ctx.fillRect(0, 0, 70, 100);
 
   ctx.strokeStyle = "#e11d48";
-  ctx.lineWidth = 2;
   ctx.strokeRect(2, 2, 66, 96);
 
   ctx.fillStyle = "#e11d48";
@@ -168,14 +167,13 @@ function parseGame(g) {
     players: g.players?.split(",") || [],
     deck: g.deck?.split(",").filter(Boolean) || [],
     hands: g.hands?.split("|").map(p => p.split(",").filter(Boolean)) || [[], []],
+    discard: g.discard || null,
     pendingPick: Number(g.pendingPick || 0),
-    history: g.history?.split("||").filter(Boolean) || [],
+    history: g.history ? g.history.split("||").filter(Boolean) : [],
     scores: g.scores?.split(",").map(Number) || [0, 0],
     round: Number(g.round || 1),
     status: g.status || "playing",
-    payoutDone: Boolean(g.payoutDone),
-    hostName: g.hostName || "Player 1",
-    opponentName: g.opponentName || "Player 2"
+    payoutDone: Boolean(g.payoutDone)
   };
 }
 
@@ -183,7 +181,7 @@ function encodeGame(g) {
   return {
     hands: g.hands.map(p => p.join(",")).join("|"),
     deck: g.deck.join(","),
-    discard: g.discard,
+    discard: g.discard || "",
     pendingPick: String(g.pendingPick),
     history: g.history.slice(-30).join("||"),
     scores: g.scores.join(","),
@@ -199,13 +197,12 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [showWin, setShowWin] = useState(false);
 
-  const payoutRef = useRef(false);
   const actionLock = useRef(false);
+  const payoutRef = useRef(false);
 
   useEffect(() => {
-    account.get().then(u => setUserId(u.$id)).catch(() => {});
+    account.get().then(u => setUserId(u.$id));
   }, []);
 
   useEffect(() => {
@@ -229,25 +226,10 @@ export default function WhotGame({ gameId, goHome }) {
         const parsed = parseGame(res.payload);
         setGame(parsed);
 
-        if (parsed.status === "finished") {
-
-          if (parsed.winnerId === userId) {
-            setShowWin(true);
-            setTimeout(goHome, 3000);
-          } else {
-            setTimeout(goHome, 2500);
-          }
-
-          if (payoutRef.current) return;
-
-          const freshGame = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id
-          );
-
-          if (freshGame.payoutDone) return;
-
+        // =========================
+        // 💰 PAYOUT SYSTEM (RESTORED)
+        // =========================
+        if (parsed.status === "finished" && !payoutRef.current) {
           payoutRef.current = true;
 
           try {
@@ -268,42 +250,7 @@ export default function WhotGame({ gameId, goHome }) {
                 DATABASE_ID,
                 WALLET_COLLECTION,
                 w.documents[0].$id,
-                {
-                  balance: Number(w.documents[0].balance || 0) + total
-                }
-              );
-            }
-
-            for (let pid of parsed.players) {
-              const wallets = await databases.listDocuments(
-                DATABASE_ID,
-                WALLET_COLLECTION,
-                [Query.equal("userId", pid)]
-              );
-
-              if (wallets.documents.length) {
-                await databases.updateDocument(
-                  DATABASE_ID,
-                  WALLET_COLLECTION,
-                  wallets.documents[0].$id,
-                  { locked: 0 }
-                );
-              }
-            }
-
-            await databases.updateDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              parsed.$id,
-              { payoutDone: true }
-            );
-
-            if (parsed.matchId) {
-              await databases.updateDocument(
-                DATABASE_ID,
-                MATCH_COLLECTION,
-                parsed.matchId,
-                { status: "finished" }
+                { balance: Number(w.documents[0].balance || 0) + total }
               );
             }
 
@@ -322,52 +269,15 @@ export default function WhotGame({ gameId, goHome }) {
   const myIdx = game.players.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
 
-  const hand = game.hands[myIdx];
-  const oppCards = game.hands[oppIdx].length;
+  const hand = game.hands[myIdx] || [];
   const top = decodeCard(game.discard);
 
-  const myName = myIdx === 0 ? game.hostName : game.opponentName;
-  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
-
-  async function endRound(g, winnerIdx) {
-    g = JSON.parse(JSON.stringify(g));
-
-    g.scores[winnerIdx]++;
-
-    const p1 = g.scores[0];
-    const p2 = g.scores[1];
-
-    if (p1 >= 2 || p2 >= 2) {
-      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-        ...encodeGame(g),
-        status: "finished",
-        winnerId: g.players[winnerIdx]
-      });
-      return;
-    }
-
-    if (g.round === 3 && p1 === 1 && p2 === 1) {
-      g.history.push("⚖️ DRAW → FINAL ROUND");
-    }
-
-    const deck = createDeck();
-    g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
-    g.discard = deck.pop();
-    g.deck = deck;
-    g.pendingPick = 0;
-    g.round = Math.min(g.round + 1, 4);
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame(g)
-    );
-  }
-
+  // =========================
+  // 🎮 PLAY CARD (WITH HOLD ON)
+  // =========================
   async function playCard(i) {
     if (actionLock.current) return;
-    if (game.status === "finished") return;
+
     if (game.turn !== userId) {
       beep(150);
       return;
@@ -381,55 +291,53 @@ export default function WhotGame({ gameId, goHome }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    if (g.pendingPick > 0 && current.number !== 2) {
-      beep(200);
-      actionLock.current = false;
-      return;
-    }
-
+    // ❌ invalid move
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
     ) {
-      beep(120);
+      beep(120, 250);
       actionLock.current = false;
       return;
     }
 
     g.hands[myIdx].splice(i, 1);
-
-    g.history = [...g.history.slice(-20), `👤 ${myName} → ${card}`];
+    g.discard = card;
 
     let nextTurn = g.players[oppIdx];
 
+    // 🔥 PICK 2 stacking
     if (current.number === 2) {
       g.pendingPick += 2;
-      g.history.push(`🔥 PICK 2 → ${g.pendingPick}`);
     }
 
-    if ([1,8,14].includes(current.number)) nextTurn = userId;
-
-    setGame({ ...g, discard: card, turn: nextTurn });
-
-    if (!g.hands[myIdx].length) {
-      await endRound(g, myIdx);
-      actionLock.current = false;
-      return;
+    // 🛑 HOLD ON (1,8,14)
+    if ([1, 8, 14].includes(current.number)) {
+      nextTurn = userId;
     }
 
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-      ...encodeGame(g),
-      discard: card,
-      turn: nextTurn
-    });
+    g.turn = nextTurn;
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: nextTurn,
+        discard: card
+      }
+    );
 
     actionLock.current = false;
   }
 
+  // =========================
+  // 🃏 DRAW MARKET
+  // =========================
   async function drawMarket() {
     if (actionLock.current) return;
-    if (game.status === "finished") return;
     if (game.turn !== userId) return;
 
     actionLock.current = true;
@@ -444,14 +352,17 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
-    g.history.push(`📦 DRAW ${count}`);
+    g.turn = g.players[oppIdx];
 
-    setGame({ ...g, turn: g.players[oppIdx] });
-
-    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-      ...encodeGame(g),
-      turn: g.players[oppIdx]
-    });
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        turn: g.turn
+      }
+    );
 
     actionLock.current = false;
   }
@@ -461,38 +372,10 @@ export default function WhotGame({ gameId, goHome }) {
       <div style={styles.box}>
         <h2>🎮 WHOT GAME</h2>
 
-        <div style={styles.row}>
-          <span>{myName}</span>
-          <span>VS</span>
-          <span>{oppName}</span>
-        </div>
-
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-          <div>{oppName}: {oppCards}</div>
-        </div>
-
-        <div style={styles.row}>
-          <span>Round {game.round}</span>
-          <span>{game.scores[0]} - {game.scores[1]}</span>
-        </div>
-
-        <div style={styles.row}>
-          <span>₦{match?.stake || 0}</span>
-          <span>🏦 ₦{match?.pot || 0}</span>
-        </div>
-
-        <p>{game.status === "finished"
-          ? "🏁 GAME FINISHED"
-          : game.turn === userId
-          ? "🟢 YOUR TURN"
-          : "⏳ OPPONENT"}</p>
-
         <div style={styles.center}>
           {top && <img src={drawCard(top)} style={styles.card} />}
-          <button style={styles.marketBtn} onClick={drawMarket}>
+
+          <button onClick={drawMarket} style={styles.marketBtn}>
             🃏 {game.deck.length}
           </button>
         </div>
@@ -505,18 +388,6 @@ export default function WhotGame({ gameId, goHome }) {
               style={styles.card}
               onClick={() => playCard(i)}
             />
-          ))}
-        </div>
-
-        {showWin && (
-          <div style={styles.winBox}>
-            🎉 You Won ₦{match?.pot || 0}
-          </div>
-        )}
-
-        <div style={styles.history}>
-          {game.history.slice().reverse().map((h, i) => (
-            <div key={i}>{h}</div>
           ))}
         </div>
 
@@ -542,16 +413,11 @@ const styles = {
     color: "#fff",
     borderRadius: 10
   },
-  row: {
-    display: "flex",
-    justifyContent: "space-between"
-  },
   hand: {
     display: "flex",
     flexWrap: "wrap",
     gap: 6,
-    justifyContent: "center",
-    marginTop: 10
+    justifyContent: "center"
   },
   card: {
     width: 65,
@@ -567,24 +433,5 @@ const styles = {
     padding: 10,
     borderRadius: 8,
     border: "none"
-  },
-  history: {
-    marginTop: 10,
-    maxHeight: 120,
-    overflow: "auto",
-    fontSize: 12,
-    color: "#ff4d4d"
-  },
-  winBox: {
-    position: "fixed",
-    top: "40%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "gold",
-    color: "#000",
-    padding: 20,
-    borderRadius: 10,
-    fontWeight: "bold",
-    zIndex: 999
   }
 };
