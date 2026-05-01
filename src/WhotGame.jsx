@@ -346,12 +346,16 @@ export default function WhotGame({ gameId, goHome }) {
       return;
     }
 
+    if (g.round === 3 && p1 === 1 && p2 === 1) {
+      g.history.push("⚖️ DRAW → FINAL ROUND");
+    }
+
     const deck = createDeck();
     g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
     g.discard = deck.pop();
     g.deck = deck;
     g.pendingPick = 0;
-    g.round++;
+    g.round = Math.min(g.round + 1, 4);
 
     await databases.updateDocument(
       DATABASE_ID,
@@ -372,6 +376,7 @@ export default function WhotGame({ gameId, goHome }) {
     actionLock.current = true;
 
     const g = JSON.parse(JSON.stringify(game));
+
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
@@ -394,24 +399,16 @@ export default function WhotGame({ gameId, goHome }) {
 
     g.hands[myIdx].splice(i, 1);
 
-    let text = `🎴 ${myName} played ${card}`;
-
-    if (current.number === 2) {
-      g.pendingPick += 2;
-      text = `🔥 ${myName} PICK 2 (+${g.pendingPick})`;
-    }
-
-    if (current.number === 8) text = `⛔ ${myName} SUSPENSION`;
-    if (current.number === 1) text = `⏸ ${myName} HOLD ON`;
-    if (current.number === 14) text = `🔁 ${myName} GENERAL MARKET`;
-
-    g.history = [...g.history.slice(-20), text];
+    g.history = [...g.history.slice(-20), `👤 ${myName} → ${card}`];
 
     let nextTurn = g.players[oppIdx];
 
-    if (current.number === 1) nextTurn = userId;
-    if (current.number === 8) nextTurn = userId;
-    if (current.number === 14) nextTurn = g.players[oppIdx];
+    if (current.number === 2) {
+      g.pendingPick += 2;
+      g.history.push(`🔥 PICK 2 → ${g.pendingPick}`);
+    }
+
+    if ([1,8,14].includes(current.number)) nextTurn = userId;
 
     setGame({ ...g, discard: card, turn: nextTurn });
 
@@ -447,7 +444,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.pendingPick = 0;
-    g.history.push(`📦 ${myName} drew ${count}`);
+    g.history.push(`📦 DRAW ${count}`);
 
     setGame({ ...g, turn: g.players[oppIdx] });
 
