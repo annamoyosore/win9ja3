@@ -3,6 +3,7 @@ import {
 databases,
 DATABASE_ID,
 WALLET_COLLECTION,
+CASINO_COLLECTION,
 account,
 Query,
 ID
@@ -22,13 +23,11 @@ const [freeSpins, setFreeSpins] = useState(0);
 const [countdown, setCountdown] = useState(null);
 const [popup, setPopup] = useState(null);
 const [flowers, setFlowers] = useState([]);
-const [casinoFeed, setCasinoFeed] = useState([]);
 
 const audioCtxRef = useRef(null);
 
 useEffect(() => {
 loadWallet();
-startCasinoFeed();
 }, []);
 
 async function loadWallet() {
@@ -45,7 +44,6 @@ if (w.documents.length) setWallet(w.documents[0]);
 
 }
 
-// 🎡 SEGMENTS
 const segments = [
 "❌ Lose",
 "x2",
@@ -59,7 +57,6 @@ const segments = [
 
 const segmentAngle = 360 / segments.length;
 
-// ✅ UPDATED PROBABILITY
 const pool = [
 { type: "LOSE", weight: 0.39 },
 { type: "LOSE2", weight: 0.05 },
@@ -78,7 +75,6 @@ if (r <= sum) return p.type;
 }
 };
 
-// 🔊 SOUND
 const playTick = () => {
 if (!audioCtxRef.current) {
 audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -99,7 +95,6 @@ setTimeout(() => o.stop(), 50);
 
 };
 
-// 🎉 CONFETTI
 const spawnFlowers = () => {
 const items = Array.from({ length: 30 }).map((_, i) => ({
 id: i,
@@ -109,27 +104,6 @@ setFlowers(items);
 setTimeout(() => setFlowers([]), 2500);
 };
 
-// 🎰 RANDOM CASINO FEED
-const startCasinoFeed = () => {
-const names = ["Alex", "John", "Mary", "Ibrahim", "Sophia", "David"];
-const prizes = ["₦5,000", "₦10,000", "₦25,000", "₦50,000"];
-
-setInterval(() => {
-  const msg = `${names[Math.floor(Math.random()*names.length)]} won ${prizes[Math.floor(Math.random()*prizes.length)]}`;
-  setCasinoFeed(prev => [...prev.slice(-3), msg]);
-}, 4000);
-
-};
-
-// 🔄 RESET
-const resetGame = () => {
-setRotation(prev => prev % 360);
-setResult("");
-setWon(0);
-setCountdown(null);
-setPopup(null);
-};
-
 const startCountdown = () => {
 let t = 4;
 setCountdown(t);
@@ -137,6 +111,7 @@ setCountdown(t);
 const int = setInterval(() => {
   t--;
   setCountdown(t);
+
   if (t <= 0) {
     clearInterval(int);
     resetGame();
@@ -145,7 +120,14 @@ const int = setInterval(() => {
 
 };
 
-// 🎡 SPIN
+const resetGame = () => {
+setRotation(prev => prev % 360);
+setResult("");
+setWon(0);
+setCountdown(null);
+setPopup(null);
+};
+
 const spin = async () => {
 if (spinning) return;
 
@@ -180,7 +162,6 @@ const map = {
 };
 
 const index = map[outcome];
-
 const randomOffset = Math.random() * (segmentAngle * 0.8);
 const stopAngle = 360 - (index * segmentAngle) - (segmentAngle / 2) + randomOffset;
 
@@ -194,33 +175,38 @@ setRotation(prev => {
 setTimeout(async () => {
   clearInterval(spinSound);
 
+  let balanceBefore = wallet.balance;
   let newBalance = wallet.balance;
+  let win = 0;
+  let status = "lose";
+  let netChange = 0;
 
-  // 🎯 deduct first if not free spin
   if (freeSpins > 0) {
     setFreeSpins(f => f - 1);
   } else {
     newBalance -= numericStake;
   }
 
-  let win = 0;
-
   if (outcome === "LOSE" || outcome === "LOSE2") {
 
+    status = "lose";
+    netChange = -numericStake;
     setPopup("lose");
     setResult(`❌ Lost ₦${numericStake}`);
 
   } else if (outcome === "FREE") {
 
+    status = "free";
     setFreeSpins(f => f + 1);
+    netChange = 0;
     setPopup("free");
     setResult("🎁 Free Spin!");
-    setSpinning(false);
-    return;
 
   } else if (outcome === "X1") {
 
+    status = "neutral";
     newBalance += numericStake;
+    netChange = 0;
     setPopup("neutral");
     setResult("⚖️ Stake Returned");
 
@@ -230,34 +216,71 @@ setTimeout(async () => {
     win = numericStake * mult;
     newBalance += win;
 
+    status = "win";
+    netChange = win - numericStake;
+
     setWon(win);
     spawnFlowers();
     setPopup("win");
     setResult(`🎉 Won ₦${win}`);
   }
 
-  await databases.updateDocument(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    wallet.$id,
-    { balance: newBalance }
-  );
+  // ✅ Update wallet
+  try {
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      { balance: newBalance }
+    );
+    setWallet({ ...wallet, balance: newBalance });
+  } catch (err) {
+    console.error("Wallet update failed:", err);
+  }
 
-  setWallet({ ...wallet, balance: newBalance });
+  // ✅ Save transaction + keep last 5
+  try {
+    await databases.createDocument(
+      DATABASE_ID,
+      CASINO_COLLECTION,
+      ID.unique(),
+      {
+        userId,
+        type: "spin",
+        status,
+        outcome,
+        stake: numericStake,
+        winAmount: win,
+        netChange,
+        balanceBefore,
+        balanceAfter: newBalance,
+        createdAt: new Date().toISOString()
+      }
+    );
 
-  await databases.createDocument(
-    DATABASE_ID,
-    "casino_spins",
-    ID.unique(),
-    {
-      userId,
-      stake: numericStake,
-      outcome,
-      winAmount: win,
-      balanceAfter: newBalance,
-      createdAt: new Date().toISOString()
+    const history = await databases.listDocuments(
+      DATABASE_ID,
+      CASINO_COLLECTION,
+      [
+        Query.equal("userId", userId),
+        Query.orderDesc("$createdAt")
+      ]
+    );
+
+    if (history.documents.length > 5) {
+      const toDelete = history.documents.slice(5);
+      for (let doc of toDelete) {
+        await databases.deleteDocument(
+          DATABASE_ID,
+          CASINO_COLLECTION,
+          doc.$id
+        );
+      }
     }
-  );
+
+  } catch (err) {
+    console.error("Transaction/log cleanup failed:", err);
+  }
 
   setSpinning(false);
   startCountdown();
@@ -269,19 +292,16 @@ setTimeout(async () => {
 return (
 <>
 <style>{`
-body { background:#111; }
-
-    .wheel {
-      width:240px;
-      height:240px;
-      border-radius:50%;
-      border:6px solid gold;
-      box-shadow:0 0 25px gold, inset 0 0 15px #000;
-      margin:auto;
-      transition:transform 3s ease;
-      position:relative;
-      overflow:hidden;
-    }
+.wheel {
+width:240px;
+height:240px;
+border-radius:50%;
+border:6px solid gold;
+position:relative;
+overflow:hidden;
+margin:auto;
+transition:transform 3s ease;
+}
 
     .segment {
       position:absolute;
@@ -295,21 +315,20 @@ body { background:#111; }
       justify-content:center;
       clip-path: polygon(0% 0%, 100% 50%, 0% 100%);
       font-weight:900;
-      font-size:14px;
-      color:#fff;
-      text-shadow:0 0 8px #000;
+      font-size:13px;
+      color:white;
+      text-shadow:0 0 6px black;
     }
 
     .label {
-      transform: rotate(-90deg) translateY(-10px);
-      width:120px;
-      text-align:center;
-      font-weight:900;
+      position:absolute;
+      left:65%;
+      transform: rotate(45deg);
     }
 
     .pointer {
-      font-size:30px;
-      margin-bottom:5px;
+      font-size:26px;
+      text-align:center;
     }
 
     .spinBtn {
@@ -317,10 +336,9 @@ body { background:#111; }
       padding:16px 40px;
       font-size:20px;
       font-weight:bold;
-      background:linear-gradient(45deg,gold,orange);
+      background:gold;
       border:none;
       border-radius:12px;
-      color:#000;
     }
 
     .popup {
@@ -328,8 +346,8 @@ body { background:#111; }
       top:40%;
       left:50%;
       transform:translate(-50%,-50%);
-      padding:30px;
-      font-size:28px;
+      padding:25px;
+      font-size:26px;
       font-weight:900;
       border-radius:15px;
       z-index:999;
@@ -340,16 +358,6 @@ body { background:#111; }
     .lose { background:red; }
     .free { background:purple; }
     .neutral { background:#333; }
-
-    .casinoFeed {
-      position:fixed;
-      top:10px;
-      right:10px;
-      font-weight:bold;
-      color:#0f0;
-      font-size:14px;
-      text-align:right;
-    }
 
     @keyframes pop {
       from { transform:translate(-50%,-50%) scale(0.6); opacity:0; }
@@ -422,11 +430,6 @@ body { background:#111; }
         {popup === "neutral" && "⚖️ SAME"}
       </div>
     )}
-
-    {/* 🔥 CASINO FEED */}
-    <div className="casinoFeed">
-      {casinoFeed.map((msg,i)=><div key={i}>{msg}</div>)}
-    </div>
 
     {flowers.map(f=>(
       <div key={f.id} className="confetti" style={{left:`${f.left}%`}}>
