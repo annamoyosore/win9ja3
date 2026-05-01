@@ -410,17 +410,14 @@ export default function WhotGame({ gameId, goHome }) {
 
     const label = cardLabel(card);
 
-    g.history = [
-      ...g.history.slice(-20),
-      `🎴 ${myName} played ${label}`
-    ];
+    g.history = [...g.history, `👤 ${myName} → ${card}`].slice(-10);
 
     let nextTurn = g.players[oppIdx];
 
     if (current.number === 2) {
       g.pendingPick += 2;
-      g.history.push(`🔥 PICK 2 → Total ${g.pendingPick}`);
-    }
+      g.history.push(`🔥 PICK ${g.pendingPick}`);
+g.history = g.history.slice(-10);
 
     if (current.number === 14) {
       g.pendingPick += 1;
