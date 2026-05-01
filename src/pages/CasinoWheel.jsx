@@ -115,7 +115,7 @@ export default function CasinoWheel() {
   };
 
   // =========================
-  // 🎡 SPIN WITH WALLET
+  // SPIN LOGIC
   // =========================
   const spin = async () => {
     if (spinning) return;
@@ -152,16 +152,13 @@ export default function CasinoWheel() {
 
     const index = map[outcome];
     const stopAngle = 360 - (index * segmentAngle + segmentAngle / 2);
-    setRotation(rotation + 1440 + stopAngle);
+    setRotation((prev) => prev + 1440 + stopAngle);
 
     setTimeout(async () => {
 
       let win = 0;
       let newBalance = wallet.balance;
 
-      // =========================
-      // CALCULATE RESULT
-      // =========================
       if (outcome === "LOSE") {
         if (freeSpins <= 0) newBalance -= numericStake;
         playSound("lose");
@@ -194,9 +191,7 @@ export default function CasinoWheel() {
         setResult(`🎉 Won ₦${win}`);
       }
 
-      // =========================
-      // UPDATE WALLET (ONCE)
-      // =========================
+      // UPDATE WALLET
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -206,9 +201,7 @@ export default function CasinoWheel() {
 
       setWallet({ ...wallet, balance: newBalance });
 
-      // =========================
-      // SAVE RECORD
-      // =========================
+      // SAVE GAME RECORD
       await databases.createDocument(
         DATABASE_ID,
         "casino_spins",
@@ -236,19 +229,16 @@ export default function CasinoWheel() {
 
       <h2>🎡 Casino Jackpot</h2>
 
-      {/* WALLET DISPLAY */}
+      {/* WALLET */}
       <div style={{
         background: "#111",
-        padding: 10,
+        padding: 12,
         borderRadius: 10,
-        marginBottom: 10
+        marginBottom: 15
       }}>
         💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
 
-        <button
-          onClick={loadWallet}
-          style={{ marginLeft: 10 }}
-        >
+        <button onClick={loadWallet} style={{ marginLeft: 10 }}>
           🔄
         </button>
       </div>
@@ -259,24 +249,65 @@ export default function CasinoWheel() {
         placeholder="Stake"
         value={stake}
         onChange={(e) => setStake(e.target.value)}
+        style={{ padding: 10, borderRadius: 8 }}
       />
 
       <p>🎟 Free Spins: {freeSpins}</p>
 
-      {/* WHEEL */}
+      {/* 🎡 REAL WHEEL */}
       <div style={{
-        margin: 20,
+        width: 220,
+        height: 220,
+        margin: "20px auto",
+        borderRadius: "50%",
+        border: "6px solid gold",
+        position: "relative",
         transform: `rotate(${rotation}deg)`,
-        transition: "transform 3s ease"
+        transition: "transform 3s cubic-bezier(0.25,1,0.5,1)"
       }}>
-        🎡
+        {segments.map((seg, i) => (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              width: "50%",
+              height: "50%",
+              top: "50%",
+              left: "50%",
+              transformOrigin: "0% 0%",
+              transform: `rotate(${i * segmentAngle}deg)`,
+              background: `hsl(${i * 45},80%,50%)`,
+              clipPath: "polygon(0% 0%, 100% 50%, 0% 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              paddingRight: 8,
+              fontSize: 12,
+              fontWeight: "bold"
+            }}
+          >
+            {seg}
+          </div>
+        ))}
       </div>
 
-      <button onClick={spin}>
-        {spinning ? "Spinning..." : "SPIN"}
+      {/* 🔥 BIG SPIN BUTTON */}
+      <button
+        onClick={spin}
+        style={{
+          padding: "18px 40px",
+          fontSize: 20,
+          fontWeight: "bold",
+          background: "gold",
+          border: "none",
+          borderRadius: 12,
+          marginTop: 10
+        }}
+      >
+        {spinning ? "Spinning..." : "🎡 SPIN"}
       </button>
 
-      <p>{result}</p>
+      <p style={{ marginTop: 10 }}>{result}</p>
       <p>🏆 Won: ₦{won}</p>
 
     </div>
