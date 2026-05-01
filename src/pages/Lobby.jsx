@@ -100,31 +100,19 @@ export default function Lobby({ goGame, back }) {
   useEffect(() => {
     if (!user) return;
 
-    // 🔥 MATCH LISTENER
     const unsubMatch = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      async (res) => {
-        const m = res.payload;
-
+      async () => {
         refresh(user.$id);
-
-        // AUTO ENTER GAME
-        if (
-          (m.hostId === user.$id || m.opponentId === user.$id) &&
-          m.status === "matched" &&
-          m.gameId
-        ) {
-          goGame(m.gameId, m.stake);
-        }
       }
     );
 
-    // 🔥 GAME LISTENER (NEW FIX)
     const unsubGame = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
       async (res) => {
         const g = res.payload;
 
+        // auto-finish match if game finished
         if (g.status === "finished" && g.matchId) {
           try {
             const m = await databases.getDocument(
@@ -199,7 +187,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD MATCHES
+  // LOAD MATCHES (FIXED)
   // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
@@ -208,10 +196,13 @@ export default function Lobby({ goGame, back }) {
     );
 
     const filtered = res.documents.filter((m) => {
-      if (m.status === "waiting") return m.hostId !== userId;
-
-      if (m.status === "matched") {
-        return m.hostId === userId || m.opponentId === userId;
+      // ✅ ONLY OPEN MATCHES
+      if (m.status === "waiting") {
+        return (
+          m.hostId !== userId &&     // not yours
+          !m.opponentId &&           // no opponent yet
+          !m.gameId                  // game not started
+        );
       }
 
       return false;
@@ -221,7 +212,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // ACTIVE MATCHES
+  // ACTIVE MATCHES (FIXED)
   // =========================
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
@@ -232,7 +223,8 @@ export default function Lobby({ goGame, back }) {
     const mine = res.documents.filter(
       (m) =>
         (m.hostId === userId || m.opponentId === userId) &&
-        m.status !== "cancelled"
+        m.status !== "cancelled" &&
+        m.status !== "waiting" // ❗ remove waiting
     );
 
     setActiveMatches(mine);
@@ -257,7 +249,8 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      if (fresh.opponentId) {
+      // 🔥 HARD BLOCK
+      if (fresh.opponentId || fresh.gameId) {
         alert("Already taken");
         return;
       }
@@ -324,49 +317,49 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-// CREATE MATCH
-// =========================
-async function createMatch() {
-  const amount = Number(stake);
+  // CREATE MATCH
+  // =========================
+  async function createMatch() {
+    const amount = Number(stake);
 
-  if (!amount || amount < 50) {
-    return alert("Minimum ₦50");
+    if (!amount || amount < 50) {
+      return alert("Minimum ₦50");
+    }
+
+    if ((wallet?.balance || 0) < amount) {
+      return alert("Insufficient balance");
+    }
+
+    setLoading(true);
+
+    try {
+      await lockFunds(user.$id, amount);
+
+      await databases.createDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        ID.unique(),
+        {
+          hostId: user.$id,
+          opponentId: null,
+          stake: amount,
+          pot: amount,
+          status: "waiting",
+          gameId: "",
+          adminPaid: false,
+          refunded: false,
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      setStake("");
+
+    } catch (err) {
+      alert(err.message);
+    }
+
+    setLoading(false);
   }
-
-  if ((wallet?.balance || 0) < amount) {
-    return alert("Insufficient balance");
-  }
-
-  setLoading(true);
-
-  try {
-    await lockFunds(user.$id, amount);
-
-    await databases.createDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      ID.unique(),
-      {
-        hostId: user.$id,
-        opponentId: null,
-        stake: amount,
-        pot: amount,
-        status: "waiting",
-        gameId: "",
-        adminPaid: false,
-        refunded: false,
-        createdAt: new Date().toISOString()
-      }
-    );
-
-    setStake("");
-
-  } catch (err) {
-    alert(err.message);
-  }
-
-  setLoading(false);
-}
 
   // =========================
   // UI
@@ -407,11 +400,9 @@ async function createMatch() {
         <div key={m.$id} style={styles.card}>
           <span>₦{m.stake}</span>
 
-          {m.status === "waiting" && (
-            <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
-              Join
-            </button>
-          )}
+          <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
+            Join
+          </button>
         </div>
       ))}
 
