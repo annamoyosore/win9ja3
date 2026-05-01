@@ -108,7 +108,7 @@ export default function Lobby({ goGame, back }) {
       async (res) => {
         const g = res.payload;
 
-        // 🔥 SYNC GAME → MATCH
+        // 🔥 SYNC GAME → MATCH (FINISHED)
         if (g.status === "finished" && g.matchId) {
           try {
             const m = await databases.getDocument(
@@ -185,7 +185,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD MATCHES
+  // LOAD AVAILABLE MATCHES
   // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
@@ -205,7 +205,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // ACTIVE MATCHES
+  // LOAD ACTIVE + FINISHED MATCHES ✅ FIXED
   // =========================
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
@@ -216,19 +216,19 @@ export default function Lobby({ goGame, back }) {
     const mine = res.documents.filter(
       (m) =>
         (m.hostId === userId || m.opponentId === userId) &&
-        (m.status === "matched" || m.status === "running")
+        m.status !== "cancelled" // ✅ include finished now
     );
 
     setActiveMatches(mine);
   }
 
   // =========================
-  // JOIN MATCH (🔒 FULLY SECURED)
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loadingMatchId) return;
 
-    // ❌ BLOCK SELF JOIN (UI)
+    // ❌ BLOCK SELF JOIN
     if (match.hostId === user.$id) {
       alert("You cannot join your own match");
       return;
@@ -243,12 +243,11 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      // ❌ BLOCK SELF JOIN (BACKEND SAFETY)
+      // ❌ BACKEND SAFETY
       if (fresh.hostId === user.$id) {
         throw new Error("Cannot join your own match");
       }
 
-      // 🔒 BLOCK TAKEN MATCH
       if (fresh.status !== "waiting" || fresh.opponentId) {
         throw new Error("Match already taken");
       }
@@ -261,7 +260,6 @@ export default function Lobby({ goGame, back }) {
 
       const adminCut = Math.floor(fresh.stake * 0.1);
 
-      // 🔥 LOCK MATCH
       const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -274,7 +272,6 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // remove instantly from UI
       setMatches((prev) => prev.filter((m) => m.$id !== fresh.$id));
 
       const game = await createGame(updated, user.$id);
@@ -357,7 +354,16 @@ export default function Lobby({ goGame, back }) {
           </div>
 
           {m.status === "finished" ? (
-            <button disabled style={{ background: "#444", color: "#fff" }}>
+            <button
+              disabled
+              style={{
+                background: "#16a34a",
+                color: "#fff",
+                padding: 8,
+                borderRadius: 6,
+                fontWeight: "bold"
+              }}
+            >
               ✅ Finished
             </button>
           ) : (
