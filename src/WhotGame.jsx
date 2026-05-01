@@ -211,10 +211,32 @@ export default function WhotGame({ gameId, goHome }) {
   useEffect(() => {
     if (!gameId || !userId) return;
 
-    const load = async () => {
-      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      setGame(parseGame(g));
+    const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
 
+let parsed = parseGame(g);
+
+// ✅ FIX: auto deal cards if empty
+if (!parsed.hands || parsed.hands.flat().length === 0) {
+  const deck = createDeck();
+
+  parsed.hands = [deck.splice(0, 6), deck.splice(0, 6)];
+  parsed.discard = deck.pop();
+  parsed.deck = deck;
+  parsed.turn = parsed.players[0];
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    gameId,
+    {
+      ...encodeGame(parsed),
+      discard: parsed.discard,
+      turn: parsed.turn
+    }
+  );
+}
+
+setGame(parsed);
       if (g.matchId) {
         const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
         setMatch(m);
