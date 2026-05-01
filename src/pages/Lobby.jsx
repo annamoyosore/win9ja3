@@ -95,12 +95,13 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // REALTIME
+  // REALTIME (MATCH + GAME)
   // =========================
   useEffect(() => {
     if (!user) return;
 
-    const unsub = databases.client.subscribe(
+    // 🔥 MATCH LISTENER
+    const unsubMatch = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
       async (res) => {
         const m = res.payload;
@@ -115,30 +116,42 @@ export default function Lobby({ goGame, back }) {
         ) {
           goGame(m.gameId, m.stake);
         }
+      }
+    );
 
-        // AUTO MARK FINISHED
-        if (m.gameId) {
+    // 🔥 GAME LISTENER (NEW FIX)
+    const unsubGame = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
+      async (res) => {
+        const g = res.payload;
+
+        if (g.status === "finished" && g.matchId) {
           try {
-            const g = await databases.getDocument(
+            const m = await databases.getDocument(
               DATABASE_ID,
-              GAME_COLLECTION,
-              m.gameId
+              MATCH_COLLECTION,
+              g.matchId
             );
 
-            if (g.status === "finished" && m.status !== "finished") {
+            if (m.status !== "finished") {
               await databases.updateDocument(
                 DATABASE_ID,
                 MATCH_COLLECTION,
-                m.$id,
+                g.matchId,
                 { status: "finished" }
               );
             }
           } catch {}
         }
+
+        refresh(user.$id);
       }
     );
 
-    return () => unsub();
+    return () => {
+      unsubMatch();
+      unsubGame();
+    };
   }, [user]);
 
   async function refresh(userId) {
@@ -148,7 +161,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // AUTO REFUND (78 HOURS)
+  // AUTO REFUND
   // =========================
   async function autoRefund(userId) {
     const res = await databases.listDocuments(
@@ -195,10 +208,8 @@ export default function Lobby({ goGame, back }) {
     );
 
     const filtered = res.documents.filter((m) => {
-      // SHOW WAITING TO ALL EXCEPT HOST
       if (m.status === "waiting") return m.hostId !== userId;
 
-      // SHOW MATCHED ONLY TO PLAYERS
       if (m.status === "matched") {
         return m.hostId === userId || m.opponentId === userId;
       }
@@ -256,13 +267,10 @@ export default function Lobby({ goGame, back }) {
         return;
       }
 
-      // LOCK USER FUNDS
       await lockFunds(user.$id, fresh.stake);
 
-      // 🔥 ADMIN CUT
       const adminCut = Math.floor(fresh.stake * 0.1);
 
-      // PAY ADMIN
       const adminWallet = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -316,49 +324,49 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // CREATE MATCH
-  // =========================
-  async function createMatch() {
-    const amount = Number(stake);
+// CREATE MATCH
+// =========================
+async function createMatch() {
+  const amount = Number(stake);
 
-    if (!amount || amount < 50) {
-      return alert("Minimum ₦50");
-    }
-
-    if ((wallet?.balance || 0) < amount) {
-      return alert("Insufficient balance");
-    }
-
-    setLoading(true);
-
-    try {
-      await lockFunds(user.$id, amount);
-
-      await databases.createDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        ID.unique(),
-        {
-          hostId: user.$id,
-          opponentId: null,
-          stake: amount,
-          pot: amount,
-          status: "waiting",
-          gameId: "",
-          adminPaid: false,
-          refunded: false,
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      setStake("");
-
-    } catch (err) {
-      alert(err.message);
-    }
-
-    setLoading(false);
+  if (!amount || amount < 50) {
+    return alert("Minimum ₦50");
   }
+
+  if ((wallet?.balance || 0) < amount) {
+    return alert("Insufficient balance");
+  }
+
+  setLoading(true);
+
+  try {
+    await lockFunds(user.$id, amount);
+
+    await databases.createDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      ID.unique(),
+      {
+        hostId: user.$id,
+        opponentId: null,
+        stake: amount,
+        pot: amount,
+        status: "waiting",
+        gameId: "",
+        adminPaid: false,
+        refunded: false,
+        createdAt: new Date().toISOString()
+      }
+    );
+
+    setStake("");
+
+  } catch (err) {
+    alert(err.message);
+  }
+
+  setLoading(false);
+}
 
   // =========================
   // UI
