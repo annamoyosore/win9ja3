@@ -271,87 +271,96 @@ useEffect(() => {
 
         if (payoutRef.current) return;
 
-        const fresh = await databases.getDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          parsed.$id
-        );
+const fresh = await databases.getDocument(
+  DATABASE_ID,
+  GAME_COLLECTION,
+  parsed.$id
+);
 
-        if (fresh.payoutDone) return;
+if (fresh.payoutDone) return;
 
-        payoutRef.current = true;
+payoutRef.current = true;
 
-        try {
-          const m = parsed.matchId
-            ? await databases.getDocument(
-                DATABASE_ID,
-                MATCH_COLLECTION,
-                parsed.matchId
-              )
-            : null;
+try {
+  const m = parsed.matchId
+    ? await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        parsed.matchId
+      )
+    : null;
 
-          const total = Number(m?.pot || 0);
+  const pot = Number(m?.pot || 0);
+  const stake = Number(m?.stake || 0);
 
-          const w = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", parsed.winnerId)]
-          );
-
-          if (w.documents.length) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              w.documents[0].$id,
-              {
-                balance:
-                  Number(w.documents[0].balance || 0) + total
-              }
-            );
-          }
-
-          for (let pid of parsed.players) {
-            const wallets = await databases.listDocuments(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              [Query.equal("userId", pid)]
-            );
-
-            if (wallets.documents.length) {
-              await databases.updateDocument(
-                DATABASE_ID,
-                WALLET_COLLECTION,
-                wallets.documents[0].$id,
-                { locked: 0 }
-              );
-            }
-          }
-
-          // ✅ mark payout done
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id,
-            { payoutDone: true }
-          );
-
-          // ✅ mark match finished
-          if (parsed.matchId) {
-            await databases.updateDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              parsed.matchId,
-              { status: "finished" }
-            );
-          }
-
-        } catch (e) {
-          console.log("payout error", e);
-        }
-      }
-    }
+  // =========================
+  // 💰 PAY WINNER ONLY
+  // =========================
+  const winnerWallet = await databases.listDocuments(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    [Query.equal("userId", parsed.winnerId)]
   );
 
+  if (winnerWallet.documents.length) {
+    const w = winnerWallet.documents[0];
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      w.$id,
+      {
+        balance: Number(w.balance || 0) + pot
+      }
+    );
+  }
+
+  // =========================
+  // 🔓 REMOVE ONLY THIS MATCH LOCK
+  // =========================
+  for (let pid of parsed.players) {
+    const wallets = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", pid)]
+    );
+
+    if (wallets.documents.length) {
+      const w = wallets.documents[0];
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        w.$id,
+        {
+          locked: Math.max(0, Number(w.locked || 0) - stake)
+        }
+      );
+    }
+  }
+
+  // =========================
+  // ✅ MARK COMPLETE
+  // =========================
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    parsed.$id,
+    { payoutDone: true }
+  );
+
+  if (parsed.matchId) {
+    await databases.updateDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      parsed.matchId,
+      { status: "finished" }
+    );
+  }
+
+} catch (e) {
+  console.log("payout error", e);
+}
   // ✅ CORRECT PLACE (outside subscribe)
   return () => unsub();
 
