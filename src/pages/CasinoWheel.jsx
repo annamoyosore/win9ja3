@@ -10,9 +10,6 @@ import {
 
 export default function CasinoWheel() {
 
-  // =========================
-  // STATE
-  // =========================
   const [userId, setUserId] = useState(null);
   const [wallet, setWallet] = useState(null);
 
@@ -23,21 +20,9 @@ export default function CasinoWheel() {
   const [spinning, setSpinning] = useState(false);
   const [freeSpins, setFreeSpins] = useState(0);
   const [countdown, setCountdown] = useState(null);
-  const [feeds, setFeeds] = useState([]);
 
   const audioCtxRef = useRef(null);
   const spinSoundRef = useRef(null);
-
-  // =========================
-  // NAMES FOR FEED
-  // =========================
-  const names = [
-    "Emeka","Tunde","Blessing","Chioma","Ibrahim",
-    "Sadiq","Zainab","Kelvin","Uche","Mary",
-    "Aisha","David","Samuel","Joy","Paul",
-    "Esther","Yusuf","Musa","Favour","Henry",
-    "Olamide","Chinedu","Ngozi","Bola","Sule"
-  ];
 
   // =========================
   // LOAD WALLET
@@ -60,33 +45,6 @@ export default function CasinoWheel() {
   }
 
   // =========================
-  // LIVE WIN FEED
-  // =========================
-  useEffect(() => {
-    const interval = setInterval(() => {
-
-      const name = names[Math.floor(Math.random() * names.length)];
-      const types = ["x3","x10","JACKPOT"];
-      const type = types[Math.floor(Math.random()*types.length)];
-
-      let amount = Math.floor(Math.random()*50000)+5000;
-      if (type==="x10") amount*=2;
-      if (type==="JACKPOT") amount*=5;
-
-      const id = Date.now();
-
-      setFeeds(prev => [...prev,{id,message:`${name} won ₦${amount.toLocaleString()} (${type}) 🎉`}].slice(-30));
-
-      setTimeout(()=>{
-        setFeeds(prev => prev.filter(f=>f.id!==id));
-      },4000);
-
-    },3000);
-
-    return ()=>clearInterval(interval);
-  },[]);
-
-  // =========================
   // SEGMENTS
   // =========================
   const segments = [
@@ -97,28 +55,7 @@ export default function CasinoWheel() {
   const segmentAngle = 360 / segments.length;
 
   // =========================
-  // RESULT POOL
-  // =========================
-  const pool = [
-    { type: "LOSE", weight: 0.39 },
-    { type: "HALF", weight: 0.12 },
-    { type: "X1", weight: 0.12 },
-    { type: "FREE", weight: 0.08 },
-    { type: "X2", weight: 0.20 },
-    { type: "X3", weight: 0.08 },
-    { type: "X10", weight: 0.01 }
-  ];
-
-  const getResult = () => {
-    let r = Math.random(), sum = 0;
-    for (let p of pool) {
-      sum += p.weight;
-      if (r <= sum) return p.type;
-    }
-  };
-
-  // =========================
-  // SAFE LOUD TICK SOUND
+  // SAFE SOUND
   // =========================
   function startTickSound() {
     if (!audioCtxRef.current) {
@@ -159,6 +96,27 @@ export default function CasinoWheel() {
   }
 
   // =========================
+  // RESULT POOL
+  // =========================
+  const pool = [
+    { type: "LOSE", weight: 0.39 },
+    { type: "HALF", weight: 0.12 },
+    { type: "X1", weight: 0.12 },
+    { type: "FREE", weight: 0.08 },
+    { type: "X2", weight: 0.20 },
+    { type: "X3", weight: 0.08 },
+    { type: "X10", weight: 0.01 }
+  ];
+
+  const getResult = () => {
+    let r = Math.random(), sum = 0;
+    for (let p of pool) {
+      sum += p.weight;
+      if (r <= sum) return p.type;
+    }
+  };
+
+  // =========================
   // RESET
   // =========================
   const startReset = () => {
@@ -185,12 +143,14 @@ export default function CasinoWheel() {
     if (spinning || countdown) return;
 
     const numericStake = Number(stake);
-    if ((!numericStake || numericStake<=0) && freeSpins<=0){
-      setResult("⚠️ Enter stake");
+
+    // ✅ MINIMUM ₦50
+    if ((!numericStake || numericStake < 50) && freeSpins <= 0) {
+      setResult("⚠️ Minimum stake is ₦50");
       return;
     }
 
-    if (freeSpins<=0 && wallet.balance < numericStake){
+    if (freeSpins <= 0 && wallet.balance < numericStake) {
       setResult("❌ Insufficient balance");
       return;
     }
@@ -213,11 +173,11 @@ export default function CasinoWheel() {
 
     setRotation(finalRotation);
 
-    setTimeout(async ()=>{
+    setTimeout(async () => {
 
       stopTick();
 
-      let win=0;
+      let win = 0;
       let newBalance = wallet.balance;
 
       if(outcome==="LOSE"){
@@ -284,44 +244,61 @@ export default function CasinoWheel() {
 
       <h2>🎡 Casino Jackpot</h2>
 
+      {/* WALLET */}
       <div style={{background:"#111",padding:10,borderRadius:10}}>
         💰 ₦{Number(wallet?.balance||0).toLocaleString()}
         <button onClick={loadWallet}>🔄</button>
       </div>
 
+      {/* STAKE */}
       <input
         type="number"
-        placeholder="Stake"
+        placeholder="Minimum ₦50"
         value={stake}
         onChange={(e)=>setStake(e.target.value)}
       />
 
-      <p>🎟 Free Spins: {freeSpins}</p>
+      {/* POINTER */}
+      <div style={{
+        fontSize:24,
+        marginTop:10
+      }}>
+        🔻
+      </div>
 
       {/* WHEEL */}
       <div style={{
-        width:220,height:220,margin:"20px auto",
-        borderRadius:"50%",border:"5px solid gold",
+        width:240,
+        height:240,
+        margin:"10px auto",
+        borderRadius:"50%",
+        border:"6px solid gold",
         position:"relative",
+        overflow:"hidden",
         transform:`rotate(${rotation}deg)`,
-        transition:"transform 3s ease"
+        transition:"transform 3s cubic-bezier(0.25,1,0.5,1)"
       }}>
         {segments.map((seg,i)=>(
           <div key={i} style={{
             position:"absolute",
-            width:"50%",height:"50%",
-            top:"50%",left:"50%",
+            width:"50%",
+            height:"50%",
+            top:"50%",
+            left:"50%",
             transformOrigin:"0% 0%",
-            transform:`rotate(${i*segmentAngle}deg)`
+            transform:`rotate(${i*segmentAngle}deg)`,
+            background:`hsl(${i*45},80%,50%)`,
+            clipPath:"polygon(0% 0%, 100% 50%, 0% 100%)",
+            display:"flex",
+            alignItems:"center",
+            justifyContent:"flex-end",
+            paddingRight:10
           }}>
             <span style={{
-              fontSize:14,
               fontWeight:"900",
+              fontSize:13,
               color: seg.includes("JACKPOT")?"gold":"white",
-              textShadow: seg.includes("JACKPOT")
-                ? "0 0 10px gold,0 0 20px gold"
-                : "0 0 6px black",
-              transform:"rotate(90deg)"
+              textShadow:"0 0 6px black"
             }}>
               {seg}
             </span>
@@ -329,6 +306,7 @@ export default function CasinoWheel() {
         ))}
       </div>
 
+      {/* BUTTON */}
       <button onClick={spin} style={{
         padding:"18px 40px",
         fontSize:20,
@@ -343,36 +321,6 @@ export default function CasinoWheel() {
       <p>🏆 ₦{won}</p>
 
       {countdown && <p>🔄 Next spin in {countdown}s...</p>}
-
-      {/* LIVE FEED */}
-      <div style={{
-        position:"fixed",
-        top:10,left:"50%",
-        transform:"translateX(-50%)",
-        zIndex:999
-      }}>
-        {feeds.map(f=>(
-          <div key={f.id} style={{
-            background:"#22c55e",
-            padding:"10px 15px",
-            marginTop:8,
-            borderRadius:8,
-            fontWeight:"bold",
-            animation:"fadeSlide 4s ease forwards"
-          }}>
-            {f.message}
-          </div>
-        ))}
-      </div>
-
-      <style>{`
-        @keyframes fadeSlide {
-          0% {opacity:0;transform:translateY(-20px);}
-          20% {opacity:1;transform:translateY(0);}
-          80% {opacity:1;}
-          100% {opacity:0;transform:translateY(-20px);}
-        }
-      `}</style>
 
     </div>
   );
