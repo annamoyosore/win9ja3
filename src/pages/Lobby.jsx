@@ -15,8 +15,6 @@ import {
 import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
-
-// 🔴 YOUR ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
@@ -73,7 +71,7 @@ export default function Lobby({ goGame, back }) {
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loadingMatchId, setLoadingMatchId] = useState(null);
 
   useEffect(() => {
     init();
@@ -95,45 +93,19 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // REALTIME (MATCH + GAME)
+  // REALTIME
   // =========================
   useEffect(() => {
     if (!user) return;
 
     const unsubMatch = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      async () => {
-        refresh(user.$id);
-      }
+      () => refresh(user.$id)
     );
 
     const unsubGame = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
-      async (res) => {
-        const g = res.payload;
-
-        // auto-finish match if game finished
-        if (g.status === "finished" && g.matchId) {
-          try {
-            const m = await databases.getDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              g.matchId
-            );
-
-            if (m.status !== "finished") {
-              await databases.updateDocument(
-                DATABASE_ID,
-                MATCH_COLLECTION,
-                g.matchId,
-                { status: "finished" }
-              );
-            }
-          } catch {}
-        }
-
-        refresh(user.$id);
-      }
+      () => refresh(user.$id)
     );
 
     return () => {
@@ -152,11 +124,7 @@ export default function Lobby({ goGame, back }) {
   // AUTO REFUND
   // =========================
   async function autoRefund(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION
-    );
-
+    const res = await databases.listDocuments(DATABASE_ID, MATCH_COLLECTION);
     const now = Date.now();
 
     for (let m of res.documents) {
@@ -176,10 +144,7 @@ export default function Lobby({ goGame, back }) {
             DATABASE_ID,
             MATCH_COLLECTION,
             m.$id,
-            {
-              status: "cancelled",
-              refunded: true
-            }
+            { status: "cancelled", refunded: true }
           );
         }
       }
@@ -196,16 +161,11 @@ export default function Lobby({ goGame, back }) {
     );
 
     const filtered = res.documents.filter((m) => {
-      // ✅ ONLY OPEN MATCHES
-      if (m.status === "waiting") {
-        return (
-          m.hostId !== userId &&     // not yours
-          !m.opponentId &&           // no opponent yet
-          !m.gameId                  // game not started
-        );
-      }
-
-      return false;
+      return (
+        m.status === "waiting" &&
+        !m.opponentId &&
+        m.hostId !== userId
+      );
     });
 
     setMatches(filtered);
@@ -223,19 +183,19 @@ export default function Lobby({ goGame, back }) {
     const mine = res.documents.filter(
       (m) =>
         (m.hostId === userId || m.opponentId === userId) &&
-        m.status !== "cancelled" &&
-        m.status !== "waiting" // ❗ remove waiting
+        m.status !== "cancelled"
     );
 
     setActiveMatches(mine);
   }
 
   // =========================
-  // JOIN MATCH
+  // JOIN MATCH (FIXED 🔥)
   // =========================
   async function joinMatch(match) {
-    if (loading) return;
-    setLoading(true);
+    if (loadingMatchId) return;
+
+    setLoadingMatchId(match.$id);
 
     try {
       if (match.hostId === user.$id) {
@@ -243,15 +203,16 @@ export default function Lobby({ goGame, back }) {
         return;
       }
 
+      // 🔥 ALWAYS re-fetch latest
       const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id
       );
 
-      // 🔥 HARD BLOCK
-      if (fresh.opponentId || fresh.gameId) {
-        alert("Already taken");
+      // 🔥 HARD STOP if taken
+      if (fresh.opponentId || fresh.status !== "waiting") {
+        alert("Match already taken");
         return;
       }
 
@@ -264,6 +225,20 @@ export default function Lobby({ goGame, back }) {
 
       const adminCut = Math.floor(fresh.stake * 0.1);
 
+      // assign opponent FIRST (locks match)
+      const updated = await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        fresh.$id,
+        {
+          opponentId: user.$id,
+          status: "matched",
+          pot: fresh.stake * 2 - adminCut,
+          adminPaid: true
+        }
+      );
+
+      // pay admin
       const adminWallet = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -281,18 +256,6 @@ export default function Lobby({ goGame, back }) {
           }
         );
       }
-
-      const updated = await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        fresh.$id,
-        {
-          opponentId: user.$id,
-          status: "matched",
-          pot: fresh.stake * 2 - adminCut,
-          adminPaid: true
-        }
-      );
 
       const game = await createGame(updated, user.$id);
 
@@ -313,7 +276,7 @@ export default function Lobby({ goGame, back }) {
       } catch {}
     }
 
-    setLoading(false);
+    setLoadingMatchId(null);
   }
 
   // =========================
@@ -329,8 +292,6 @@ export default function Lobby({ goGame, back }) {
     if ((wallet?.balance || 0) < amount) {
       return alert("Insufficient balance");
     }
-
-    setLoading(true);
 
     try {
       await lockFunds(user.$id, amount);
@@ -357,8 +318,6 @@ export default function Lobby({ goGame, back }) {
     } catch (err) {
       alert(err.message);
     }
-
-    setLoading(false);
   }
 
   // =========================
@@ -367,8 +326,6 @@ export default function Lobby({ goGame, back }) {
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>🎮 Game Lobby</h1>
-
-      {loading && <p style={styles.loading}>⚡ Processing...</p>}
 
       <h2 style={styles.section}>🔥 Your Matches</h2>
 
@@ -400,9 +357,19 @@ export default function Lobby({ goGame, back }) {
         <div key={m.$id} style={styles.card}>
           <span>₦{m.stake}</span>
 
-          <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
-            Join
-          </button>
+          {m.status === "waiting" && !m.opponentId ? (
+            <button
+              onClick={() => joinMatch(m)}
+              style={styles.joinBtn}
+              disabled={loadingMatchId === m.$id}
+            >
+              {loadingMatchId === m.$id ? "Joining..." : "Join"}
+            </button>
+          ) : (
+            <button disabled style={styles.finishedBtn}>
+              Taken
+            </button>
+          )}
         </div>
       ))}
 
@@ -439,7 +406,6 @@ const styles = {
   },
   title: { fontSize: 28, fontWeight: "bold" },
   section: { marginTop: 20, color: "gold" },
-  loading: { color: "gold" },
   card: {
     background: "#111827",
     padding: 15,
