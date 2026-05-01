@@ -9,6 +9,47 @@ import {
 } from "../lib/appwrite";
 
 export default function CasinoWheel() {
+
+  // =========================
+  // STATE
+  // =========================
+  const [userId, setUserId] = useState(null);
+  const [wallet, setWallet] = useState(null);
+
+  const [stake, setStake] = useState("");
+  const [rotation, setRotation] = useState(0);
+  const [result, setResult] = useState("");
+  const [won, setWon] = useState(0);
+  const [spinning, setSpinning] = useState(false);
+  const [freeSpins, setFreeSpins] = useState(0);
+
+  const audioCtxRef = useRef(null);
+
+  // =========================
+  // LOAD USER + WALLET
+  // =========================
+  useEffect(() => {
+    loadWallet();
+  }, []);
+
+  async function loadWallet() {
+    const u = await account.get();
+    setUserId(u.$id);
+
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id)]
+    );
+
+    if (w.documents.length) {
+      setWallet(w.documents[0]);
+    }
+  }
+
+  // =========================
+  // SEGMENTS
+  // =========================
   const segments = [
     "❌ Lose",
     "x2",
@@ -21,21 +62,6 @@ export default function CasinoWheel() {
   ];
 
   const segmentAngle = 360 / segments.length;
-
-  const [stake, setStake] = useState("");
-  const [rotation, setRotation] = useState(0);
-  const [result, setResult] = useState("");
-  const [won, setWon] = useState(0);
-  const [spinning, setSpinning] = useState(false);
-  const [overlay, setOverlay] = useState(null);
-  const [countdown, setCountdown] = useState(null);
-  const [freeSpins, setFreeSpins] = useState(0);
-  const [flowers, setFlowers] = useState([]);
-
-  const [user, setUser] = useState(null);
-  const [wallet, setWallet] = useState(null);
-
-  const audioCtxRef = useRef(null);
 
   // =========================
   // RESULT POOL
@@ -59,39 +85,8 @@ export default function CasinoWheel() {
   };
 
   // =========================
-  // LOAD USER + WALLET
+  // SOUND
   // =========================
-  useEffect(() => {
-    init();
-  }, []);
-
-  async function init() {
-    const u = await account.get();
-    setUser(u);
-
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", u.$id)]
-    );
-
-    if (res.documents.length) {
-      setWallet(res.documents[0]);
-    }
-  }
-
-  // =========================
-  // FX / SOUND
-  // =========================
-  const spawnFlowers = () => {
-    const items = Array.from({ length: 25 }).map((_, i) => ({
-      id: i,
-      left: Math.random() * 100
-    }));
-    setFlowers(items);
-    setTimeout(() => setFlowers([]), 2500);
-  };
-
   const playSound = (type) => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext ||
@@ -119,25 +114,8 @@ export default function CasinoWheel() {
     );
   };
 
-  const startResetCountdown = () => {
-    let time = 5;
-    setCountdown(time);
-
-    const interval = setInterval(() => {
-      time--;
-      setCountdown(time);
-      if (time <= 0) {
-        clearInterval(interval);
-        setRotation(0);
-        setResult("");
-        setOverlay(null);
-        setCountdown(null);
-      }
-    }, 1000);
-  };
-
   // =========================
-  // SPIN (CONNECTED TO DB)
+  // 🎡 SPIN WITH WALLET
   // =========================
   const spin = async () => {
     if (spinning) return;
@@ -145,18 +123,19 @@ export default function CasinoWheel() {
     const numericStake = Number(stake);
 
     if ((!numericStake || numericStake <= 0) && freeSpins <= 0) {
-      setResult("⚠️ Enter valid stake");
+      setResult("⚠️ Enter stake");
       return;
     }
 
-    if (freeSpins <= 0 && (wallet?.balance || 0) < numericStake) {
+    if (!wallet) return;
+
+    if (freeSpins <= 0 && wallet.balance < numericStake) {
       setResult("❌ Insufficient balance");
       return;
     }
 
     setSpinning(true);
     setResult("");
-    setOverlay(null);
     setWon(0);
 
     const outcome = getResult();
@@ -173,132 +152,133 @@ export default function CasinoWheel() {
 
     const index = map[outcome];
     const stopAngle = 360 - (index * segmentAngle + segmentAngle / 2);
-    const finalRotation = rotation + 1440 + stopAngle;
-
-    setRotation(finalRotation);
+    setRotation(rotation + 1440 + stopAngle);
 
     setTimeout(async () => {
-      let text = "";
-      let win = 0;
-      let newBalance = Number(wallet?.balance || 0);
 
+      let win = 0;
+      let newBalance = wallet.balance;
+
+      // =========================
+      // CALCULATE RESULT
+      // =========================
       if (outcome === "LOSE") {
         if (freeSpins <= 0) newBalance -= numericStake;
-        text = `❌ Lost ₦${numericStake}`;
         playSound("lose");
-        setOverlay("lose");
+        setResult(`❌ Lost ₦${numericStake}`);
 
       } else if (outcome === "HALF") {
-        if (freeSpins <= 0) newBalance -= numericStake / 2;
-        text = `➖ Lost ₦${numericStake / 2}`;
+        const loss = numericStake / 2;
+        if (freeSpins <= 0) newBalance -= loss;
         playSound("lose");
-        setOverlay("lose");
+        setResult(`➖ Lost ₦${loss}`);
 
       } else if (outcome === "X1") {
-        text = "⚖️ No Gain";
+        setResult("⚖️ No Gain");
         playSound("win");
 
       } else if (outcome === "FREE") {
         setFreeSpins((f) => f + 1);
-        text = "🎁 Free Spin!";
+        setResult("🎁 Free Spin!");
         playSound("win");
 
       } else {
         const mult = parseInt(outcome.replace("X", ""));
         win = numericStake * mult;
 
-        if (freeSpins <= 0) {
-          newBalance = newBalance - numericStake + win;
-        } else {
-          newBalance = newBalance + win;
-        }
+        if (freeSpins <= 0) newBalance -= numericStake;
+        newBalance += win;
 
         setWon(win);
         playSound("win");
-        spawnFlowers();
-        setOverlay("win");
-        text = `🎉 Won ₦${win}`;
+        setResult(`🎉 Won ₦${win}`);
       }
 
-      if (freeSpins > 0) {
-        setFreeSpins((f) => f - 1);
-      }
+      // =========================
+      // UPDATE WALLET (ONCE)
+      // =========================
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        { balance: newBalance }
+      );
 
-      // ✅ UPDATE WALLET
-      try {
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          wallet.$id,
-          { balance: newBalance }
-        );
+      setWallet({ ...wallet, balance: newBalance });
 
-        setWallet((w) => ({
-          ...w,
-          balance: newBalance
-        }));
-      } catch (err) {
-        console.error("Wallet update failed", err);
-      }
+      // =========================
+      // SAVE RECORD
+      // =========================
+      await databases.createDocument(
+        DATABASE_ID,
+        "casino_spins",
+        ID.unique(),
+        {
+          userId,
+          stake: numericStake,
+          outcome,
+          winAmount: win,
+          balanceAfter: newBalance,
+          createdAt: new Date().toISOString()
+        }
+      );
 
-      // ✅ SAVE SPIN HISTORY
-      try {
-        await databases.createDocument(
-          DATABASE_ID,
-          "casino_spins",
-          ID.unique(),
-          {
-            userId: user.$id,
-            stake: numericStake,
-            outcome,
-            winAmount: win,
-            balanceAfter: newBalance,
-            createdAt: new Date().toISOString()
-          }
-        );
-      } catch (err) {
-        console.log("spin log failed", err);
-      }
-
-      setResult(text);
       setSpinning(false);
-      startResetCountdown();
 
     }, 3000);
   };
 
+  // =========================
+  // UI
+  // =========================
   return (
-    <>
-      <div className="container">
-        <h3>🎡 Casino Wheel</h3>
+    <div style={{ textAlign: "center", color: "#fff", padding: 20 }}>
 
-        <input
-          type="number"
-          placeholder="Enter stake..."
-          value={stake}
-          onChange={(e) => setStake(e.target.value)}
-        />
+      <h2>🎡 Casino Jackpot</h2>
 
-        <p>💰 Balance: ₦{Number(wallet?.balance || 0)}</p>
-        <p>🎟 Free Spins: {freeSpins}</p>
+      {/* WALLET DISPLAY */}
+      <div style={{
+        background: "#111",
+        padding: 10,
+        borderRadius: 10,
+        marginBottom: 10
+      }}>
+        💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
 
-        <div
-          className="wheel"
-          style={{ transform: `rotate(${rotation}deg)` }}
-        />
-
-        <button onClick={spin}>
-          {spinning ? "Spinning..." : "🎡 Spin"}
+        <button
+          onClick={loadWallet}
+          style={{ marginLeft: 10 }}
+        >
+          🔄
         </button>
-
-        <p>{result}</p>
-
-        {overlay && (
-          <div>
-            {overlay === "win" ? "🏆 WIN!" : "😢 LOST"}
-          </div>
-        )}
       </div>
-    </>
+
+      {/* STAKE */}
+      <input
+        type="number"
+        placeholder="Stake"
+        value={stake}
+        onChange={(e) => setStake(e.target.value)}
+      />
+
+      <p>🎟 Free Spins: {freeSpins}</p>
+
+      {/* WHEEL */}
+      <div style={{
+        margin: 20,
+        transform: `rotate(${rotation}deg)`,
+        transition: "transform 3s ease"
+      }}>
+        🎡
+      </div>
+
+      <button onClick={spin}>
+        {spinning ? "Spinning..." : "SPIN"}
+      </button>
+
+      <p>{result}</p>
+      <p>🏆 Won: ₦{won}</p>
+
+    </div>
   );
 }
