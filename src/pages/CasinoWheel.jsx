@@ -9,7 +9,6 @@ import {
 } from "../lib/appwrite";
 
 const CASINO_COLLECTION = "casino_spins";
-const TRANSACTION_COLLECTION = "transactions";
 
 export default function CasinoWheel({ goBack }) {
 
@@ -26,12 +25,13 @@ export default function CasinoWheel({ goBack }) {
   const [overlay, setOverlay] = useState(null);
   const [flowers, setFlowers] = useState([]);
 
+  const [winnerPop, setWinnerPop] = useState(null);
+  const [feed, setFeed] = useState([]);
+
   const audioCtxRef = useRef(null);
   const tickRef = useRef(null);
 
-  // =========================
-  // LOAD WALLET
-  // =========================
+  // ================= LOAD =================
   useEffect(() => {
     loadWallet();
   }, []);
@@ -49,9 +49,7 @@ export default function CasinoWheel({ goBack }) {
     if (w.documents.length) setWallet(w.documents[0]);
   }
 
-  // =========================
-  // SEGMENTS
-  // =========================
+  // ================= SEGMENTS =================
   const segments = [
     "❌ Lose","x2","🎁 Free","x3",
     "❌ Lose","x1","🔥 x10","💎 JACKPOT ×30"
@@ -59,9 +57,7 @@ export default function CasinoWheel({ goBack }) {
 
   const segmentAngle = 360 / segments.length;
 
-  // =========================
-  // PROBABILITY
-  // =========================
+  // ================= PROBABILITY =================
   const pool = [
     { type: "LOSE", weight: 0.30 },
     { type: "LOSE2", weight: 0.30 },
@@ -80,9 +76,7 @@ export default function CasinoWheel({ goBack }) {
     }
   };
 
-  // =========================
-  // SOUND
-  // =========================
+  // ================= SOUND =================
   const startTick = () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -101,7 +95,7 @@ export default function CasinoWheel({ goBack }) {
       o.connect(g);
       g.connect(ctx.destination);
 
-      g.gain.setValueAtTime(0.1, ctx.currentTime);
+      g.gain.setValueAtTime(0.08, ctx.currentTime);
       g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
 
       o.start();
@@ -118,9 +112,7 @@ export default function CasinoWheel({ goBack }) {
     };
   };
 
-  // =========================
-  // FLOWERS
-  // =========================
+  // ================= FLOWERS =================
   const spawnFlowers = () => {
     const items = Array.from({ length: 25 }).map((_, i) => ({
       id: i,
@@ -130,12 +122,31 @@ export default function CasinoWheel({ goBack }) {
     setTimeout(() => setFlowers([]), 2500);
   };
 
-  // =========================
-  // RESET COUNTDOWN
-  // =========================
-  const startResetCountdown = (isFree = false) => {
-    if (isFree) return;
+  // ================= FEED =================
+  const names = ["Emeka","Tunde","Chioma","Ibrahim","Zainab","Kelvin","Uche","Mary"];
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const name = names[Math.floor(Math.random() * names.length)];
+      const amount = Math.floor(Math.random() * 50000) + 2000;
+      const id = Date.now();
+
+      setFeed(prev => [...prev, {
+        id,
+        text: `${name} won ₦${amount.toLocaleString()} 🎉`
+      }]);
+
+      setTimeout(() => {
+        setFeed(prev => prev.filter(f => f.id !== id));
+      }, 4000);
+
+    }, 6000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // ================= RESULT =================
+  const startCountdown = () => {
     let time = 3;
     setCountdown(time);
 
@@ -154,22 +165,18 @@ export default function CasinoWheel({ goBack }) {
     }, 1000);
   };
 
-  // =========================
-  // SPIN
-  // =========================
+  // ================= SPIN =================
   const spin = async () => {
-    if (spinning || countdown) return;
+    if (spinning) return;
 
     const numericStake = Number(stake);
 
     if ((!numericStake || numericStake < 50) && freeSpins <= 0) {
-      setResult("⚠️ Minimum ₦50");
-      return;
+      return setResult("⚠️ Minimum ₦50");
     }
 
     if (freeSpins <= 0 && wallet.balance < numericStake) {
-      setResult("❌ Insufficient balance");
-      return;
+      return setResult("❌ Insufficient balance");
     }
 
     const stopTick = startTick();
@@ -177,7 +184,6 @@ export default function CasinoWheel({ goBack }) {
     setSpinning(true);
     setResult("");
     setWon(0);
-    setOverlay(null);
 
     const outcome = getResult();
 
@@ -205,16 +211,15 @@ export default function CasinoWheel({ goBack }) {
 
       if (outcome === "LOSE" || outcome === "LOSE2") {
         if (freeSpins <= 0) newBalance -= numericStake;
-        setOverlay("lose");
         setResult(`❌ Lost ₦${numericStake}`);
+        setOverlay("lose");
 
       } else if (outcome === "X1") {
-        setOverlay("neutral");
         setResult("⚖️ No Gain");
+        setOverlay("neutral");
 
       } else if (outcome === "FREE") {
         setFreeSpins(f => f + 1);
-        setOverlay("win");
         setResult("🎁 Free Spin!");
         isFree = true;
 
@@ -226,12 +231,17 @@ export default function CasinoWheel({ goBack }) {
         newBalance += win;
 
         setWon(win);
-        setOverlay("win");
         spawnFlowers();
+        setOverlay("win");
+
+        if (win >= numericStake * 3) {
+          setWinnerPop(`🎉 BIG WIN ₦${win}`);
+          setTimeout(()=>setWinnerPop(null),3000);
+        }
+
         setResult(`🎉 Won ₦${win}`);
       }
 
-      // UPDATE WALLET
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -241,144 +251,149 @@ export default function CasinoWheel({ goBack }) {
 
       setWallet({ ...wallet, balance: newBalance });
 
-      // SAVE GAME
-      const spinId = ID.unique();
-
       await databases.createDocument(
         DATABASE_ID,
         CASINO_COLLECTION,
-        spinId,
-        {
-          userId,
-          stake: numericStake,
-          outcome,
-          winAmount: win,
-          balanceAfter: newBalance,
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      // SAVE TRANSACTION
-      await databases.createDocument(
-        DATABASE_ID,
-        TRANSACTION_COLLECTION,
         ID.unique(),
-        {
-          userId,
-          type: "casino",
-          amount: win > 0 ? win : -numericStake,
-          ref: spinId,
-          status: "completed",
-          createdAt: new Date().toISOString()
-        }
+        { userId, stake: numericStake, outcome, winAmount: win }
       );
 
       setSpinning(false);
-      startResetCountdown(isFree);
+
+      if (!isFree) startCountdown();
 
     }, 3000);
   };
 
   return (
-    <div style={{ textAlign: "center", color: "#fff", padding: 20 }}>
-
-      <h2>🎡 Casino Jackpot</h2>
-
-      <button onClick={goBack}>← Exit</button>
-
-      <div style={{ background:"#111", padding:10, borderRadius:10 }}>
-        💰 ₦{Number(wallet?.balance || 0).toLocaleString()}
-        <button onClick={loadWallet}>🔄</button>
-      </div>
-
-      <input
-        type="number"
-        placeholder="Minimum ₦50"
-        value={stake}
-        onChange={(e)=>setStake(e.target.value)}
-      />
-
-      <p>🎟 Free Spins: {freeSpins}</p>
-
-      {/* POINTER */}
-      <div style={{ fontSize:24 }}>🔻</div>
-
-      {/* WHEEL */}
-      <div style={{
-        width:240,height:240,margin:"10px auto",
-        borderRadius:"50%",border:"6px solid gold",
-        overflow:"hidden",
-        transform:`rotate(${rotation}deg)`,
-        transition:"transform 3s cubic-bezier(0.25,1,0.5,1)"
-      }}>
-        {segments.map((seg,i)=>(
-          <div key={i} style={{
-            position:"absolute",
-            width:"50%",height:"50%",
-            top:"50%",left:"50%",
-            transformOrigin:"0% 0%",
-            transform:`rotate(${i*segmentAngle}deg)`,
-            background:`hsl(${i*45},80%,50%)`,
-            clipPath:"polygon(0% 0%, 100% 50%, 0% 100%)"
-          }}>
-            <div style={{
-              position:"absolute",
-              left:"70%",
-              top:"50%",
-              transform:"translate(-50%,-50%)",
-              fontWeight:"900",
-              fontSize:13,
-              color: seg.includes("JACKPOT") ? "gold":"white",
-              textShadow:"0 0 6px #000"
-            }}>
-              {seg}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <button onClick={spin} style={{
-        padding:"18px 40px",
-        fontSize:20,
-        fontWeight:"bold",
-        background:"gold",
-        borderRadius:10
-      }}>
-        {spinning ? "Spinning..." : "🎡 SPIN"}
-      </button>
-
-      <p>{result}</p>
-      <p>🏆 ₦{won}</p>
-
-      {countdown && <p>🔄 Reset in {countdown}s</p>}
-
-      {overlay && (
-        <div style={{
-          position:"fixed",top:0,left:0,width:"100%",height:"100%",
-          background:"rgba(0,0,0,0.7)",
-          display:"flex",alignItems:"center",justifyContent:"center",
-          fontSize:30,fontWeight:"bold"
-        }}>
-          {overlay === "win" ? `🏆 ₦${won}` : "😢 LOST"}
-        </div>
-      )}
-
-      {flowers.map(f=>(
-        <div key={f.id} style={{
-          position:"fixed",
-          top:-20,
-          left:`${f.left}%`,
-          fontSize:18,
-          animation:"fall 2.5s linear forwards"
-        }}>🌸</div>
-      ))}
-
+    <>
       <style>{`
+        .wheel-container {
+          width:240px;height:240px;margin:20px auto;position:relative;
+        }
+        .pointer {
+          position:absolute;top:-18px;left:50%;
+          transform:translateX(-50%);
+          font-size:26px;z-index:10;
+        }
+        .wheel {
+          width:100%;height:100%;
+          border-radius:50%;
+          border:6px solid gold;
+          overflow:hidden;
+          transition:transform 3s cubic-bezier(0.25,1,0.5,1);
+        }
+        .segment {
+          position:absolute;
+          width:50%;height:50%;
+          top:50%;left:50%;
+          transform-origin:0% 0%;
+          display:flex;
+          align-items:center;
+          justify-content:flex-end;
+          padding-right:12px;
+          clip-path: polygon(0% 0%, 100% 50%, 0% 100%);
+        }
+        .label {
+          font-size:14px;
+          font-weight:900;
+          color:white;
+          text-shadow:0 0 6px black;
+        }
+        .jackpot {
+          color:gold;
+          text-shadow:0 0 10px gold,0 0 20px gold;
+        }
+        .confetti {
+          position:fixed;
+          top:-20px;
+          animation:fall 2.5s linear forwards;
+        }
         @keyframes fall {
-          to { transform: translateY(110vh); opacity:0; }
+          to { transform:translateY(110vh); opacity:0; }
         }
       `}</style>
 
-    </div>
+      <div style={{ textAlign:"center", color:"#fff", padding:20 }}>
+
+        <button onClick={goBack}>← Exit</button>
+
+        <h2>🎡 Casino Jackpot</h2>
+
+        <div style={{ background:"#111", padding:10 }}>
+          💰 ₦{Number(wallet?.balance || 0).toLocaleString()}
+          <button onClick={loadWallet}>🔄</button>
+        </div>
+
+        <input
+          type="number"
+          placeholder="Minimum ₦50"
+          value={stake}
+          onChange={(e)=>setStake(e.target.value)}
+        />
+
+        <p>🎟 Free Spins: {freeSpins}</p>
+
+        <div className="wheel-container">
+          <div className="pointer">🔻</div>
+
+          <div className="wheel" style={{ transform:`rotate(${rotation}deg)` }}>
+            {segments.map((seg,i)=>(
+              <div
+                key={i}
+                className="segment"
+                style={{
+                  transform:`rotate(${i*segmentAngle}deg)`,
+                  background:`hsl(${i*45},80%,50%)`
+                }}
+              >
+                <span className={`label ${seg.includes("JACKPOT")?"jackpot":""}`}>
+                  {seg}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button onClick={spin} style={{
+          padding:"18px 40px",
+          fontSize:20,
+          fontWeight:"bold",
+          background:"gold"
+        }}>
+          {spinning ? "Spinning..." : "🎡 SPIN"}
+        </button>
+
+        <p>{result}</p>
+        {countdown !== null && <p>🔄 {countdown}s</p>}
+
+        {winnerPop && (
+          <div style={{
+            position:"fixed",
+            top:"40%",
+            left:"50%",
+            transform:"translate(-50%,-50%)",
+            background:"gold",
+            padding:20,
+            fontWeight:"bold"
+          }}>
+            {winnerPop}
+          </div>
+        )}
+
+        {feed.map(f=>(
+          <div key={f.id} style={{ position:"fixed", top:10 }}>
+            {f.text}
+          </div>
+        ))}
+
+        {flowers.map(f=>(
+          <div key={f.id} className="confetti" style={{ left:`${f.left}%` }}>
+            🌸
+          </div>
+        ))}
+
+      </div>
+    </>
   );
 }
