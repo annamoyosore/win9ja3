@@ -38,7 +38,7 @@ export default function CasinoWheel() {
 
   const segmentAngle = 360 / segments.length;
 
-  const gradient = `conic-gradient(${segments
+  const gradient = `conic-gradient(from -90deg, ${segments
     .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
     .join(",")})`;
 
@@ -97,15 +97,15 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
-  // ✅ UPDATED PROBABILITY (balanced to 100%)
+  // 🎯 UPDATED PROBABILITY
   const getResult = () => {
     const r = Math.random();
 
-    if (r < 0.35) return "LOSE";
-    if (r < 0.52) return "LOSE2";
-    if (r < 0.62) return "FREE";
-    if (r < 0.82) return "X1";
-    if (r < 0.975) return "X2";
+    if (r < 0.335) return "LOSE";
+    if (r < 0.475) return "LOSE2";
+    if (r < 0.545) return "FREE";
+    if (r < 0.745) return "X1";
+    if (r < 0.945) return "X2";
     if (r < 0.985) return "X3";
     if (r < 0.995) return "X10";
     return "JACKPOT";
@@ -137,7 +137,7 @@ export default function CasinoWheel() {
       if (ticks > 40) clearInterval(sound);
     }, 60);
 
-    // 💸 deduct first
+    // deduct
     let deducted = wallet.balance - amount;
 
     await databases.updateDocument(
@@ -152,11 +152,13 @@ export default function CasinoWheel() {
     const outcome = getResult();
     const index = segments.findIndex(s => s.type === outcome);
 
-    const pointerOffset = 90;
-    const target = index * segmentAngle + segmentAngle / 2;
-    const final = (360 - target + pointerOffset) % 360;
+    // 🎯 PERFECT ALIGNMENT (0° = top)
+    const centerAngle = index * segmentAngle + segmentAngle / 2;
 
-    setRotation(prev => (prev % 360) + 360 * 5 + final);
+    const spins = 360 * 5;
+    const finalAngle = spins + (360 - centerAngle);
+
+    setRotation(finalAngle);
 
     setTimeout(async () => {
 
@@ -167,7 +169,7 @@ export default function CasinoWheel() {
         win = amount;
         setResult("🎁 FREE SPIN");
       } else if (mult) {
-        win = amount * mult; // ✅ x1 returns stake correctly
+        win = amount * mult;
         setResult(`🎉 WON ₦${win}`);
         setWon(win);
         if (mult >= 10) spawnFlowers();
@@ -219,7 +221,6 @@ export default function CasinoWheel() {
   return (
     <div style={{ textAlign: "center", paddingTop: 120 }}>
 
-      {/* RETURNS */}
       <div style={{
         position: "fixed",
         top: 10,
@@ -239,7 +240,6 @@ export default function CasinoWheel() {
         <div>💎 x30</div>
       </div>
 
-      {/* LIVE FEED */}
       <div style={{ position: "fixed", top: 10, right: 10 }}>
         {feed.map(f => (
           <div key={f.id} style={{
@@ -291,7 +291,7 @@ export default function CasinoWheel() {
           borderRadius: "50%",
           background: gradient,
           transform: `rotate(${rotation}deg)`,
-          transition: spinning ? "transform 4s ease-out" : "none",
+          transition: spinning ? "transform 4s cubic-bezier(0.1, 0.7, 0.2, 1)" : "none",
           boxShadow: glow ? "0 0 30px gold" : ""
         }}>
           {segments.map((s, i) => (
@@ -301,7 +301,7 @@ export default function CasinoWheel() {
               left: "50%",
               transform: `
                 rotate(${i * segmentAngle}deg)
-                translate(0,-125px)
+                translate(0,-140px)
                 rotate(-${i * segmentAngle}deg)
               `,
               color: flashIndex === i ? "gold" : "#fff",
