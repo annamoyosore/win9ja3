@@ -9,7 +9,7 @@ import {
   ID
 } from "../lib/appwrite";
 
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 
 const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David","Zainab"];
 const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
@@ -25,15 +25,19 @@ export default function CasinoWheel({ goBack }) {
   const [feed, setFeed] = useState([]);
   const [flowers, setFlowers] = useState([]);
 
-  // 🎯 LOGIC (85 / 10 / 5)
+  // 🎯 UPDATED POOL (matches wheel better)
   const pool = [
-    { type: "LOSE", w: 0.70 },
+    { type: "LOSE", w: 0.60 },
     { type: "LOSE2", w: 0.15 },
     { type: "FREE", w: 0.10 },
-    { type: "X1", w: 0.05 }
+    { type: "X1", w: 0.10 },
+    { type: "X2", w: 0.025 },
+    { type: "X3", w: 0.01 },
+    { type: "X10", w: 0.003 },
+    { type: "JACKPOT", w: 0.002 }
   ];
 
-  // 🎡 FULL WHEEL
+  // 🎡 WHEEL
   const segments = [
     { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
     { label: "x2", type: "X2", color: "#22c55e" },
@@ -68,14 +72,12 @@ export default function CasinoWheel({ goBack }) {
   useEffect(() => {
     loadWallet();
 
-    // version refresh
     const saved = localStorage.getItem("app_version");
     if (saved !== APP_VERSION) {
       localStorage.setItem("app_version", APP_VERSION);
       window.location.reload();
     }
 
-    // flower animation
     const style = document.createElement("style");
     style.innerHTML = `
       @keyframes fall {
@@ -106,7 +108,6 @@ export default function CasinoWheel({ goBack }) {
     }, 5000);
 
     return () => clearInterval(interval);
-
   }, []);
 
   async function loadWallet() {
@@ -128,6 +129,7 @@ export default function CasinoWheel({ goBack }) {
       sum += p.w;
       if (r <= sum) return p.type;
     }
+    return "LOSE";
   };
 
   function spawnFlowers() {
@@ -157,12 +159,16 @@ export default function CasinoWheel({ goBack }) {
     const outcome = getResult();
     const index = map[outcome];
 
-    // 🎯 POINTER FIX
+    // 🎯 PERFECT POINTER ALIGNMENT (TOP POINTER FIX)
     const target = index * segmentAngle + segmentAngle / 2;
-    const finalAngle = (360 - target) % 360;
+    const finalAngle = (360 - target + 90) % 360;
+
     const spins = 5 * 360;
 
-    setRotation(prev => prev % 360 + spins + finalAngle);
+    setRotation(prev => {
+      const base = prev % 360;
+      return base + spins + finalAngle;
+    });
 
     setTimeout(async () => {
 
@@ -181,147 +187,4 @@ export default function CasinoWheel({ goBack }) {
         status = "neutral";
         setResult("⚖️ Stake Returned");
 
-      } else {
-        setResult(`❌ Lost ₦${amount}`);
-      }
-
-      // 💾 SAVE WALLET
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        { balance: newBalance }
-      );
-
-      setWallet(prev => ({ ...prev, balance: newBalance }));
-
-      // 💾 SAVE CASINO (FIXED)
-      try {
-        const u = await account.get();
-
-        await databases.createDocument(
-          DATABASE_ID,
-          CASINO_COLLECTION,
-          ID.unique(),
-          {
-            userId: u.$id,
-            type: "spin",
-            status,
-            outcome,
-            stake: amount,
-            winAmount: win,
-            netChange: win - amount,
-            balanceBefore,
-            balanceAfter: newBalance,
-            createdAt: new Date().toISOString()
-          }
-        );
-
-      } catch (e) {
-        console.log("❌ Save failed:", e.message);
-      }
-
-      if (status === "win") spawnFlowers();
-
-      setSpinning(false);
-
-    }, 4500);
-  };
-
-  // =========================
-  // UI
-  // =========================
-  return (
-    <div style={{ display: "flex", color: "#fff" }}>
-
-      {/* LEFT RETURNS */}
-      <div style={{ width: 130 }}>
-        <h4>Returns</h4>
-        <div>x2 → ₦{stake * 2}</div>
-        <div>x3 → ₦{stake * 3}</div>
-        <div>x10 → ₦{stake * 10}</div>
-        <div>x30 → ₦{stake * 30}</div>
-      </div>
-
-      {/* CENTER */}
-      <div style={{ flex: 1, textAlign: "center", position: "relative" }}>
-        <button onClick={goBack}>← Exit</button>
-
-        <h2>🎡 Casino Wheel</h2>
-        <h3>₦{wallet?.balance || 0}</h3>
-
-        <input
-          type="number"
-          value={stake}
-          onChange={e => setStake(e.target.value)}
-          placeholder="Enter stake"
-        />
-
-        {/* POINTER */}
-        <div style={{
-          position: "absolute",
-          top: "120px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          fontSize: 24,
-          zIndex: 10
-        }}>
-          🔻
-        </div>
-
-        {/* WHEEL */}
-        <div style={{
-          width: 260,
-          height: 260,
-          margin: "20px auto",
-          borderRadius: "50%",
-          background: gradient,
-          transform: `rotate(${rotation}deg)`,
-          transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
-        }}>
-          {segments.map((seg, i) => {
-            const angle = i * segmentAngle + segmentAngle / 2;
-            return (
-              <div key={i} style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: `rotate(${angle}deg) translate(0, -95px) rotate(-${angle}deg)`
-              }}>
-                <div style={{ fontWeight: "bold" }}>
-                  {seg.label}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <button onClick={spin}>
-          {spinning ? "Spinning..." : "SPIN"}
-        </button>
-
-        <h3>{result}</h3>
-      </div>
-
-      {/* RIGHT LIVE FEED */}
-      <div style={{ width: 150 }}>
-        {feed.map(f => (
-          <div key={f.id}>{f.msg}</div>
-        ))}
-      </div>
-
-      {/* FLOWERS */}
-      {flowers.map(f => (
-        <div key={f.id} style={{
-          position: "fixed",
-          top: "-20px",
-          left: `${f.left}%`,
-          animation: "fall 3s linear forwards"
-        }}>
-          🌸
-        </div>
-      ))}
-
-    </div>
-  );
-}
+      } else if (["X
