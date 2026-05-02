@@ -31,13 +31,8 @@ export default function CasinoWheel() {
     { label: "LOSE", type: "LOSE2", color: "#ef4444" },
     { label: "x1", type: "X1", color: "#f59e0b" },
     { label: "x10", type: "X10", color: "#f97316" },
-    { label: "JACKPOT", type: "JACKPOT", color: "#eab308" }
+    { label: "💎30", type: "JACKPOT", color: "#eab308" }
   ];
-
-  const map = {
-    LOSE: 0, X2: 1, FREE: 2, X3: 3,
-    LOSE2: 4, X1: 5, X10: 6, JACKPOT: 7
-  };
 
   const segmentAngle = 360 / segments.length;
 
@@ -48,7 +43,7 @@ export default function CasinoWheel() {
   useEffect(() => {
     loadWallet();
 
-    // flowers animation
+    // animation
     if (!document.getElementById("fall-style")) {
       const style = document.createElement("style");
       style.id = "fall-style";
@@ -60,16 +55,14 @@ export default function CasinoWheel() {
       document.head.appendChild(style);
     }
 
-    // 🔥 GOLD POPUP FEED
+    // gold popup feed
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
       const amount = Math.floor(Math.random() * 50000) + 2000;
 
       const id = Date.now();
-      const msg = `💰 ${name} from ${city} won ₦${amount}`;
-
-      setFeed(prev => [...prev, { id, msg }]);
+      setFeed(prev => [...prev, { id, msg: `💰 ${name} from ${city} won ₦${amount}` }]);
 
       setTimeout(() => {
         setFeed(prev => prev.filter(f => f.id !== id));
@@ -94,15 +87,17 @@ export default function CasinoWheel() {
     }
   }
 
+  // 🎯 UPDATED PROBABILITY
   const getResult = () => {
     const r = Math.random();
-    if (r < 0.60) return "LOSE";
-    if (r < 0.75) return "LOSE2";
-    if (r < 0.85) return "FREE";
+
+    if (r < 0.50) return "LOSE";
+    if (r < 0.65) return "LOSE2";
+    if (r < 0.75) return "FREE";
     if (r < 0.95) return "X1";
     if (r < 0.975) return "X2";
     if (r < 0.985) return "X3";
-    if (r < 0.998) return "X10";
+    if (r < 0.995) return "X10";
     return "JACKPOT";
   };
 
@@ -127,7 +122,9 @@ export default function CasinoWheel() {
     setWon(0);
 
     const outcome = getResult();
-    const index = map[outcome];
+
+    // ✅ SAFE INDEX (fix mismatch bug)
+    const index = segments.findIndex(s => s.type === outcome);
 
     const target = index * segmentAngle + segmentAngle / 2;
     const final = (360 - target) % 360;
@@ -169,6 +166,19 @@ export default function CasinoWheel() {
           { balance: newBalance }
         );
 
+        await databases.createDocument(
+          DATABASE_ID,
+          CASINO_COLLECTION,
+          ID.unique(),
+          {
+            userId: wallet.userId,
+            stake: amount,
+            win,
+            result: outcome,
+            createdAt: new Date().toISOString()
+          }
+        );
+
         setWallet(prev => ({ ...prev, balance: newBalance }));
 
       } catch (err) {
@@ -178,6 +188,7 @@ export default function CasinoWheel() {
 
       setSpinning(false);
 
+      // reset after result
       setTimeout(() => {
         setResult("");
         setWon(0);
@@ -237,6 +248,7 @@ export default function CasinoWheel() {
 
       <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
 
+        {/* POINTER */}
         <div style={{
           position: "absolute",
           top: -5,
@@ -248,6 +260,7 @@ export default function CasinoWheel() {
           zIndex: 10
         }} />
 
+        {/* WHEEL */}
         <div
           style={{
             width: 280,
