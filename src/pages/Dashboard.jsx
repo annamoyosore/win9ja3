@@ -13,6 +13,9 @@ import {
 // 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
+// 📞 WHATSAPP SUPPORT
+const WHATSAPP_NUMBER = "2348012345678";
+
 // =========================
 // FAKE ACTIVITY DATA
 // =========================
@@ -58,7 +61,7 @@ function playPop() {
 // =========================
 export default function Dashboard({
   goLobby,
-  goCasino,   // ✅ NEW
+  goCasino,
   goWallet,
   goTransactions,
   goAdmin,
@@ -68,6 +71,19 @@ export default function Dashboard({
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState([]);
+
+  // =========================
+  // WHATSAPP REDIRECT
+  // =========================
+  function openWhatsApp() {
+    const message = `Hello Support, I need help.
+
+Name: ${user?.name || "Unknown"}
+User ID: ${user?.$id || "N/A"}`;
+
+    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank");
+  }
 
   // =========================
   // LOAD USER + WALLET
@@ -164,17 +180,25 @@ export default function Dashboard({
         📊 Transactions
       </button>
 
-      {/* 🎲 WHOT (UNCHANGED) */}
+      {/* 🎲 WHOT */}
       <button style={styles.btn} onClick={() => goLobby?.()}>
         🎲 Play WHOT
       </button>
 
-      {/* 🎰 CASINO (NEW) */}
+      {/* 🎰 CASINO */}
       <button
         style={{ ...styles.btn, background: "#22c55e" }}
         onClick={() => goCasino?.()}
       >
         🎰 Play Casino Jackpot
+      </button>
+
+      {/* 📞 WHATSAPP SUPPORT */}
+      <button
+        style={{ ...styles.btn, background: "#25D366", color: "#000" }}
+        onClick={openWhatsApp}
+      >
+        💬 Contact Support (WhatsApp)
       </button>
 
       {/* ADMIN */}
