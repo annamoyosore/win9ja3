@@ -3,10 +3,8 @@ import {
   databases,
   DATABASE_ID,
   WALLET_COLLECTION,
-  CASINO_COLLECTION,
   account,
-  Query,
-  ID
+  Query
 } from "../lib/appwrite";
 
 export default function CasinoWheel({ goBack }) {
@@ -17,15 +15,12 @@ export default function CasinoWheel({ goBack }) {
   const [result, setResult] = useState("");
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
-  const [freeSpins, setFreeSpins] = useState(0);
   const [feed, setFeed] = useState([]);
+  const [flowers, setFlowers] = useState([]);
 
   const audioCtxRef = useRef(null);
   const tickerRef = useRef(null);
 
-  // =========================
-  // LOAD WALLET
-  // =========================
   useEffect(() => {
     (async () => {
       const u = await account.get();
@@ -38,18 +33,16 @@ export default function CasinoWheel({ goBack }) {
     })();
   }, []);
 
-  // =========================
   // 🎡 SEGMENTS
-  // =========================
   const segments = [
-    { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
+    { label: "❌", type: "LOSE", color: "#ef4444" },
     { label: "x2", type: "X2", color: "#22c55e" },
-    { label: "🎁 FREE", type: "FREE", color: "#3b82f6" },
+    { label: "🎁", type: "FREE", color: "#3b82f6" },
     { label: "x3", type: "X3", color: "#a855f7" },
-    { label: "❌ LOSE", type: "LOSE2", color: "#ef4444" },
+    { label: "❌", type: "LOSE2", color: "#ef4444" },
     { label: "x1", type: "X1", color: "#f59e0b" },
-    { label: "🔥 x10", type: "X10", color: "#f97316" },
-    { label: "💎 ×30", type: "JACKPOT", color: "#eab308" }
+    { label: "x10", type: "X10", color: "#f97316" },
+    { label: "💎", type: "JACKPOT", color: "#eab308" }
   ];
 
   const segmentAngle = 360 / segments.length;
@@ -65,28 +58,26 @@ export default function CasinoWheel({ goBack }) {
     JACKPOT: 7
   };
 
-  const pool = [
-    { type: "LOSE", weight: 0.39 },
-    { type: "LOSE2", weight: 0.05 },
-    { type: "X1", weight: 0.1 },
-    { type: "FREE", weight: 0.24 },
-    { type: "X2", weight: 0.18 },
-    { type: "X3", weight: 0.03 },
-    { type: "X10", weight: 0.009 },
-    { type: "JACKPOT", weight: 0.001 }
-  ];
-
   const getResult = () => {
+    const pool = [
+      { type: "LOSE", w: 0.39 },
+      { type: "LOSE2", w: 0.05 },
+      { type: "X1", w: 0.1 },
+      { type: "FREE", w: 0.24 },
+      { type: "X2", w: 0.18 },
+      { type: "X3", w: 0.03 },
+      { type: "X10", w: 0.009 },
+      { type: "JACKPOT", w: 0.001 }
+    ];
+
     let r = Math.random(), sum = 0;
     for (let p of pool) {
-      sum += p.weight;
+      sum += p.w;
       if (r <= sum) return p.type;
     }
   };
 
-  // =========================
   // 🔊 SOUND
-  // =========================
   const playTick = () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -114,48 +105,36 @@ export default function CasinoWheel({ goBack }) {
 
   const stopTicking = () => clearTimeout(tickerRef.current);
 
-  // =========================
-  // 📊 WIN INFO
-  // =========================
-  const getWinInfo = (s) => {
-    const n = Number(s || 0);
-    return [
-      { l: "x2", v: n * 2 },
-      { l: "x3", v: n * 3 },
-      { l: "x10", v: n * 10 },
-      { l: "x30", v: n * 30 }
-    ];
+  // 🌸 WIN EFFECT
+  const spawnFlowers = () => {
+    const f = Array.from({ length: 30 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100
+    }));
+    setFlowers(f);
+    setTimeout(() => setFlowers([]), 2500);
   };
 
-  // =========================
-  // 🔥 LIVE FEED
-  // =========================
+  // 🔥 FEED
   useEffect(() => {
-    const names = ["John", "Mike", "Emma", "David"];
     const i = setInterval(() => {
+      const names = ["John", "Emma", "David"];
       const name = names[Math.floor(Math.random() * names.length)];
-      const stake = [100, 500, 1000][Math.floor(Math.random() * 3)];
-      const mult = [2, 3, 10, 30][Math.floor(Math.random() * 4)];
-      const msg = mult === 30
-        ? `💎 ${name} hit ₦${(stake * mult).toLocaleString()}`
-        : `🎉 ${name} won ₦${(stake * mult).toLocaleString()}`;
+      const win = [200, 500, 3000][Math.floor(Math.random() * 3)];
 
       const id = Date.now();
-      setFeed(f => [...f, { id, msg }]);
+      setFeed(f => [...f, { id, msg: `🎉 ${name} won ₦${win}` }]);
 
       setTimeout(() => {
         setFeed(f => f.filter(x => x.id !== id));
-      }, 4000);
-
+      }, 3000);
     }, 3000);
 
     return () => clearInterval(i);
   }, []);
 
-  // =========================
   // 🎡 SPIN
-  // =========================
-  const spin = async () => {
+  const spin = () => {
     if (spinning) return;
 
     const amount = Number(stake);
@@ -171,24 +150,19 @@ export default function CasinoWheel({ goBack }) {
     const outcome = getResult();
     const index = map[outcome];
 
-    const targetAngle = index * segmentAngle + segmentAngle / 2;
-    const stopAngle = 360 - targetAngle;
+    const target = index * segmentAngle + segmentAngle / 2;
+    const stop = 360 - target;
 
-    const duration = 4500 + Math.random() * 1000;
+    const duration = 4500;
 
     startTicking();
 
-    setRotation(prev => prev % 360 + 1800 + stopAngle);
-
-    setTimeout(() => {
-      setRotation(prev => Math.round(prev / segmentAngle) * segmentAngle);
-    }, duration - 150);
+    setRotation(prev => prev % 360 + 1800 + stop);
 
     setTimeout(() => {
       stopTicking();
 
       let win = 0;
-
       if (outcome === "X2") win = amount * 2;
       if (outcome === "X3") win = amount * 3;
       if (outcome === "X10") win = amount * 10;
@@ -196,12 +170,8 @@ export default function CasinoWheel({ goBack }) {
 
       if (win > 0) {
         setWon(win);
-        setResult(`🎉 ₦${win.toLocaleString()}`);
-
-        setFeed(f => [...f, {
-          id: Date.now(),
-          msg: `🎉 You won ₦${win.toLocaleString()}`
-        }]);
+        setResult(`🎉 ₦${win}`);
+        spawnFlowers();
       } else {
         setResult("❌ Lose");
       }
@@ -210,74 +180,74 @@ export default function CasinoWheel({ goBack }) {
     }, duration);
   };
 
-  // =========================
-  // 🎨 UI
-  // =========================
+  // 📊 RETURNS
+  const getWinInfo = (s) => {
+    const n = Number(s || 0);
+    return [
+      { l: "x2", v: n * 2 },
+      { l: "x3", v: n * 3 },
+      { l: "x10", v: n * 10 },
+      { l: "x30", v: n * 30 }
+    ];
+  };
+
   return (
     <div style={{ display: "flex", color: "#fff" }}>
 
-      {/* LEFT PANEL */}
-      <div style={{ width: 150, padding: 10 }}>
+      {/* LEFT */}
+      <div style={{ width: 120 }}>
         <h4>Returns</h4>
-        {getWinInfo(stake).map((w, i) => (
-          <div key={i}>
-            {w.l} → ₦{w.v.toLocaleString()}
-          </div>
+        {getWinInfo(stake).map((w,i)=>(
+          <div key={i}>{w.l} → ₦{w.v}</div>
         ))}
       </div>
 
-      {/* CENTER GAME */}
-      <div style={{ flex: 1, textAlign: "center" }}>
+      {/* CENTER */}
+      <div style={{ flex:1, textAlign:"center" }}>
 
         <button onClick={goBack}>← Exit</button>
 
-        <h2>🎡 Casino Wheel</h2>
+        <h2>🎡 Wheel</h2>
 
         <input
           value={stake}
-          onChange={e => setStake(e.target.value)}
+          onChange={e=>setStake(e.target.value)}
           placeholder="₦50+"
         />
 
         {/* POINTER */}
-        <div style={{ fontSize: 26 }}>🔻</div>
+        <div style={{ fontSize:24 }}>🔻</div>
 
-        {/* WHEEL */}
-        <div
-          style={{
-            width: 260,
-            height: 260,
-            margin: "20px auto",
-            borderRadius: "50%",
-            position: "relative",
-            transform: `rotate(${rotation}deg)`,
-            transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
-          }}
-        >
-          {segments.map((seg, i) => (
-            <div
-              key={i}
-              style={{
-                position: "absolute",
-                width: "50%",
-                height: "50%",
-                top: "50%",
-                left: "50%",
-                transformOrigin: "0% 0%",
-                transform: `rotate(${i * segmentAngle}deg) skewY(${90 - segmentAngle}deg)`,
-                background: seg.color
-              }}
-            >
-              <span
-                style={{
-                  position: "absolute",
-                  top: "-100%",
-                  left: "0%",
-                  transform: `skewY(-${90 - segmentAngle}deg) rotate(${segmentAngle / 2}deg)`,
-                  fontSize: 10,
-                  fontWeight: "bold"
-                }}
-              >
+        {/* WHEEL FIX */}
+        <div style={{
+          width:260,
+          height:260,
+          margin:"20px auto",
+          borderRadius:"50%",
+          overflow:"hidden",
+          position:"relative",
+          transform:`rotate(${rotation}deg)`,
+          transition:"transform 4.5s cubic-bezier(.17,.67,.83,.67)"
+        }}>
+          {segments.map((seg,i)=>(
+            <div key={i} style={{
+              position:"absolute",
+              width:"50%",
+              height:"50%",
+              top:"50%",
+              left:"50%",
+              transformOrigin:"0% 0%",
+              transform:`rotate(${i*segmentAngle}deg) skewY(${90-segmentAngle}deg)`,
+              background:seg.color
+            }}>
+              <span style={{
+                position:"absolute",
+                top:"-90%",
+                left:"10%",
+                transform:`skewY(-${90-segmentAngle}deg) rotate(${segmentAngle/2}deg)`,
+                fontSize:10,
+                fontWeight:"bold"
+              }}>
                 {seg.label}
               </span>
             </div>
@@ -291,11 +261,20 @@ export default function CasinoWheel({ goBack }) {
         <h3>{result}</h3>
         <h2>₦{won}</h2>
 
+        {/* FLOWERS */}
+        {flowers.map(f=>(
+          <div key={f.id} style={{
+            position:"fixed",
+            top:0,
+            left:`${f.left}%`
+          }}>🌸</div>
+        ))}
+
       </div>
 
-      {/* RIGHT LIVE FEED */}
-      <div style={{ width: 160, padding: 10 }}>
-        {feed.map(f => (
+      {/* RIGHT */}
+      <div style={{ width:140 }}>
+        {feed.map(f=>(
           <div key={f.id}>{f.msg}</div>
         ))}
       </div>
