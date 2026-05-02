@@ -17,8 +17,8 @@ export default function CasinoWheel({ goBack }) {
   const [spinning, setSpinning] = useState(false);
   const [feed, setFeed] = useState([]);
 
-  const audioCtxRef = useRef(null);
   const tickerRef = useRef(null);
+  const audioCtxRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -46,6 +46,13 @@ export default function CasinoWheel({ goBack }) {
 
   const segmentAngle = 360 / segments.length;
 
+  // 🎨 CONIC GRADIENT (locks colors perfectly)
+  const gradient = `conic-gradient(
+    ${segments.map((s, i) =>
+      `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`
+    ).join(",")}
+  )`;
+
   const map = {
     LOSE: 0,
     X2: 1,
@@ -68,6 +75,7 @@ export default function CasinoWheel({ goBack }) {
       { type: "X10", w: 0.009 },
       { type: "JACKPOT", w: 0.001 }
     ];
+
     let r = Math.random(), sum = 0;
     for (let p of pool) {
       sum += p.w;
@@ -102,21 +110,6 @@ export default function CasinoWheel({ goBack }) {
   };
 
   const stopTicking = () => clearTimeout(tickerRef.current);
-
-  // 🔥 FEED
-  useEffect(() => {
-    const i = setInterval(() => {
-      const names = ["David", "Emma", "Mike"];
-      const name = names[Math.floor(Math.random() * names.length)];
-      const win = [200, 500, 3000][Math.floor(Math.random() * 3)];
-      const id = Date.now();
-      setFeed(f => [...f, { id, msg: `🎉 ${name} won ₦${win}` }]);
-      setTimeout(() => {
-        setFeed(f => f.filter(x => x.id !== id));
-      }, 3000);
-    }, 3000);
-    return () => clearInterval(i);
-  }, []);
 
   // 🎡 SPIN
   const spin = () => {
@@ -164,87 +157,62 @@ export default function CasinoWheel({ goBack }) {
     }, duration);
   };
 
-  // 📊 RETURNS
-  const getWinInfo = (s) => {
-    const n = Number(s || 0);
-    return [
-      { l: "x2", v: n * 2 },
-      { l: "x3", v: n * 3 },
-      { l: "x10", v: n * 10 },
-      { l: "x30", v: n * 30 }
-    ];
-  };
-
   return (
     <div style={{ display: "flex", color: "#fff" }}>
 
-      {/* LEFT PANEL */}
+      {/* LEFT RETURNS */}
       <div style={{ width: 120, padding: 10 }}>
         <h4>Returns</h4>
-        {getWinInfo(stake).map((w,i)=>(
-          <div key={i}>{w.l} → ₦{w.v}</div>
-        ))}
+        <div>x2 → ₦{Number(stake || 0) * 2}</div>
+        <div>x3 → ₦{Number(stake || 0) * 3}</div>
+        <div>x10 → ₦{Number(stake || 0) * 10}</div>
+        <div>x30 → ₦{Number(stake || 0) * 30}</div>
       </div>
 
       {/* CENTER */}
-      <div style={{ flex:1, textAlign:"center" }}>
+      <div style={{ flex: 1, textAlign: "center" }}>
 
         <button onClick={goBack}>← Exit</button>
 
         <h2>🎡 Casino Wheel</h2>
 
+        {/* 💰 WALLET */}
+        <h3>💰 ₦{Number(wallet?.balance || 0).toLocaleString()}</h3>
+
         <input
           value={stake}
-          onChange={e=>setStake(e.target.value)}
+          onChange={e => setStake(e.target.value)}
           placeholder="₦50+"
         />
 
         {/* POINTER */}
-        <div style={{ fontSize:24, zIndex:10 }}>🔻</div>
+        <div style={{ fontSize: 26 }}>🔻</div>
 
-        {/* WHEEL CONTAINER (STRICT) */}
+        {/* 🎡 WHEEL */}
         <div style={{
-          width:240,
-          height:240,
-          margin:"20px auto",
-          position:"relative",
-          zIndex:1
+          width: 260,
+          height: 260,
+          margin: "20px auto",
+          borderRadius: "50%",
+          background: gradient,
+          position: "relative",
+          transform: `rotate(${rotation}deg)`,
+          transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
         }}>
-
-          <div style={{
-            width:"100%",
-            height:"100%",
-            borderRadius:"50%",
-            overflow:"hidden",
-            transform:`rotate(${rotation}deg)`,
-            transition:"transform 4.5s cubic-bezier(.17,.67,.83,.67)"
-          }}>
-            {segments.map((seg,i)=>(
-              <div key={i} style={{
-                position:"absolute",
-                width:"50%",
-                height:"50%",
-                top:"50%",
-                left:"50%",
-                transformOrigin:"0% 0%",
-                transform:`rotate(${i*segmentAngle}deg) skewY(${90-segmentAngle}deg)`,
-                background:seg.color
-              }}>
-                <span style={{
-                  position:"absolute",
-                  top:"-85%",
-                  left:"15%",
-                  transform:`skewY(-${90-segmentAngle}deg) rotate(${segmentAngle/2}deg)`,
-                  fontSize:11,
-                  fontWeight:"900",
-                  color:"#fff"
-                }}>
-                  {seg.label}
-                </span>
-              </div>
-            ))}
-          </div>
-
+          {segments.map((seg, i) => (
+            <div key={i} style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: `rotate(${i * segmentAngle + segmentAngle / 2}deg) translate(90px) rotate(90deg)`,
+              transformOrigin: "center",
+              fontWeight: "900",
+              fontSize: 12,
+              color: "#fff"
+            }}>
+              {seg.label}
+            </div>
+          ))}
         </div>
 
         <button onClick={spin}>
@@ -256,9 +224,9 @@ export default function CasinoWheel({ goBack }) {
 
       </div>
 
-      {/* RIGHT PANEL */}
-      <div style={{ width:140, padding:10 }}>
-        {feed.map(f=>(
+      {/* RIGHT FEED */}
+      <div style={{ width: 140, padding: 10 }}>
+        {feed.map(f => (
           <div key={f.id}>{f.msg}</div>
         ))}
       </div>
