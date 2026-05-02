@@ -1,167 +1,334 @@
 import { useEffect, useState } from "react";
 import {
+account,
 databases,
 DATABASE_ID,
-Query,
-account,
-CASINO_COLLECTION,
 MATCH_COLLECTION,
-GAME_COLLECTION
+CASINO_COLLECTION,
+Query
 } from "../lib/appwrite";
 
-export default function Transactions({ goBack }) {
+const GAME_COLLECTION = "games";
+const DEPOSIT_COLLECTION = "deposit_requests";
+const WITHDRAW_COLLECTION = "withdrawal_requests";
 
-const [records, setRecords] = useState([]);
+export default function Transactions({ back }) {
+const [data, setData] = useState([]);
 const [loading, setLoading] = useState(true);
 
 useEffect(() => {
-loadTransactions();
+init();
 }, []);
 
-const loadTransactions = async () => {
+async function fetchAll(collection, queries = []) {
+let all = [];
+let offset = 0;
+const limit = 100;
+
+while (true) {
+  const res = await databases.listDocuments(
+    DATABASE_ID,
+    collection,
+    [...queries, Query.limit(limit), Query.offset(offset)]
+  );
+
+  all = [...all, ...res.documents];
+
+  if (res.documents.length < limit) break;
+  offset += limit;
+}
+
+return all;
+
+}
+
+async function init() {
 try {
-const user = await account.get();
-const userId = user.$id;
+setLoading(true);
+
+  const user = await account.get();
 
   // =========================
-  // CASINO
+  // MATCHES (UNCHANGED)
   // =========================
-  const casinoRes = await databases.listDocuments(
-    DATABASE_ID,
-    CASINO_COLLECTION,
-    [
-      Query.equal("userId", userId),
-      Query.limit(20)
-    ]
+  const hostMatches = await fetchAll(MATCH_COLLECTION, [
+    Query.equal("hostId", user.$id)
+  ]);
+
+  const opponentMatches = await fetchAll(MATCH_COLLECTION, [
+    Query.equal("opponentId", user.$id)
+  ]);
+
+  const matchMap = new Map();
+  [...hostMatches, ...opponentMatches].forEach(m => {
+    matchMap.set(m.$id, m);
+  });
+
+  const matches = Array.from(matchMap.values());
+
+  const matchList = await Promise.all(
+    matches.map(async (m) => {
+      let title = "";
+      let amount = 0;
+      let color = "#facc15";
+
+      let winnerId = m.winnerId || null;
+
+      if (!winnerId && m.gameId) {
+        try {
+          const g = await databases.getDocument(
+            DATABASE_ID,
+            GAME_COLLECTION,
+            m.gameId
+          );
+          winnerId = g.winnerId;
+        } catch {}
+      }
+
+      switch (m.status) {
+        case "waiting":
+        case "matched":
+        case "running":
+          title = "Game in progress";
+          amount = -Number(m.stake || 0);
+          break;
+
+        case "finished":
+          if (winnerId === user.$id) {
+            title = "Game Won";
+            amount = Number(m.pot || 0);
+            color = "#22c55e";
+          } else {
+            title = "Game Lost";
+            amount = -Number(m.stake || 0);
+            color = "#ef4444";
+          }
+          break;
+
+        default:
+          title = "Match Update";
+      }
+
+      return {
+        id: "match_" + m.$id,
+        title,
+        amount,
+        color,
+        status: m.status || "unknown",
+        createdAt: m.$createdAt
+      };
+    })
   );
 
-  const casinoData = casinoRes.documents.map(doc => ({
-    id: doc.$id,
-    source: "casino",
-    title: "🎡 Casino Spin",
-    status: doc.status,
-    amount: doc.netChange,
-    createdAt: doc.$createdAt
-  }));
+  // =========================
+  // CASINO (NEW)
+  // =========================
+  const casino = await fetchAll(CASINO_COLLECTION, [
+    Query.equal("userId", user.$id)
+  ]);
+
+  const casinoList = casino.map(c => {
+    let color = "#facc15";
+    let title = "Casino Spin";
+
+    if (c.status === "win") {
+      color = "#22c55e";
+      title = `Won (${c.outcome})`;
+    } else if (c.status === "lose") {
+      color = "#ef4444";
+      title = `Lost (${c.outcome})`;
+    } else if (c.status === "free") {
+      color = "purple";
+      title = "Free Spin";
+    } else if (c.status === "neutral") {
+      title = "Stake Returned";
+    }
+
+    return {
+      id: "casino_" + c.$id,
+      title,
+      amount: Number(c.netChange || 0),
+      color,
+      status: c.status,
+      createdAt: c.$createdAt
+    };
+  });
 
   // =========================
-  // MATCHES (OLD GAME)
+  // DEPOSITS (UNCHANGED)
   // =========================
-  const matchRes = await databases.listDocuments(
-    DATABASE_ID,
-    MATCH_COLLECTION,
-    [
-      Query.equal("userId", userId),
-      Query.limit(20)
-    ]
+  const deposits = await fetchAll(DEPOSIT_COLLECTION, [
+    Query.equal("userId", user.$id)
+  ]);
+
+  const depositList = deposits.map(d => {
+    let color = "#facc15";
+
+    if (d.status === "approved") color = "#22c55e";
+    if (d.status === "rejected") color = "#ef4444";
+
+    return {
+      id: "dep_" + d.$id,
+      title:
+        d.status === "approved"
+          ? "Deposit Successful"
+          : d.status === "rejected"
+          ? "Deposit Failed"
+          : "Deposit Pending",
+      amount: Number(d.amount || 0),
+      color,
+      status: d.status || "pending",
+      createdAt: d.$createdAt
+    };
+  });
+
+  // =========================
+  // WITHDRAWALS (UNCHANGED)
+  // =========================
+  const withdrawals = await fetchAll(WITHDRAW_COLLECTION, [
+    Query.equal("userId", user.$id)
+  ]);
+
+  const withdrawalList = withdrawals.map(w => {
+    let color = "#facc15";
+
+    if (w.status === "approved") color = "#ef4444";
+    if (w.status === "rejected") color = "#22c55e";
+
+    return {
+      id: "wd_" + w.$id,
+      title:
+        w.status === "approved"
+          ? "Withdrawal Sent"
+          : w.status === "rejected"
+          ? "Withdrawal Reversed"
+          : "Withdrawal Pending",
+      amount: -Number(w.amount || 0),
+      color,
+      status: w.status || "pending",
+      createdAt: w.$createdAt
+    };
+  });
+
+  // =========================
+  // MERGE ALL (UPDATED)
+  // =========================
+  const merged = [
+    ...matchList,
+    ...casinoList,   // ✅ ADDED HERE
+    ...depositList,
+    ...withdrawalList
+  ].sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
 
-  const matchData = matchRes.documents.map(doc => ({
-    id: doc.$id,
-    source: "match",
-    title: "🎯 Match Game",
-    status: doc.status || "played",
-    amount: doc.winAmount || 0,
-    createdAt: doc.$createdAt
-  }));
-
-  // =========================
-  // GAMES (GENERAL)
-  // =========================
-  const gameRes = await databases.listDocuments(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    [
-      Query.equal("userId", userId),
-      Query.limit(20)
-    ]
-  );
-
-  const gameData = gameRes.documents.map(doc => ({
-    id: doc.$id,
-    source: "game",
-    title: "🎮 Game",
-    status: doc.status || "played",
-    amount: doc.amount || 0,
-    createdAt: doc.$createdAt
-  }));
-
-  // =========================
-  // MERGE ALL
-  // =========================
-  const all = [
-    ...casinoData,
-    ...matchData,
-    ...gameData
-  ];
-
-  // =========================
-  // SORT (LATEST FIRST)
-  // =========================
-  all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-  setRecords(all);
+  setData(merged);
 
 } catch (err) {
-  console.error("Transaction load error:", err);
+  console.log("tx error", err);
 } finally {
   setLoading(false);
 }
 
-};
+}
+
+if (loading) {
+return (
+<div style={styles.loading}>
+<h2>📊 Activity</h2>
+<p>Loading...</p>
+</div>
+);
+}
 
 return (
-<div style={{ padding:20, color:"#fff" }}>
+<div style={styles.container}>
+<h1 style={styles.title}>📊 Activity</h1>
 
-  <button onClick={goBack}>← Back</button>
-
-  <h2>📜 Transactions</h2>
-
-  {loading && <p>Loading...</p>}
-
-  {!loading && records.length === 0 && (
-    <p>No transactions yet</p>
+  {data.length === 0 && (
+    <p style={styles.empty}>No activity yet</p>
   )}
 
-  {records.map((tx) => (
-
-    <div key={tx.id} style={{
-      background:"#1a1a1a",
-      padding:12,
-      marginBottom:10,
-      borderRadius:10,
-      borderLeft:
-        tx.status === "win" ? "5px solid gold" :
-        tx.status === "lose" ? "5px solid red" :
-        tx.status === "free" ? "5px solid purple" :
-        "5px solid gray"
-    }}>
-
-      <div style={{ fontWeight:"bold" }}>
-        {tx.title}
-      </div>
-
+  {data.map((t) => (
+    <div key={t.id} style={styles.card}>
       <div>
-        Status: {tx.status}
+        <p style={styles.titleText}>{t.title}</p>
+        <p style={styles.date}>
+          {new Date(t.createdAt).toLocaleString()}
+        </p>
       </div>
 
-      <div style={{
-        color: tx.amount > 0 ? "lime" :
-               tx.amount < 0 ? "red" : "#ccc",
-        fontWeight:"bold"
-      }}>
-        ₦{tx.amount}
+      <div style={styles.right}>
+        <p style={{ color: t.color, fontWeight: "bold" }}>
+          {t.amount > 0 ? "+" : ""}
+          ₦{Number(t.amount).toLocaleString()}
+        </p>
+        <p style={styles.status}>{t.status}</p>
       </div>
-
-      <div style={{ fontSize:12, opacity:0.7 }}>
-        {new Date(tx.createdAt).toLocaleString()}
-      </div>
-
     </div>
-
   ))}
 
+  <button style={styles.back} onClick={back}>
+    ← Back
+  </button>
 </div>
 
 );
 }
+
+const styles = {
+container: {
+padding: 20,
+minHeight: "100vh",
+background: "#020617",
+color: "#fff"
+},
+title: {
+fontSize: 26,
+marginBottom: 15,
+color: "gold"
+},
+empty: {
+opacity: 0.6,
+textAlign: "center"
+},
+card: {
+background: "#111827",
+padding: 15,
+borderRadius: 12,
+marginBottom: 10,
+display: "flex",
+justifyContent: "space-between"
+},
+titleText: {
+fontWeight: "bold"
+},
+date: {
+fontSize: 12,
+opacity: 0.6
+},
+right: {
+textAlign: "right"
+},
+status: {
+fontSize: 12,
+opacity: 0.7
+},
+back: {
+marginTop: 20,
+padding: 12,
+background: "#475569",
+border: "none",
+borderRadius: 10,
+color: "#fff",
+width: "100%"
+},
+loading: {
+minHeight: "100vh",
+display: "flex",
+justifyContent: "center",
+alignItems: "center",
+background: "#020617",
+color: "#fff"
+}
+};
