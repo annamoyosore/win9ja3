@@ -279,7 +279,33 @@ export default function CasinoWheel({ goBack }) {
 
         <h3>💰 ₦{Number(wallet?.balance || 0).toLocaleString()}</h3>
 
-        <input value={stake} onChange={e => setStake(e.target.value)} />
+        <div style={{ marginTop: 10 }}>
+  <input
+    type="number"
+    value={stake}
+    onChange={e => setStake(e.target.value)}
+    placeholder="Enter stake (min ₦50)"
+    style={{
+      padding: "10px",
+      borderRadius: "8px",
+      border: "2px solid #333",
+      outline: "none",
+      width: "160px",
+      fontWeight: "600",
+      textAlign: "center"
+    }}
+  />
+
+  {/* MIN STAKE INFO */}
+  <div style={{
+    marginTop: 6,
+    fontSize: 12,
+    color: "#f87171",
+    fontWeight: "700"
+  }}>
+    Minimum Stake: ₦50
+  </div>
+</div>
 
         <div style={{ fontSize: 26 }}>🔻</div>
 
