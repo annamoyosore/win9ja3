@@ -14,7 +14,7 @@ import {
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // 📞 WHATSAPP SUPPORT
-const WHATSAPP_NUMBER = "2348012345678";
+const WHATSAPP_NUMBER = "+1862 272-6355";
 
 // =========================
 // FAKE ACTIVITY DATA
