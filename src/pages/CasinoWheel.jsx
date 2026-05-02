@@ -19,6 +19,8 @@ export default function CasinoWheel({ goBack }) {
   const [spinning, setSpinning] = useState(false);
   const [feed, setFeed] = useState([]);
   const [popup, setPopup] = useState(null);
+
+  // ✅ NEW STATES
   const [countdown, setCountdown] = useState(null);
   const [flowers, setFlowers] = useState([]);
 
@@ -29,7 +31,7 @@ export default function CasinoWheel({ goBack }) {
   useEffect(() => {
     loadWallet();
 
-    // 🌸 Inject animation CSS once
+    // 🌸 inject animation once
     const style = document.createElement("style");
     style.innerHTML = `
       @keyframes fall {
@@ -135,20 +137,19 @@ export default function CasinoWheel({ goBack }) {
   const stopTicking = () => clearTimeout(tickerRef.current);
 
   // =========================
-  // FLOWERS
+  // 🌸 WIN ANIMATION
   // =========================
   function spawnFlowers() {
     const items = Array.from({ length: 30 }).map((_, i) => ({
       id: i,
       left: Math.random() * 100
     }));
-
     setFlowers(items);
     setTimeout(() => setFlowers([]), 3000);
   }
 
   // =========================
-  // COUNTDOWN
+  // ⏳ COUNTDOWN FIX
   // =========================
   function startCountdown() {
     if (countdownRef.current) clearInterval(countdownRef.current);
@@ -172,39 +173,6 @@ export default function CasinoWheel({ goBack }) {
       }
     }, 1000);
   }
-
-  // =========================
-  // LIVE FEED
-  // =========================
-  useEffect(() => {
-    const names = [
-      "David","Emma","John","Sophia","Michael","Daniel","Grace","Lucas",
-      "Ethan","Olivia","Noah","Liam","Ava","Mia","James","Logan",
-      "Elijah","Amelia","Harper","Evelyn","Abigail","Henry","Jack",
-      "Samuel","Leo","Benjamin","Chloe","Zoe","Victoria","Isabella"
-    ];
-
-    const interval = setInterval(() => {
-      const name = names[Math.floor(Math.random() * names.length)];
-      const stake = [100, 200, 500, 1000][Math.floor(Math.random() * 4)];
-      const mult = [2, 3, 10, 30][Math.floor(Math.random() * 4)];
-      const win = stake * mult;
-
-      const msg =
-        mult === 30
-          ? `💎 ${name} hit ₦${win.toLocaleString()}`
-          : `🎉 ${name} won ₦${win.toLocaleString()}`;
-
-      const id = Date.now();
-      setFeed(prev => [...prev, { id, msg }]);
-
-      setTimeout(() => {
-        setFeed(prev => prev.filter(f => f.id !== id));
-      }, 4000);
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   // =========================
   // SPIN
@@ -270,7 +238,8 @@ export default function CasinoWheel({ goBack }) {
 
         setWon(win);
         setPopup("win");
-        spawnFlowers();
+
+        spawnFlowers(); // ✅ restored animation
 
         setResult(`🎉 ₦${win.toLocaleString()}`);
       } else {
@@ -305,7 +274,7 @@ export default function CasinoWheel({ goBack }) {
         }
       );
 
-      startCountdown();
+      startCountdown(); // ✅ FIXED
       setSpinning(false);
 
     }, duration);
@@ -316,7 +285,9 @@ export default function CasinoWheel({ goBack }) {
 
       <div style={{ flex: 1, textAlign: "center" }}>
 
-        <button onClick={goBack} style={{ zIndex: 9999 }}>← Exit</button>
+        <button onClick={goBack} style={{ position: "relative", zIndex: 9999 }}>
+          ← Exit
+        </button>
 
         <h3>💰 ₦{Number(wallet?.balance || 0).toLocaleString()}</h3>
 
@@ -340,8 +311,7 @@ export default function CasinoWheel({ goBack }) {
           borderRadius: "50%",
           background: gradient,
           transform: `rotate(${rotation}deg)`
-        }}>
-        </div>
+        }} />
 
         <button onClick={spin}>
           {spinning ? "Spinning..." : "SPIN"}
@@ -351,17 +321,22 @@ export default function CasinoWheel({ goBack }) {
         <h2>₦{won}</h2>
 
         {countdown !== null && (
-          <div>Next spin in {countdown}s...</div>
+          <div style={{ color: "#facc15", fontWeight: "700" }}>
+            Next spin in {countdown}s...
+          </div>
         )}
 
       </div>
 
+      {/* 🌸 FLOWERS */}
       {flowers.map(f => (
         <div key={f.id} style={{
           position: "fixed",
           top: "-20px",
           left: `${f.left}%`,
-          animation: "fall 3s linear forwards"
+          fontSize: "20px",
+          animation: "fall 3s linear forwards",
+          pointerEvents: "none"
         }}>
           🌸
         </div>
