@@ -25,7 +25,7 @@ export default function CasinoWheel() {
   const [flashIndex, setFlashIndex] = useState(null);
   const [error, setError] = useState("");
 
-  // 🎯 STRICT COLOR LOCK
+  // 🎯 LOCKED SEGMENTS (color = meaning)
   const segments = [
     { label: "LOSE", type: "LOSE", color: "#ef4444" },
     { label: "x2", type: "X2", color: "#3b82f6" },
@@ -39,6 +39,7 @@ export default function CasinoWheel() {
 
   const segmentAngle = 360 / segments.length;
 
+  // ✅ ONLY place we shift coordinate system
   const gradient = `conic-gradient(from -90deg, ${segments
     .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
     .join(",")})`;
@@ -46,7 +47,7 @@ export default function CasinoWheel() {
   useEffect(() => {
     loadWallet();
 
-    // 🔥 RANDOM WINNERS FEED RESTORED
+    // 🔥 RANDOM WINNERS FEED
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
@@ -78,7 +79,7 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
-  // 🎯 EXACT PROBABILITY (no rounding errors)
+  // 🎯 WEIGHTED RESULTS
   const weighted = [
     ...Array(335).fill("LOSE"),
     ...Array(140).fill("LOSE2"),
@@ -148,8 +149,8 @@ export default function CasinoWheel() {
     const outcome = getResult();
     const index = segments.findIndex(s => s.type === outcome);
 
-    // 🎯 FINAL PERFECT ALIGNMENT
-    const centerAngle = index * segmentAngle + segmentAngle / 2;
+    // 🎯 PERFECT ALIGNMENT (NO OFFSET CONFUSION)
+    const centerAngle = (index + 0.5) * segmentAngle;
     const finalAngle = 360 * 5 + (360 - centerAngle);
 
     setRotation(prev => prev + finalAngle);
@@ -263,8 +264,7 @@ export default function CasinoWheel() {
             color: "gold",
             padding: 8,
             margin: 4,
-            borderRadius: 6,
-            border: "1px solid gold"
+            borderRadius: 6
           }}>
             {f.msg}
           </div>
@@ -313,13 +313,13 @@ export default function CasinoWheel() {
               position: "absolute",
               top: "50%",
               left: "50%",
-              width: 60,
-              marginLeft: -30,
+              width: 70,
+              marginLeft: -35,
               textAlign: "center",
               transform: `
-                rotate(${i * segmentAngle - 90 + segmentAngle / 2}deg)
-                translateY(-100px)
-                rotate(-${i * segmentAngle - 90 + segmentAngle / 2}deg)
+                rotate(${(i + 0.5) * segmentAngle}deg)
+                translateY(-95px)
+                rotate(-${(i + 0.5) * segmentAngle}deg)
               `,
               color: flashIndex === i ? "gold" : "#fff",
               fontWeight: "bold"
