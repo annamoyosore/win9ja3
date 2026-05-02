@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   databases,
   DATABASE_ID,
@@ -42,7 +42,6 @@ export default function CasinoWheel() {
     .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
     .join(",")})`;
 
-  // 🔊 tick sound
   function tick() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -60,7 +59,6 @@ export default function CasinoWheel() {
   useEffect(() => {
     loadWallet();
 
-    // flowers animation
     const style = document.createElement("style");
     style.innerHTML = `
       @keyframes fall {
@@ -69,7 +67,6 @@ export default function CasinoWheel() {
     `;
     document.head.appendChild(style);
 
-    // 🔥 live feed
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
@@ -100,14 +97,14 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
-  // ✅ UPDATED PROBABILITY
+  // ✅ UPDATED PROBABILITY (balanced to 100%)
   const getResult = () => {
     const r = Math.random();
 
-    if (r < 0.40) return "LOSE";
-    if (r < 0.55) return "LOSE2";
-    if (r < 0.65) return "FREE";
-    if (r < 0.85) return "X1";
+    if (r < 0.35) return "LOSE";
+    if (r < 0.52) return "LOSE2";
+    if (r < 0.62) return "FREE";
+    if (r < 0.82) return "X1";
     if (r < 0.975) return "X2";
     if (r < 0.985) return "X3";
     if (r < 0.995) return "X10";
@@ -133,7 +130,6 @@ export default function CasinoWheel() {
     setSpinning(true);
     setGlow(true);
 
-    // 🔊 tick loop
     let ticks = 0;
     const sound = setInterval(() => {
       tick();
@@ -141,6 +137,7 @@ export default function CasinoWheel() {
       if (ticks > 40) clearInterval(sound);
     }, 60);
 
+    // 💸 deduct first
     let deducted = wallet.balance - amount;
 
     await databases.updateDocument(
@@ -170,7 +167,7 @@ export default function CasinoWheel() {
         win = amount;
         setResult("🎁 FREE SPIN");
       } else if (mult) {
-        win = amount * mult;
+        win = amount * mult; // ✅ x1 returns stake correctly
         setResult(`🎉 WON ₦${win}`);
         setWon(win);
         if (mult >= 10) spawnFlowers();
@@ -261,7 +258,17 @@ export default function CasinoWheel() {
 
       <h3>💰 ₦{wallet?.balance || 0}</h3>
 
-      <input value={stake} onChange={e => setStake(e.target.value)} />
+      <input
+        type="number"
+        placeholder="Min ₦50"
+        value={stake}
+        onChange={e => setStake(e.target.value)}
+        style={{ padding: 10, textAlign: "center" }}
+      />
+
+      <p style={{ color: "red", fontWeight: "bold" }}>
+        Stake: ₦{stake || 0}
+      </p>
 
       <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
 
