@@ -20,12 +20,26 @@ export default function CasinoWheel({ goBack }) {
   const [feed, setFeed] = useState([]);
   const [popup, setPopup] = useState(null);
   const [countdown, setCountdown] = useState(null);
+  const [flowers, setFlowers] = useState([]);
 
   const tickerRef = useRef(null);
   const audioCtxRef = useRef(null);
+  const countdownRef = useRef(null);
 
   useEffect(() => {
     loadWallet();
+
+    // 🌸 Inject animation CSS once
+    const style = document.createElement("style");
+    style.innerHTML = `
+      @keyframes fall {
+        to {
+          transform: translateY(110vh) rotate(360deg);
+          opacity: 0;
+        }
+      }
+    `;
+    document.head.appendChild(style);
   }, []);
 
   async function loadWallet() {
@@ -121,18 +135,35 @@ export default function CasinoWheel({ goBack }) {
   const stopTicking = () => clearTimeout(tickerRef.current);
 
   // =========================
+  // FLOWERS
+  // =========================
+  function spawnFlowers() {
+    const items = Array.from({ length: 30 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100
+    }));
+
+    setFlowers(items);
+    setTimeout(() => setFlowers([]), 3000);
+  }
+
+  // =========================
   // COUNTDOWN
   // =========================
   function startCountdown() {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+
     let t = 4;
     setCountdown(t);
 
-    const interval = setInterval(() => {
+    countdownRef.current = setInterval(() => {
       t--;
       setCountdown(t);
 
       if (t <= 0) {
-        clearInterval(interval);
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+
         setCountdown(null);
         setResult("");
         setWon(0);
@@ -239,11 +270,7 @@ export default function CasinoWheel({ goBack }) {
 
         setWon(win);
         setPopup("win");
-
-        setFeed(prev => [
-          ...prev,
-          { id: Date.now(), msg: `🎉 You won ₦${win.toLocaleString()}` }
-        ]);
+        spawnFlowers();
 
         setResult(`🎉 ₦${win.toLocaleString()}`);
       } else {
@@ -287,26 +314,9 @@ export default function CasinoWheel({ goBack }) {
   return (
     <div style={{ display: "flex", color: "#fff" }}>
 
-      {/* LEFT */}
-      <div style={{ width: 120, padding: 10 }}>
-        <h4>Returns</h4>
-        <div>x2 → ₦{stake * 2}</div>
-        <div>x3 → ₦{stake * 3}</div>
-        <div>x10 → ₦{stake * 10}</div>
-        <div>x30 → ₦{stake * 30}</div>
-      </div>
-
-      {/* CENTER */}
       <div style={{ flex: 1, textAlign: "center" }}>
 
-        <button
-          onClick={goBack}
-          style={{ position: "relative", zIndex: 9999 }}
-        >
-          ← Exit
-        </button>
-
-        <h2>🎡 Casino Wheel</h2>
+        <button onClick={goBack} style={{ zIndex: 9999 }}>← Exit</button>
 
         <h3>💰 ₦{Number(wallet?.balance || 0).toLocaleString()}</h3>
 
@@ -317,7 +327,7 @@ export default function CasinoWheel({ goBack }) {
           placeholder="Enter stake (min ₦50)"
         />
 
-        <div style={{ color: "#f87171", fontWeight: "700", fontSize: 12 }}>
+        <div style={{ color: "#f87171", fontWeight: "700" }}>
           Minimum Stake: ₦50
         </div>
 
@@ -328,31 +338,9 @@ export default function CasinoWheel({ goBack }) {
           height: 260,
           margin: "20px auto",
           borderRadius: "50%",
-          position: "relative",
           background: gradient,
-          transform: `rotate(${rotation}deg)`,
-          transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
+          transform: `rotate(${rotation}deg)`
         }}>
-          {segments.map((seg, i) => {
-            const angle = i * segmentAngle + segmentAngle / 2;
-            return (
-              <div key={i} style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: `rotate(${angle}deg) translate(0, -95px) rotate(-${angle}deg)`
-              }}>
-                <div style={{
-                  fontWeight: "900",
-                  fontSize: 13,
-                  letterSpacing: "0.6px",
-                  textShadow: "0 3px 6px black"
-                }}>
-                  {seg.label}
-                </div>
-              </div>
-            );
-          })}
         </div>
 
         <button onClick={spin}>
@@ -363,32 +351,21 @@ export default function CasinoWheel({ goBack }) {
         <h2>₦{won}</h2>
 
         {countdown !== null && (
-          <div style={{ color: "#facc15", fontWeight: "700" }}>
-            Next spin in {countdown}s...
-          </div>
-        )}
-
-        {popup === "win" && (
-          <div style={{
-            position: "fixed",
-            top: "40%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            background: "#000",
-            padding: 20,
-            borderRadius: 10,
-            zIndex: 999
-          }}>
-            🎉 ₦{won.toLocaleString()}
-          </div>
+          <div>Next spin in {countdown}s...</div>
         )}
 
       </div>
 
-      {/* RIGHT */}
-      <div style={{ width: 150 }}>
-        {feed.map(f => <div key={f.id}>{f.msg}</div>)}
-      </div>
+      {flowers.map(f => (
+        <div key={f.id} style={{
+          position: "fixed",
+          top: "-20px",
+          left: `${f.left}%`,
+          animation: "fall 3s linear forwards"
+        }}>
+          🌸
+        </div>
+      ))}
 
     </div>
   );
