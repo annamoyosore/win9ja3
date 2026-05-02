@@ -51,11 +51,23 @@ export default function CasinoWheel() {
     .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
     .join(",")})`;
 
-  // =========================
-  // INIT
-  // =========================
   useEffect(() => {
     loadWallet();
+
+    // ✅ animation keyframes (safe)
+    if (!document.getElementById("fall-style")) {
+      const style = document.createElement("style");
+      style.id = "fall-style";
+      style.innerHTML = `
+        @keyframes fall {
+          to {
+            transform: translateY(110vh) rotate(360deg);
+            opacity: 0;
+          }
+        }
+      `;
+      document.head.appendChild(style);
+    }
 
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
@@ -84,11 +96,9 @@ export default function CasinoWheel() {
         WALLET_COLLECTION,
         [Query.equal("userId", u.$id)]
       );
-      if (res.documents.length) {
-        setWallet(res.documents[0]);
-      }
+      if (res.documents.length) setWallet(res.documents[0]);
     } catch (err) {
-      console.error("Wallet load failed:", err);
+      console.error(err);
     }
   }
 
@@ -113,23 +123,13 @@ export default function CasinoWheel() {
     setTimeout(() => setFlowers([]), 3000);
   }
 
-  // =========================
-  // SPIN
-  // =========================
   const spin = async () => {
     if (spinning || !wallet) return;
 
     const amount = Number(stake);
 
-    if (!amount || amount < 50) {
-      setResult("Minimum ₦50");
-      return;
-    }
-
-    if (wallet.balance < amount) {
-      setResult("No balance");
-      return;
-    }
+    if (!amount || amount < 50) return setResult("Minimum ₦50");
+    if (wallet.balance < amount) return setResult("No balance");
 
     setSpinning(true);
     setResult("");
@@ -157,12 +157,7 @@ export default function CasinoWheel() {
           setResult("⚖️ RETURNED");
 
         } else {
-          const mult = {
-            X2: 2,
-            X3: 3,
-            X10: 10,
-            JACKPOT: 30
-          }[outcome];
+          const mult = { X2: 2, X3: 3, X10: 10, JACKPOT: 30 }[outcome];
 
           if (mult) {
             win = amount * mult;
@@ -176,7 +171,6 @@ export default function CasinoWheel() {
           }
         }
 
-        // ✅ UPDATE WALLET
         await databases.updateDocument(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -184,7 +178,6 @@ export default function CasinoWheel() {
           { balance: newBalance }
         );
 
-        // ✅ SAVE GAME
         await databases.createDocument(
           DATABASE_ID,
           CASINO_COLLECTION,
@@ -198,23 +191,28 @@ export default function CasinoWheel() {
           }
         );
 
-        // ✅ FIXED SYNTAX ERROR HERE
         setWallet(prev => ({ ...prev, balance: newBalance }));
 
       } catch (err) {
-        console.error("Spin error:", err);
+        console.error(err);
         setResult("Error occurred");
       }
 
       setSpinning(false);
+
+      // ✅ RESET AFTER RESULT (2 seconds delay)
+      setTimeout(() => {
+        setResult("");
+        setWon(0);
+        setRotation(0);
+        setStake("");
+      }, 2000);
+
     }, 4000);
   };
 
-  // =========================
-  // UI
-  // =========================
   return (
-    <div style={{ textAlign: "center", padding: 20 }}>
+    <div style={{ textAlign: "center", padding: 20, paddingTop: 120 }}>
 
       {/* RETURNS */}
       <div style={{
@@ -223,18 +221,19 @@ export default function CasinoWheel() {
         left: 10,
         background: "#000",
         color: "gold",
-        padding: 12,
+        padding: 10,
         borderRadius: 10,
         border: "1px solid gold",
         fontWeight: "bold",
-        zIndex: 999
+        fontSize: 12,
+        maxWidth: 130
       }}>
         🎯 RETURNS
         <div>x1 → stake</div>
         <div>x2 → double</div>
         <div>x3 → triple</div>
         <div>x10 → big</div>
-        <div>💎 x30 → jackpot</div>
+        <div>💎 x30</div>
       </div>
 
       {/* LIVE FEED */}
@@ -254,10 +253,21 @@ export default function CasinoWheel() {
         ))}
       </div>
 
-      <h2>🎡 Casino Wheel</h2>
+      <h3>💰 Balance: ₦{wallet?.balance || 0}</h3>
 
-      {/* POINTER + WHEEL */}
-      <div style={{ position: "relative", width: 300, margin: "0 auto" }}>
+      <input
+        type="number"
+        placeholder="Enter stake"
+        value={stake}
+        onChange={e => setStake(e.target.value)}
+        style={{ padding: 10 }}
+      />
+
+      <p style={{ color: "red", fontWeight: "bold" }}>
+        Stake: ₦{stake || 0}
+      </p>
+
+      <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
 
         <div style={{
           position: "absolute",
@@ -281,36 +291,8 @@ export default function CasinoWheel() {
               ? "transform 4s cubic-bezier(0.2,0.8,0.2,1)"
               : "none"
           }}
-        >
-          {segments.map((s, i) => (
-            <div
-              key={i}
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: `rotate(${i * segmentAngle}deg) translate(0,-120px) rotate(-${i * segmentAngle}deg)`,
-                fontSize: 13,
-                fontWeight: "bold",
-                color: "#fff"
-              }}
-            >
-              {s.label}
-            </div>
-          ))}
-        </div>
+        />
       </div>
-
-      <input
-        type="number"
-        placeholder="Stake"
-        value={stake}
-        onChange={e => setStake(e.target.value)}
-      />
-
-      <p style={{ color: "red", fontWeight: "bold" }}>
-        Stake: ₦{stake || 0}
-      </p>
 
       <button onClick={spin} disabled={spinning}>
         {spinning ? "Spinning..." : "Spin"}
@@ -319,9 +301,6 @@ export default function CasinoWheel() {
       <h3>{result}</h3>
       {won > 0 && <h2 style={{ color: "gold" }}>₦{won}</h2>}
 
-      <h4>Balance: ₦{wallet?.balance || 0}</h4>
-
-      {/* FLOWERS */}
       {flowers.map(f => (
         <div key={f.id} style={{
           position: "fixed",
