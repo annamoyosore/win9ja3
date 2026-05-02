@@ -55,7 +55,7 @@ export default function CasinoWheel() {
       document.head.appendChild(style);
     }
 
-    // gold popup feed
+    // popup feed
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
@@ -83,7 +83,7 @@ export default function CasinoWheel() {
       );
       if (res.documents.length) setWallet(res.documents[0]);
     } catch (err) {
-      console.error(err);
+      console.error("LOAD WALLET ERROR:", err);
     }
   }
 
@@ -122,8 +122,6 @@ export default function CasinoWheel() {
     setWon(0);
 
     const outcome = getResult();
-
-    // ✅ SAFE INDEX (fix mismatch bug)
     const index = segments.findIndex(s => s.type === outcome);
 
     const target = index * segmentAngle + segmentAngle / 2;
@@ -132,33 +130,35 @@ export default function CasinoWheel() {
     setRotation(prev => (prev % 360) + 360 * 5 + final);
 
     setTimeout(async () => {
-      try {
-        let newBalance = wallet.balance - amount;
-        let win = 0;
 
-        if (outcome === "FREE") {
-          newBalance += amount;
-          setResult("🎁 FREE SPIN");
+      let newBalance = wallet.balance - amount;
+      let win = 0;
 
-        } else if (outcome === "X1") {
-          newBalance += amount;
-          setResult("⚖️ RETURNED");
+      if (outcome === "FREE") {
+        newBalance += amount;
+        setResult("🎁 FREE SPIN");
 
+      } else if (outcome === "X1") {
+        newBalance += amount;
+        setResult("⚖️ RETURNED");
+
+      } else {
+        const mult = { X2: 2, X3: 3, X10: 10, JACKPOT: 30 }[outcome];
+
+        if (mult) {
+          win = amount * mult;
+          newBalance += win;
+          setResult(`🎉 WON ₦${win}`);
+          setWon(win);
+
+          if (mult >= 10) spawnFlowers();
         } else {
-          const mult = { X2: 2, X3: 3, X10: 10, JACKPOT: 30 }[outcome];
-
-          if (mult) {
-            win = amount * mult;
-            newBalance += win;
-            setResult(`🎉 WON ₦${win}`);
-            setWon(win);
-
-            if (mult >= 10) spawnFlowers();
-          } else {
-            setResult("❌ LOST");
-          }
+          setResult("❌ LOST");
         }
+      }
 
+      try {
+        // ✅ wallet update MUST succeed
         await databases.updateDocument(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -166,29 +166,33 @@ export default function CasinoWheel() {
           { balance: newBalance }
         );
 
+        setWallet(prev => ({ ...prev, balance: newBalance }));
+
+      } catch (err) {
+        console.error("WALLET UPDATE ERROR:", err);
+        setResult("Wallet error");
+      }
+
+      try {
+        // ✅ logging (non-blocking)
         await databases.createDocument(
           DATABASE_ID,
           CASINO_COLLECTION,
           ID.unique(),
           {
-            userId: wallet.userId,
-            stake: amount,
-            win,
-            result: outcome,
+            userId: wallet.userId || wallet.$id,
+            stake: Number(amount),
+            win: Number(win),
+            result: String(outcome),
             createdAt: new Date().toISOString()
           }
         );
-
-        setWallet(prev => ({ ...prev, balance: newBalance }));
-
       } catch (err) {
-        console.error(err);
-        setResult("Error occurred");
+        console.warn("LOGGING FAILED (ignored):", err);
       }
 
       setSpinning(false);
 
-      // reset after result
       setTimeout(() => {
         setResult("");
         setWon(0);
@@ -202,18 +206,16 @@ export default function CasinoWheel() {
   return (
     <div style={{ textAlign: "center", padding: 20, paddingTop: 120 }}>
 
-      {/* RETURNS */}
       <div style={{
         position: "fixed",
         top: 10,
         left: 10,
         background: "#000",
         color: "gold",
-        fontWeight: "bold",
         padding: 10,
         borderRadius: 10
       }}>
-        🎯 RETURNS  
+        🎯 RETURNS
         <div>x1 → stake</div>
         <div>x2 → double</div>
         <div>x3 → triple</div>
@@ -221,7 +223,6 @@ export default function CasinoWheel() {
         <div>💎 x30</div>
       </div>
 
-      {/* GOLD FEED */}
       <div style={{ position: "fixed", top: 10, right: 10 }}>
         {feed.map(f => (
           <div key={f.id} style={{
@@ -248,7 +249,6 @@ export default function CasinoWheel() {
 
       <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
 
-        {/* POINTER */}
         <div style={{
           position: "absolute",
           top: -5,
@@ -260,7 +260,6 @@ export default function CasinoWheel() {
           zIndex: 10
         }} />
 
-        {/* WHEEL */}
         <div
           style={{
             width: 280,
