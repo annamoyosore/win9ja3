@@ -19,6 +19,7 @@ export default function CasinoWheel({ goBack }) {
   const [spinning, setSpinning] = useState(false);
   const [feed, setFeed] = useState([]);
   const [popup, setPopup] = useState(null);
+  const [countdown, setCountdown] = useState(null);
 
   const tickerRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -38,7 +39,7 @@ export default function CasinoWheel({ goBack }) {
   }
 
   // =========================
-  // SEGMENTS (EQUAL SLICES)
+  // SEGMENTS
   // =========================
   const segments = [
     { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
@@ -69,7 +70,7 @@ export default function CasinoWheel({ goBack }) {
   };
 
   // =========================
-  // RESULT ENGINE (UNCHANGED)
+  // RESULT ENGINE
   // =========================
   const getResult = () => {
     const pool = [
@@ -120,6 +121,28 @@ export default function CasinoWheel({ goBack }) {
   const stopTicking = () => clearTimeout(tickerRef.current);
 
   // =========================
+  // COUNTDOWN
+  // =========================
+  function startCountdown() {
+    let t = 4;
+    setCountdown(t);
+
+    const interval = setInterval(() => {
+      t--;
+      setCountdown(t);
+
+      if (t <= 0) {
+        clearInterval(interval);
+        setCountdown(null);
+        setResult("");
+        setWon(0);
+        setPopup(null);
+        setRotation(prev => prev % 360);
+      }
+    }, 1000);
+  }
+
+  // =========================
   // LIVE FEED
   // =========================
   useEffect(() => {
@@ -153,7 +176,7 @@ export default function CasinoWheel({ goBack }) {
   }, []);
 
   // =========================
-  // SPIN (UNCHANGED)
+  // SPIN
   // =========================
   const spin = async () => {
     if (spinning || !wallet) return;
@@ -255,6 +278,7 @@ export default function CasinoWheel({ goBack }) {
         }
       );
 
+      startCountdown();
       setSpinning(false);
 
     }, duration);
@@ -274,42 +298,31 @@ export default function CasinoWheel({ goBack }) {
 
       {/* CENTER */}
       <div style={{ flex: 1, textAlign: "center" }}>
-        <button onClick={goBack}>← Exit</button>
+
+        <button
+          onClick={goBack}
+          style={{ position: "relative", zIndex: 9999 }}
+        >
+          ← Exit
+        </button>
+
         <h2>🎡 Casino Wheel</h2>
 
         <h3>💰 ₦{Number(wallet?.balance || 0).toLocaleString()}</h3>
 
-        <div style={{ marginTop: 10 }}>
-  <input
-    type="number"
-    value={stake}
-    onChange={e => setStake(e.target.value)}
-    placeholder="Enter stake (min ₦50)"
-    style={{
-      padding: "10px",
-      borderRadius: "8px",
-      border: "2px solid #333",
-      outline: "none",
-      width: "160px",
-      fontWeight: "600",
-      textAlign: "center"
-    }}
-  />
+        <input
+          type="number"
+          value={stake}
+          onChange={e => setStake(e.target.value)}
+          placeholder="Enter stake (min ₦50)"
+        />
 
-  {/* MIN STAKE INFO */}
-  <div style={{
-    marginTop: 6,
-    fontSize: 12,
-    color: "#f87171",
-    fontWeight: "700"
-  }}>
-    Minimum Stake: ₦50
-  </div>
-</div>
+        <div style={{ color: "#f87171", fontWeight: "700", fontSize: 12 }}>
+          Minimum Stake: ₦50
+        </div>
 
         <div style={{ fontSize: 26 }}>🔻</div>
 
-        {/* 🎡 WHEEL WITH LABELS */}
         <div style={{
           width: 260,
           height: 260,
@@ -327,33 +340,19 @@ export default function CasinoWheel({ goBack }) {
                 position: "absolute",
                 top: "50%",
                 left: "50%",
-                transform: `rotate(${angle}deg) translate(0, -95px) rotate(-${angle}deg)`,
-                width: 70,
-                textAlign: "center"
+                transform: `rotate(${angle}deg) translate(0, -95px) rotate(-${angle}deg)`
               }}>
                 <div style={{
                   fontWeight: "900",
-                  fontSize: 12,
-                  color: "#fff",
-                  textShadow: "0 2px 4px rgba(0,0,0,0.9)"
+                  fontSize: 13,
+                  letterSpacing: "0.6px",
+                  textShadow: "0 3px 6px black"
                 }}>
                   {seg.label}
                 </div>
               </div>
             );
           })}
-
-          <div style={{
-            position: "absolute",
-            width: 50,
-            height: 50,
-            borderRadius: "50%",
-            background: "#111",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            border: "3px solid #fff"
-          }} />
         </div>
 
         <button onClick={spin}>
@@ -363,6 +362,12 @@ export default function CasinoWheel({ goBack }) {
         <h3>{result}</h3>
         <h2>₦{won}</h2>
 
+        {countdown !== null && (
+          <div style={{ color: "#facc15", fontWeight: "700" }}>
+            Next spin in {countdown}s...
+          </div>
+        )}
+
         {popup === "win" && (
           <div style={{
             position: "fixed",
@@ -371,11 +376,13 @@ export default function CasinoWheel({ goBack }) {
             transform: "translate(-50%, -50%)",
             background: "#000",
             padding: 20,
-            borderRadius: 10
+            borderRadius: 10,
+            zIndex: 999
           }}>
             🎉 ₦{won.toLocaleString()}
           </div>
         )}
+
       </div>
 
       {/* RIGHT */}
