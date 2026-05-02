@@ -9,17 +9,10 @@ import {
   ID
 } from "../lib/appwrite";
 
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.9";
 
-const names = [
-  "Emeka","Tunde","Blessing","Chioma","Ibrahim",
-  "Sadiq","Zainab","Kelvin","Uche","Mary",
-  "Aisha","David","Samuel","Joy","Paul"
-];
-
-const cities = [
-  "Lagos","Abuja","Ibadan","Kano","Enugu"
-];
+const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David"];
+const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
 
 export default function CasinoWheel({ goBack }) {
 
@@ -32,31 +25,24 @@ export default function CasinoWheel({ goBack }) {
   const [feed, setFeed] = useState([]);
   const [flowers, setFlowers] = useState([]);
 
-  const tickerRef = useRef(null);
-  const audioCtxRef = useRef(null);
-
-  // 🎯 PROBABILITY
+  // =========================
+  // 🎯 PROBABILITY (YOUR REQUEST)
+  // =========================
   const pool = [
-    { type: "LOSE", w: 0.45 },
+    { type: "LOSE", w: 0.70 },
     { type: "LOSE2", w: 0.15 },
-    { type: "X1", w: 0.1 },
-    { type: "FREE", w: 0.1 },
-    { type: "X2", w: 0.12 },
-    { type: "X3", w: 0.03 },
-    { type: "X10", w: 0.009 },
-    { type: "JACKPOT", w: 0.001 }
+    { type: "FREE", w: 0.10 },
+    { type: "X1", w: 0.05 }
   ];
 
-  // SEGMENTS
+  // =========================
+  // 🎡 SEGMENTS (MATCHING LOGIC)
+  // =========================
   const segments = [
     { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
-    { label: "x2", type: "X2", color: "#22c55e" },
     { label: "🎁 FREE", type: "FREE", color: "#3b82f6" },
-    { label: "x3", type: "X3", color: "#a855f7" },
     { label: "❌ LOSE", type: "LOSE2", color: "#ef4444" },
-    { label: "x1", type: "X1", color: "#f59e0b" },
-    { label: "🔥 x10", type: "X10", color: "#f97316" },
-    { label: "💎 ×30", type: "JACKPOT", color: "#eab308" }
+    { label: "⚖️ x1", type: "X1", color: "#f59e0b" }
   ];
 
   const segmentAngle = 360 / segments.length;
@@ -66,21 +52,23 @@ export default function CasinoWheel({ goBack }) {
     .join(",")})`;
 
   const map = {
-    LOSE: 0, X2: 1, FREE: 2, X3: 3,
-    LOSE2: 4, X1: 5, X10: 6, JACKPOT: 7
+    LOSE: 0,
+    FREE: 1,
+    LOSE2: 2,
+    X1: 3
   };
 
   useEffect(() => {
     loadWallet();
 
-    // version refresh
+    // version update (force refresh)
     const saved = localStorage.getItem("app_version");
     if (saved !== APP_VERSION) {
       localStorage.setItem("app_version", APP_VERSION);
       window.location.reload();
     }
 
-    // flowers animation
+    // flower animation
     const style = document.createElement("style");
     style.innerHTML = `
       @keyframes fall {
@@ -89,7 +77,7 @@ export default function CasinoWheel({ goBack }) {
     `;
     document.head.appendChild(style);
 
-    // 🔥 FAKE LIVE FEED
+    // fake live feed
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
@@ -132,7 +120,7 @@ export default function CasinoWheel({ goBack }) {
   };
 
   function spawnFlowers() {
-    const items = Array.from({ length: 25 }).map((_, i) => ({
+    const items = Array.from({ length: 20 }).map((_, i) => ({
       id: i,
       left: Math.random() * 100
     }));
@@ -155,10 +143,12 @@ export default function CasinoWheel({ goBack }) {
     const outcome = getResult();
     const index = map[outcome];
 
-    const target = index * segmentAngle + segmentAngle / 2;
-    const stop = 360 - target;
+    // 🎯 PERFECT POINTER FIX
+    const targetAngle = index * segmentAngle + segmentAngle / 2;
+    const finalAngle = (360 - targetAngle) % 360;
+    const spins = 5 * 360;
 
-    setRotation(prev => prev % 360 + 1800 + stop);
+    setRotation(prev => prev % 360 + spins + finalAngle);
 
     setTimeout(async () => {
 
@@ -177,20 +167,10 @@ export default function CasinoWheel({ goBack }) {
         status = "neutral";
         setResult("⚖️ Stake Returned");
 
-      } else if (!(outcome === "LOSE" || outcome === "LOSE2")) {
-        const mult = outcome === "JACKPOT" ? 30 : parseInt(outcome.replace("X",""));
-        win = amount * mult;
-        newBalance += win;
-
-        status = "win";
-        setWon(win);
-        spawnFlowers();
-        setResult(`🎉 ₦${win.toLocaleString()}`);
       } else {
         setResult(`❌ Lost ₦${amount}`);
       }
 
-      // wallet update
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -200,7 +180,6 @@ export default function CasinoWheel({ goBack }) {
 
       setWallet(prev => ({ ...prev, balance: newBalance }));
 
-      // save spin
       try {
         const u = await account.get();
         await databases.createDocument(
@@ -222,25 +201,24 @@ export default function CasinoWheel({ goBack }) {
         );
       } catch {}
 
+      if (status === "win") spawnFlowers();
+
       setSpinning(false);
 
     }, 4500);
   };
 
   return (
-    <div style={{ display: "flex", color: "#fff" }}>
+    <div style={{ display: "flex", color: "#fff", position: "relative" }}>
 
-      {/* LEFT - RETURNS */}
+      {/* LEFT */}
       <div style={{ width: 120 }}>
         <h4>Returns</h4>
-        <div>x2 → ₦{stake * 2}</div>
-        <div>x3 → ₦{stake * 3}</div>
-        <div>x10 → ₦{stake * 10}</div>
-        <div>x30 → ₦{stake * 30}</div>
+        <div>x1 → ₦{stake}</div>
       </div>
 
       {/* CENTER */}
-      <div style={{ flex: 1, textAlign: "center" }}>
+      <div style={{ flex: 1, textAlign: "center", position: "relative" }}>
         <button onClick={goBack}>← Exit</button>
 
         <h2>🎡 Casino Wheel</h2>
@@ -253,7 +231,17 @@ export default function CasinoWheel({ goBack }) {
           placeholder="Enter stake"
         />
 
-        <div>🔻</div>
+        {/* POINTER */}
+        <div style={{
+          position: "absolute",
+          top: "120px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          fontSize: 24,
+          zIndex: 10
+        }}>
+          🔻
+        </div>
 
         {/* WHEEL */}
         <div style={{
@@ -287,10 +275,9 @@ export default function CasinoWheel({ goBack }) {
         </button>
 
         <h3>{result}</h3>
-        <h2>₦{won}</h2>
       </div>
 
-      {/* RIGHT - LIVE FEED */}
+      {/* RIGHT FEED */}
       <div style={{ width: 150 }}>
         {feed.map(f => (
           <div key={f.id}>{f.msg}</div>
