@@ -9,6 +9,9 @@ import {
   ID
 } from "../lib/appwrite";
 
+const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David","Zainab"];
+const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
+
 export default function CasinoWheel() {
 
   const [wallet, setWallet] = useState(null);
@@ -17,11 +20,12 @@ export default function CasinoWheel() {
   const [result, setResult] = useState("");
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
+  const [feed, setFeed] = useState([]);
   const [glow, setGlow] = useState(false);
   const [flashIndex, setFlashIndex] = useState(null);
   const [error, setError] = useState("");
 
-  // 🎯 LOCKED SEGMENTS (color = meaning)
+  // 🎯 STRICT COLOR LOCK
   const segments = [
     { label: "LOSE", type: "LOSE", color: "#ef4444" },
     { label: "x2", type: "X2", color: "#3b82f6" },
@@ -41,6 +45,27 @@ export default function CasinoWheel() {
 
   useEffect(() => {
     loadWallet();
+
+    // 🔥 RANDOM WINNERS FEED RESTORED
+    const interval = setInterval(() => {
+      const name = names[Math.floor(Math.random() * names.length)];
+      const city = cities[Math.floor(Math.random() * cities.length)];
+      const amount = Math.floor(Math.random() * 50000) + 2000;
+
+      const id = Date.now();
+
+      setFeed(prev => [
+        ...prev,
+        { id, msg: `💰 ${name} from ${city} won ₦${amount}` }
+      ]);
+
+      setTimeout(() => {
+        setFeed(prev => prev.filter(f => f.id !== id));
+      }, 3000);
+
+    }, 4000);
+
+    return () => clearInterval(interval);
   }, []);
 
   async function loadWallet() {
@@ -53,19 +78,20 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
-  // 🎯 PROBABILITY
-  const getResult = () => {
-    const r = Math.random();
+  // 🎯 EXACT PROBABILITY (no rounding errors)
+  const weighted = [
+    ...Array(335).fill("LOSE"),
+    ...Array(140).fill("LOSE2"),
+    ...Array(70).fill("FREE"),
+    ...Array(200).fill("X1"),
+    ...Array(200).fill("X2"),
+    ...Array(40).fill("X3"),
+    ...Array(10).fill("X10"),
+    ...Array(5).fill("JACKPOT")
+  ];
 
-    if (r < 0.335) return "LOSE";
-    if (r < 0.475) return "LOSE2";
-    if (r < 0.545) return "FREE";
-    if (r < 0.745) return "X1";
-    if (r < 0.945) return "X2";
-    if (r < 0.985) return "X3";
-    if (r < 0.995) return "X10";
-    return "JACKPOT";
-  };
+  const getResult = () =>
+    weighted[Math.floor(Math.random() * weighted.length)];
 
   // 🔊 SOUND
   function tick() {
@@ -122,11 +148,11 @@ export default function CasinoWheel() {
     const outcome = getResult();
     const index = segments.findIndex(s => s.type === outcome);
 
-    // 🎯 PERFECT POINTER FIX
+    // 🎯 FINAL PERFECT ALIGNMENT
     const centerAngle = index * segmentAngle + segmentAngle / 2;
-    const finalAngle = 360 * 5 + (360 - centerAngle - 90);
+    const finalAngle = 360 * 5 + (360 - centerAngle);
 
-    setRotation(finalAngle);
+    setRotation(prev => prev + finalAngle);
 
     setTimeout(async () => {
 
@@ -178,7 +204,6 @@ export default function CasinoWheel() {
         setFlashIndex(null);
         setResult("");
         setWon(0);
-        setRotation(0);
         setStake("");
       }, 2000);
 
@@ -188,13 +213,13 @@ export default function CasinoWheel() {
   const amount = Number(stake) || 0;
 
   return (
-    <div style={{ textAlign: "center", paddingTop: 140 }}>
+    <div style={{ textAlign: "center", paddingTop: 120 }}>
 
-      {/* 🔴 ERROR POPUP */}
+      {/* ERROR */}
       {error && (
         <div style={{
           position: "fixed",
-          top: 80,
+          top: 70,
           left: "50%",
           transform: "translateX(-50%)",
           background: "red",
@@ -208,7 +233,7 @@ export default function CasinoWheel() {
         </div>
       )}
 
-      {/* 🎯 RETURNS */}
+      {/* RETURNS */}
       <div style={{
         position: "fixed",
         top: 10,
@@ -228,6 +253,22 @@ export default function CasinoWheel() {
             <div>💎 → ₦{amount * 30}</div>
           </>
         ) : "Enter stake"}
+      </div>
+
+      {/* FEED */}
+      <div style={{ position: "fixed", top: 10, right: 10 }}>
+        {feed.map(f => (
+          <div key={f.id} style={{
+            background: "#000",
+            color: "gold",
+            padding: 8,
+            margin: 4,
+            borderRadius: 6,
+            border: "1px solid gold"
+          }}>
+            {f.msg}
+          </div>
+        ))}
       </div>
 
       <h3>💰 ₦{wallet?.balance || 0}</h3>
@@ -276,9 +317,9 @@ export default function CasinoWheel() {
               marginLeft: -30,
               textAlign: "center",
               transform: `
-                rotate(${i * segmentAngle + segmentAngle / 2}deg)
-                translate(0, -110px)
-                rotate(-${i * segmentAngle + segmentAngle / 2}deg)
+                rotate(${i * segmentAngle - 90 + segmentAngle / 2}deg)
+                translateY(-100px)
+                rotate(-${i * segmentAngle - 90 + segmentAngle / 2}deg)
               `,
               color: flashIndex === i ? "gold" : "#fff",
               fontWeight: "bold"
