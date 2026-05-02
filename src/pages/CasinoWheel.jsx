@@ -25,6 +25,7 @@ const [popup, setPopup] = useState(null);
 const [flowers, setFlowers] = useState([]);
 
 const audioCtxRef = useRef(null);
+const tickerRef = useRef(null);
 
 useEffect(() => {
 loadWallet();
@@ -63,7 +64,8 @@ const pool = [
 { type: "FREE", weight: 0.24 },
 { type: "X2", weight: 0.18 },
 { type: "X3", weight: 0.03 },
-{ type: "X10", weight: 0.01 }
+{ type: "X10", weight: 0.009 },
+{ type: "JACKPOT", weight: 0.001 }
 ];
 
 const getResult = () => {
@@ -86,11 +88,28 @@ const g = ctx.createGain();
 o.connect(g);
 g.connect(ctx.destination);
 
-o.frequency.value = 500;
+o.frequency.value = 600;
 g.gain.value = 0.05;
 
 o.start();
-setTimeout(() => o.stop(), 50);
+setTimeout(() => o.stop(), 40);
+};
+
+const startTicking = () => {
+let speed = 40;
+
+const tickLoop = () => {
+playTick();
+speed += 6;
+
+tickerRef.current = setTimeout(tickLoop, speed);
+};
+
+tickLoop();
+};
+
+const stopTicking = () => {
+clearTimeout(tickerRef.current);
 };
 
 const spawnFlowers = () => {
@@ -155,23 +174,38 @@ FREE: 2,
 X3: 3,
 LOSE2: 4,
 X1: 5,
-X10: 6
+X10: 6,
+JACKPOT: 7
 };
 
 const index = map[outcome];
 
-// ✅ PERFECT CENTER ALIGNMENT (no random drift)
-const stopAngle = 360 - (index * segmentAngle) - (segmentAngle / 2);
+// 🎯 PERFECT TARGET
+const targetAngle = index * segmentAngle + segmentAngle / 2;
+const stopAngle = 360 - targetAngle;
 
-let spinSound = setInterval(playTick, 120);
+// 🎯 RANDOM SPIN TIME
+const spinDuration = 4500 + Math.random() * 1000;
+
+// 🔊 START SOUND
+startTicking();
 
 setRotation(prev => {
 const base = prev % 360;
-return base + 1440 + stopAngle;
+return base + 1800 + stopAngle;
 });
 
+// 🔥 MAGNETIC SNAP (final correction)
+setTimeout(() => {
+setRotation(prev => {
+const snapped = Math.round(prev / segmentAngle) * segmentAngle;
+return snapped;
+});
+}, spinDuration - 180);
+
 setTimeout(async () => {
-clearInterval(spinSound);
+
+stopTicking();
 
 let balanceBefore = wallet.balance;
 let newBalance = wallet.balance;
@@ -204,7 +238,7 @@ setPopup("neutral");
 setResult("⚖️ Stake Returned");
 
 } else {
-const mult = parseInt(outcome.replace("X", ""));
+const mult = outcome === "JACKPOT" ? 30 : parseInt(outcome.replace("X",""));
 win = numericStake * mult;
 newBalance += win;
 
@@ -214,7 +248,7 @@ netChange = win - numericStake;
 setWon(win);
 spawnFlowers();
 setPopup("win");
-setResult(`🎉 Won ₦${win}`);
+setResult(outcome === "JACKPOT" ? `💎 JACKPOT ₦${win}` : `🎉 Won ₦${win}`);
 
 }
 
@@ -253,7 +287,7 @@ await databases.createDocument(
 setSpinning(false);
 startCountdown();
 
-}, 3000);
+}, spinDuration);
 };
 
 return (
@@ -268,7 +302,7 @@ border:6px solid gold;
 position:relative;
 overflow:hidden;
 margin:auto;
-transition:transform 3s ease;
+transition:transform 4.5s cubic-bezier(0.15,0.85,0.25,1);
 }
 
 .segment {
@@ -363,7 +397,11 @@ background:`hsl(${i*45},80%,50%)`
 <span
 className="label"
 style={{
-transform:`rotate(${90 - i*segmentAngle}deg) translate(20px,-50%)`
+transform:`
+rotate(${i * segmentAngle + segmentAngle/2}deg)
+translate(35px,-50%)
+rotate(90deg)
+`
 }}
 >
 {s}
@@ -383,7 +421,12 @@ transform:`rotate(${90 - i*segmentAngle}deg) translate(20px,-50%)`
 {popup === "free" && "🎁 FREE SPIN"}
 {popup === "neutral" && "⚖️ SAME"}
 </div>
-)}</div>
+)}{flowers.map(f=>(
+
+<div key={f.id} className="confetti" style={{left:`${f.left}%`}}>
+🌸
+</div>
+))}</div>
 </>
 );
 }
