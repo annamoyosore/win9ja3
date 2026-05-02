@@ -9,6 +9,9 @@ import {
   ID
 } from "../lib/appwrite";
 
+const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David","Zainab"];
+const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
+
 export default function CasinoWheel() {
 
   const [wallet, setWallet] = useState(null);
@@ -17,10 +20,10 @@ export default function CasinoWheel() {
   const [result, setResult] = useState("");
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
+  const [feed, setFeed] = useState([]);
+  const [flowers, setFlowers] = useState([]);
   const [glow, setGlow] = useState(false);
   const [flashIndex, setFlashIndex] = useState(null);
-
-  const tickRef = useRef(null);
 
   const segments = [
     { label: "LOSE", type: "LOSE", color: "#ef4444" },
@@ -39,19 +42,16 @@ export default function CasinoWheel() {
     .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
     .join(",")})`;
 
-  // 🔊 Tick sound
+  // 🔊 tick sound
   function tick() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-
       osc.frequency.value = 700;
       gain.gain.value = 0.05;
-
       osc.connect(gain);
       gain.connect(ctx.destination);
-
       osc.start();
       osc.stop(ctx.currentTime + 0.02);
     } catch {}
@@ -59,6 +59,35 @@ export default function CasinoWheel() {
 
   useEffect(() => {
     loadWallet();
+
+    // flowers animation
+    const style = document.createElement("style");
+    style.innerHTML = `
+      @keyframes fall {
+        to { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+      }
+    `;
+    document.head.appendChild(style);
+
+    // 🔥 live feed
+    const interval = setInterval(() => {
+      const name = names[Math.floor(Math.random() * names.length)];
+      const city = cities[Math.floor(Math.random() * cities.length)];
+      const amount = Math.floor(Math.random() * 50000) + 2000;
+
+      const id = Date.now();
+      setFeed(prev => [...prev, {
+        id,
+        msg: `💰 ${name} from ${city} won ₦${amount}`
+      }]);
+
+      setTimeout(() => {
+        setFeed(prev => prev.filter(f => f.id !== id));
+      }, 3500);
+
+    }, 4000);
+
+    return () => clearInterval(interval);
   }, []);
 
   async function loadWallet() {
@@ -83,39 +112,43 @@ export default function CasinoWheel() {
     return "JACKPOT";
   };
 
+  function spawnFlowers() {
+    const items = Array.from({ length: 25 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100
+    }));
+    setFlowers(items);
+    setTimeout(() => setFlowers([]), 3000);
+  }
+
   const spin = async () => {
     if (spinning || !wallet) return;
 
     const amount = Number(stake);
     if (!amount || amount < 50) return;
+    if (wallet.balance < amount) return;
 
     setSpinning(true);
     setGlow(true);
 
     // 🔊 tick loop
     let ticks = 0;
-    const interval = setInterval(() => {
+    const sound = setInterval(() => {
       tick();
       ticks++;
-      if (ticks > 40) clearInterval(interval);
+      if (ticks > 40) clearInterval(sound);
     }, 60);
 
-    // 💸 instant deduction
     let deducted = wallet.balance - amount;
 
-    try {
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        { balance: deducted }
-      );
-      setWallet(prev => ({ ...prev, balance: deducted }));
-    } catch (err) {
-      console.error(err);
-      setSpinning(false);
-      return;
-    }
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      { balance: deducted }
+    );
+
+    setWallet(prev => ({ ...prev, balance: deducted }));
 
     const outcome = getResult();
     const index = segments.findIndex(s => s.type === outcome);
@@ -129,14 +162,7 @@ export default function CasinoWheel() {
     setTimeout(async () => {
 
       let win = 0;
-
-      const mult = {
-        X1: 1,
-        X2: 2,
-        X3: 3,
-        X10: 10,
-        JACKPOT: 30
-      }[outcome];
+      const mult = { X1:1, X2:2, X3:3, X10:10, JACKPOT:30 }[outcome];
 
       if (outcome === "FREE") {
         win = amount;
@@ -145,13 +171,13 @@ export default function CasinoWheel() {
         win = amount * mult;
         setResult(`🎉 WON ₦${win}`);
         setWon(win);
+        if (mult >= 10) spawnFlowers();
       } else {
         setResult("❌ LOST");
       }
 
       const finalBalance = deducted + win;
 
-      // 💰 update wallet
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -161,7 +187,6 @@ export default function CasinoWheel() {
 
       setWallet(prev => ({ ...prev, balance: finalBalance }));
 
-      // 🧾 SAFE LOGGING (feeds history)
       try {
         await databases.createDocument(
           DATABASE_ID,
@@ -172,13 +197,10 @@ export default function CasinoWheel() {
             stake: amount,
             win,
             result: outcome,
-            balanceAfter: finalBalance,
             createdAt: new Date().toISOString()
           }
         );
-      } catch (err) {
-        console.warn("Log failed:", err);
-      }
+      } catch {}
 
       setFlashIndex(index);
       setGlow(false);
@@ -188,8 +210,8 @@ export default function CasinoWheel() {
         setFlashIndex(null);
         setResult("");
         setWon(0);
-        setStake("");
         setRotation(0);
+        setStake("");
       }, 2000);
 
     }, 4000);
@@ -198,16 +220,50 @@ export default function CasinoWheel() {
   return (
     <div style={{ textAlign: "center", paddingTop: 120 }}>
 
+      {/* RETURNS */}
+      <div style={{
+        position: "fixed",
+        top: 10,
+        left: 10,
+        background: "#000",
+        color: "gold",
+        fontWeight: "bold",
+        padding: 10,
+        borderRadius: 10,
+        border: "1px solid gold"
+      }}>
+        🎯 RETURNS
+        <div>x1 → ₦same</div>
+        <div>x2 → double</div>
+        <div>x3 → triple</div>
+        <div>x10 → big</div>
+        <div>💎 x30</div>
+      </div>
+
+      {/* LIVE FEED */}
+      <div style={{ position: "fixed", top: 10, right: 10 }}>
+        {feed.map(f => (
+          <div key={f.id} style={{
+            background: "#000",
+            color: "gold",
+            fontWeight: "bold",
+            padding: 8,
+            margin: 4,
+            borderRadius: 6,
+            border: "1px solid gold"
+          }}>
+            {f.msg}
+          </div>
+        ))}
+      </div>
+
       <h3>💰 ₦{wallet?.balance || 0}</h3>
 
-      <input
-        value={stake}
-        onChange={e => setStake(e.target.value)}
-        placeholder="Stake"
-      />
+      <input value={stake} onChange={e => setStake(e.target.value)} />
 
       <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
 
+        {/* POINTER */}
         <div style={{
           position: "absolute",
           top: -5,
@@ -219,6 +275,7 @@ export default function CasinoWheel() {
           zIndex: 10
         }} />
 
+        {/* WHEEL */}
         <div style={{
           width: 280,
           height: 280,
@@ -226,9 +283,7 @@ export default function CasinoWheel() {
           background: gradient,
           transform: `rotate(${rotation}deg)`,
           transition: spinning ? "transform 4s ease-out" : "none",
-          boxShadow: glow
-            ? "0 0 30px gold, 0 0 60px orange"
-            : "0 0 10px rgba(0,0,0,0.3)"
+          boxShadow: glow ? "0 0 30px gold" : ""
         }}>
           {segments.map((s, i) => (
             <div key={i} style={{
@@ -241,10 +296,7 @@ export default function CasinoWheel() {
                 rotate(-${i * segmentAngle}deg)
               `,
               color: flashIndex === i ? "gold" : "#fff",
-              fontWeight: "bold",
-              textShadow: flashIndex === i
-                ? "0 0 10px gold"
-                : "0 0 5px #000"
+              fontWeight: "bold"
             }}>
               {s.label}
             </div>
@@ -258,6 +310,15 @@ export default function CasinoWheel() {
 
       <h3>{result}</h3>
       {won > 0 && <h2 style={{ color: "gold" }}>₦{won}</h2>}
+
+      {flowers.map(f => (
+        <div key={f.id} style={{
+          position: "fixed",
+          top: "-10px",
+          left: `${f.left}%`,
+          animation: "fall 3s linear"
+        }}>🌸</div>
+      ))}
 
     </div>
   );
