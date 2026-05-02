@@ -9,10 +9,7 @@ import {
   ID
 } from "../lib/appwrite";
 
-const APP_VERSION = "1.0.9";
-
-const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David"];
-const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
+const APP_VERSION = "1.1.0";
 
 export default function CasinoWheel({ goBack }) {
 
@@ -22,11 +19,10 @@ export default function CasinoWheel({ goBack }) {
   const [result, setResult] = useState("");
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
-  const [feed, setFeed] = useState([]);
   const [flowers, setFlowers] = useState([]);
 
   // =========================
-  // 🎯 PROBABILITY (YOUR REQUEST)
+  // 🎯 YOUR LOGIC (85/10/5)
   // =========================
   const pool = [
     { type: "LOSE", w: 0.70 },
@@ -36,13 +32,17 @@ export default function CasinoWheel({ goBack }) {
   ];
 
   // =========================
-  // 🎡 SEGMENTS (MATCHING LOGIC)
+  // 🎡 FULL WHEEL (RESTORED)
   // =========================
   const segments = [
     { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
+    { label: "x2", type: "X2", color: "#22c55e" },
     { label: "🎁 FREE", type: "FREE", color: "#3b82f6" },
+    { label: "x3", type: "X3", color: "#a855f7" },
     { label: "❌ LOSE", type: "LOSE2", color: "#ef4444" },
-    { label: "⚖️ x1", type: "X1", color: "#f59e0b" }
+    { label: "x1", type: "X1", color: "#f59e0b" },
+    { label: "🔥 x10", type: "X10", color: "#f97316" },
+    { label: "💎 ×30", type: "JACKPOT", color: "#eab308" }
   ];
 
   const segmentAngle = 360 / segments.length;
@@ -53,22 +53,24 @@ export default function CasinoWheel({ goBack }) {
 
   const map = {
     LOSE: 0,
-    FREE: 1,
-    LOSE2: 2,
-    X1: 3
+    X2: 1,
+    FREE: 2,
+    X3: 3,
+    LOSE2: 4,
+    X1: 5,
+    X10: 6,
+    JACKPOT: 7
   };
 
   useEffect(() => {
     loadWallet();
 
-    // version update (force refresh)
     const saved = localStorage.getItem("app_version");
     if (saved !== APP_VERSION) {
       localStorage.setItem("app_version", APP_VERSION);
       window.location.reload();
     }
 
-    // flower animation
     const style = document.createElement("style");
     style.innerHTML = `
       @keyframes fall {
@@ -76,28 +78,6 @@ export default function CasinoWheel({ goBack }) {
       }
     `;
     document.head.appendChild(style);
-
-    // fake live feed
-    const interval = setInterval(() => {
-      const name = names[Math.floor(Math.random() * names.length)];
-      const city = cities[Math.floor(Math.random() * cities.length)];
-      const amount = Math.floor(Math.random() * 50000) + 2000;
-
-      const msg = Math.random() > 0.5
-        ? `${name} from ${city} won ₦${amount}`
-        : `${name} from ${city} withdrew ₦${amount}`;
-
-      const id = Date.now();
-
-      setFeed(prev => [...prev, { id, msg }]);
-
-      setTimeout(() => {
-        setFeed(prev => prev.filter(f => f.id !== id));
-      }, 4000);
-
-    }, 5000);
-
-    return () => clearInterval(interval);
 
   }, []);
 
@@ -209,82 +189,65 @@ export default function CasinoWheel({ goBack }) {
   };
 
   return (
-    <div style={{ display: "flex", color: "#fff", position: "relative" }}>
+    <div style={{ textAlign: "center", color: "#fff" }}>
 
-      {/* LEFT */}
-      <div style={{ width: 120 }}>
-        <h4>Returns</h4>
-        <div>x1 → ₦{stake}</div>
+      <button onClick={goBack}>← Exit</button>
+
+      <h2>🎡 Casino Wheel</h2>
+      <h3>₦{wallet?.balance || 0}</h3>
+
+      <input
+        type="number"
+        value={stake}
+        onChange={e => setStake(e.target.value)}
+        placeholder="Enter stake"
+      />
+
+      {/* POINTER */}
+      <div style={{
+        position: "absolute",
+        top: "140px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        fontSize: 24,
+        zIndex: 10
+      }}>
+        🔻
       </div>
 
-      {/* CENTER */}
-      <div style={{ flex: 1, textAlign: "center", position: "relative" }}>
-        <button onClick={goBack}>← Exit</button>
-
-        <h2>🎡 Casino Wheel</h2>
-        <h3>₦{wallet?.balance || 0}</h3>
-
-        <input
-          type="number"
-          value={stake}
-          onChange={e => setStake(e.target.value)}
-          placeholder="Enter stake"
-        />
-
-        {/* POINTER */}
-        <div style={{
-          position: "absolute",
-          top: "120px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          fontSize: 24,
-          zIndex: 10
-        }}>
-          🔻
-        </div>
-
-        {/* WHEEL */}
-        <div style={{
-          width: 260,
-          height: 260,
-          margin: "20px auto",
-          borderRadius: "50%",
-          background: gradient,
-          transform: `rotate(${rotation}deg)`,
-          transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
-        }}>
-          {segments.map((seg, i) => {
-            const angle = i * segmentAngle + segmentAngle / 2;
-            return (
-              <div key={i} style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: `rotate(${angle}deg) translate(0, -95px) rotate(-${angle}deg)`
-              }}>
-                <div style={{ fontWeight: "bold" }}>
-                  {seg.label}
-                </div>
+      {/* WHEEL */}
+      <div style={{
+        width: 260,
+        height: 260,
+        margin: "20px auto",
+        borderRadius: "50%",
+        background: gradient,
+        transform: `rotate(${rotation}deg)`,
+        transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
+      }}>
+        {segments.map((seg, i) => {
+          const angle = i * segmentAngle + segmentAngle / 2;
+          return (
+            <div key={i} style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: `rotate(${angle}deg) translate(0, -95px) rotate(-${angle}deg)`
+            }}>
+              <div style={{ fontWeight: "bold" }}>
+                {seg.label}
               </div>
-            );
-          })}
-        </div>
-
-        <button onClick={spin}>
-          {spinning ? "Spinning..." : "SPIN"}
-        </button>
-
-        <h3>{result}</h3>
+            </div>
+          );
+        })}
       </div>
 
-      {/* RIGHT FEED */}
-      <div style={{ width: 150 }}>
-        {feed.map(f => (
-          <div key={f.id}>{f.msg}</div>
-        ))}
-      </div>
+      <button onClick={spin}>
+        {spinning ? "Spinning..." : "SPIN"}
+      </button>
 
-      {/* FLOWERS */}
+      <h3>{result}</h3>
+
       {flowers.map(f => (
         <div key={f.id} style={{
           position: "fixed",
