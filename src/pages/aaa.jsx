@@ -263,7 +263,10 @@ export default function AdminDashboard({ back }) {
       {deposits.map(d => (
         <div key={d.$id} style={styles.card}>
           <div>
-            ₦{d.amount} — {d.userId}
+            <strong>₦{d.amount}</strong>
+            <div style={styles.subText}>
+              {d.name || "Unknown"} ({d.userId})
+            </div>
           </div>
           <div>
             <button onClick={() => approveDeposit(d)}>Approve</button>
@@ -277,7 +280,10 @@ export default function AdminDashboard({ back }) {
       {withdrawals.map(w => (
         <div key={w.$id} style={styles.card}>
           <div>
-            ₦{w.amount} — {w.userId}
+            <strong>₦{w.amount}</strong>
+            <div style={styles.subText}>
+              {w.name || "Unknown"} ({w.userId})
+            </div>
           </div>
           <div>
             <button onClick={() => approveWithdrawal(w)}>Approve</button>
@@ -323,6 +329,11 @@ const styles = {
     marginTop: 10,
     display: "flex",
     justifyContent: "space-between",
-    borderRadius: 8
+    borderRadius: 8,
+    alignItems: "center"
+  },
+  subText: {
+    fontSize: 12,
+    opacity: 0.7
   }
 };
