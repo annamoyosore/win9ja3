@@ -4,12 +4,13 @@ databases,
 DATABASE_ID,
 Query,
 account,
-CASINO_COLLECTION
+CASINO_COLLECTION,
+MATCH_COLLECTION,
+GAME_COLLECTION
 } from "../lib/appwrite";
 
 export default function Transactions({ goBack }) {
 
-const [userId, setUserId] = useState(null);
 const [records, setRecords] = useState([]);
 const [loading, setLoading] = useState(true);
 
@@ -20,42 +21,82 @@ loadTransactions();
 const loadTransactions = async () => {
 try {
 const user = await account.get();
-setUserId(user.$id);
+const userId = user.$id;
 
   // =========================
-  // FETCH CASINO SPINS
+  // CASINO
   // =========================
   const casinoRes = await databases.listDocuments(
     DATABASE_ID,
     CASINO_COLLECTION,
     [
-      Query.equal("userId", user.$id),
-      Query.orderDesc("$createdAt")
+      Query.equal("userId", userId),
+      Query.limit(20)
     ]
   );
 
-  // =========================
-  // FORMAT CASINO DATA
-  // =========================
   const casinoData = casinoRes.documents.map(doc => ({
     id: doc.$id,
-    type: "casino",
+    source: "casino",
+    title: "🎡 Casino Spin",
     status: doc.status,
-    outcome: doc.outcome,
     amount: doc.netChange,
-    balanceAfter: doc.balanceAfter,
     createdAt: doc.$createdAt
   }));
 
   // =========================
-  // MERGE (add other collections later here)
+  // MATCHES (OLD GAME)
+  // =========================
+  const matchRes = await databases.listDocuments(
+    DATABASE_ID,
+    MATCH_COLLECTION,
+    [
+      Query.equal("userId", userId),
+      Query.limit(20)
+    ]
+  );
+
+  const matchData = matchRes.documents.map(doc => ({
+    id: doc.$id,
+    source: "match",
+    title: "🎯 Match Game",
+    status: doc.status || "played",
+    amount: doc.winAmount || 0,
+    createdAt: doc.$createdAt
+  }));
+
+  // =========================
+  // GAMES (GENERAL)
+  // =========================
+  const gameRes = await databases.listDocuments(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    [
+      Query.equal("userId", userId),
+      Query.limit(20)
+    ]
+  );
+
+  const gameData = gameRes.documents.map(doc => ({
+    id: doc.$id,
+    source: "game",
+    title: "🎮 Game",
+    status: doc.status || "played",
+    amount: doc.amount || 0,
+    createdAt: doc.$createdAt
+  }));
+
+  // =========================
+  // MERGE ALL
   // =========================
   const all = [
-    ...casinoData
+    ...casinoData,
+    ...matchData,
+    ...gameData
   ];
 
   // =========================
-  // SORT ALL RECORDS
+  // SORT (LATEST FIRST)
   // =========================
   all.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
@@ -69,9 +110,6 @@ setUserId(user.$id);
 
 };
 
-// =========================
-// UI RENDER
-// =========================
 return (
 <div style={{ padding:20, color:"#fff" }}>
 
@@ -100,15 +138,11 @@ return (
     }}>
 
       <div style={{ fontWeight:"bold" }}>
-        🎡 Casino Spin
+        {tx.title}
       </div>
 
       <div>
-        Result: {tx.outcome}
-      </div>
-
-      <div>
-        Status: {tx.status.toUpperCase()}
+        Status: {tx.status}
       </div>
 
       <div style={{
