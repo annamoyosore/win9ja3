@@ -3,8 +3,10 @@ import {
   databases,
   DATABASE_ID,
   WALLET_COLLECTION,
+  CASINO_COLLECTION,
   account,
-  Query
+  Query,
+  ID
 } from "../lib/appwrite";
 
 export default function CasinoWheel({ goBack }) {
@@ -16,23 +18,31 @@ export default function CasinoWheel({ goBack }) {
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [feed, setFeed] = useState([]);
+  const [popup, setPopup] = useState(null);
 
   const tickerRef = useRef(null);
   const audioCtxRef = useRef(null);
 
+  // =========================
+  // LOAD WALLET
+  // =========================
   useEffect(() => {
-    (async () => {
-      const u = await account.get();
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
-      if (w.documents.length) setWallet(w.documents[0]);
-    })();
+    loadWallet();
   }, []);
 
-  // 🎡 SEGMENTS
+  async function loadWallet() {
+    const u = await account.get();
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id)]
+    );
+    if (res.documents.length) setWallet(res.documents[0]);
+  }
+
+  // =========================
+  // SEGMENTS
+  // =========================
   const segments = [
     { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
     { label: "x2", type: "X2", color: "#22c55e" },
@@ -46,12 +56,9 @@ export default function CasinoWheel({ goBack }) {
 
   const segmentAngle = 360 / segments.length;
 
-  // 🎨 CONIC GRADIENT (locks colors perfectly)
-  const gradient = `conic-gradient(
-    ${segments.map((s, i) =>
-      `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`
-    ).join(",")}
-  )`;
+  const gradient = `conic-gradient(${segments
+    .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
+    .join(",")})`;
 
   const map = {
     LOSE: 0,
@@ -64,6 +71,9 @@ export default function CasinoWheel({ goBack }) {
     JACKPOT: 7
   };
 
+  // =========================
+  // RESULT ENGINE
+  // =========================
   const getResult = () => {
     const pool = [
       { type: "LOSE", w: 0.39 },
@@ -75,7 +85,6 @@ export default function CasinoWheel({ goBack }) {
       { type: "X10", w: 0.009 },
       { type: "JACKPOT", w: 0.001 }
     ];
-
     let r = Math.random(), sum = 0;
     for (let p of pool) {
       sum += p.w;
@@ -83,7 +92,9 @@ export default function CasinoWheel({ goBack }) {
     }
   };
 
-  // 🔊 SOUND
+  // =========================
+  // SOUND
+  // =========================
   const playTick = () => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -111,13 +122,54 @@ export default function CasinoWheel({ goBack }) {
 
   const stopTicking = () => clearTimeout(tickerRef.current);
 
-  // 🎡 SPIN
-  const spin = () => {
-    if (spinning) return;
+  // =========================
+  // LIVE FEED (30 NAMES)
+  // =========================
+  useEffect(() => {
+    const names = [
+      "David","Emma","John","Sophia","Michael","Daniel","Grace","Lucas",
+      "Ethan","Olivia","Noah","Liam","Ava","Mia","James","Logan",
+      "Elijah","Amelia","Harper","Evelyn","Abigail","Henry","Jack",
+      "Samuel","Leo","Benjamin","Chloe","Zoe","Victoria","Isabella"
+    ];
 
-    const amount = Number(stake);
-    if (!amount || amount < 50) {
-      setResult("Min ₦50");
+    const interval = setInterval(() => {
+      const name = names[Math.floor(Math.random() * names.length)];
+      const stake = [100, 200, 500, 1000][Math.floor(Math.random() * 4)];
+      const mult = [2, 3, 10, 30][Math.floor(Math.random() * 4)];
+      const win = stake * mult;
+
+      const msg =
+        mult === 30
+          ? `💎 ${name} hit ₦${win.toLocaleString()}`
+          : `🎉 ${name} won ₦${win.toLocaleString()}`;
+
+      const id = Date.now();
+      setFeed(prev => [...prev, { id, msg }]);
+
+      setTimeout(() => {
+        setFeed(prev => prev.filter(f => f.id !== id));
+      }, 4000);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // =========================
+  // SPIN
+  // =========================
+  const spin = async () => {
+    if (spinning || !wallet) return;
+
+    const numericStake = Number(stake);
+
+    if (!numericStake || numericStake < 50) {
+      setResult("⚠️ Minimum stake ₦50");
+      return;
+    }
+
+    if (wallet.balance < numericStake) {
+      setResult("❌ Insufficient balance");
       return;
     }
 
@@ -134,86 +186,117 @@ export default function CasinoWheel({ goBack }) {
     const duration = 4500;
 
     startTicking();
-
     setRotation(prev => prev % 360 + 1800 + stop);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       stopTicking();
 
+      let balanceBefore = wallet.balance;
+      let newBalance = wallet.balance - numericStake;
       let win = 0;
-      if (outcome === "X2") win = amount * 2;
-      if (outcome === "X3") win = amount * 3;
-      if (outcome === "X10") win = amount * 10;
-      if (outcome === "JACKPOT") win = amount * 30;
+      let status = "lose";
+      let netChange = -numericStake;
 
-      if (win > 0) {
+      if (outcome === "FREE") {
+        newBalance += numericStake;
+        status = "free";
+        netChange = 0;
+        setResult("🎁 Free Spin!");
+
+      } else if (outcome === "X1") {
+        newBalance += numericStake;
+        status = "neutral";
+        netChange = 0;
+        setResult("⚖️ Stake Returned");
+
+      } else if (!(outcome === "LOSE" || outcome === "LOSE2")) {
+        const mult = outcome === "JACKPOT" ? 30 : parseInt(outcome.replace("X",""));
+        win = numericStake * mult;
+        newBalance += win;
+
+        status = "win";
+        netChange = win - numericStake;
+
         setWon(win);
+        setPopup("win");
+
+        setFeed(prev => [
+          ...prev,
+          { id: Date.now(), msg: `🎉 You won ₦${win.toLocaleString()}` }
+        ]);
+
         setResult(`🎉 ₦${win.toLocaleString()}`);
       } else {
-        setResult("❌ Lose");
+        setResult(`❌ Lost ₦${numericStake}`);
       }
 
+      // 💾 UPDATE WALLET
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        { balance: newBalance }
+      );
+
+      setWallet(prev => ({ ...prev, balance: newBalance }));
+
+      // 📜 LOG GAME
+      const user = await account.get();
+      await databases.createDocument(
+        DATABASE_ID,
+        CASINO_COLLECTION,
+        ID.unique(),
+        {
+          userId: user.$id,
+          type: "spin",
+          status,
+          outcome,
+          stake: numericStake,
+          winAmount: win,
+          netChange,
+          balanceBefore,
+          balanceAfter: newBalance,
+          createdAt: new Date().toISOString()
+        }
+      );
+
       setSpinning(false);
+
     }, duration);
   };
 
   return (
     <div style={{ display: "flex", color: "#fff" }}>
 
-      {/* LEFT RETURNS */}
+      {/* LEFT */}
       <div style={{ width: 120, padding: 10 }}>
         <h4>Returns</h4>
-        <div>x2 → ₦{Number(stake || 0) * 2}</div>
-        <div>x3 → ₦{Number(stake || 0) * 3}</div>
-        <div>x10 → ₦{Number(stake || 0) * 10}</div>
-        <div>x30 → ₦{Number(stake || 0) * 30}</div>
+        <div>x2 → ₦{stake * 2}</div>
+        <div>x3 → ₦{stake * 3}</div>
+        <div>x10 → ₦{stake * 10}</div>
+        <div>x30 → ₦{stake * 30}</div>
       </div>
 
       {/* CENTER */}
       <div style={{ flex: 1, textAlign: "center" }}>
-
         <button onClick={goBack}>← Exit</button>
-
         <h2>🎡 Casino Wheel</h2>
 
-        {/* 💰 WALLET */}
         <h3>💰 ₦{Number(wallet?.balance || 0).toLocaleString()}</h3>
 
-        <input
-          value={stake}
-          onChange={e => setStake(e.target.value)}
-          placeholder="₦50+"
-        />
+        <input value={stake} onChange={e => setStake(e.target.value)} />
 
-        {/* POINTER */}
         <div style={{ fontSize: 26 }}>🔻</div>
 
-        {/* 🎡 WHEEL */}
         <div style={{
           width: 260,
           height: 260,
           margin: "20px auto",
           borderRadius: "50%",
           background: gradient,
-          position: "relative",
           transform: `rotate(${rotation}deg)`,
           transition: "transform 4.5s cubic-bezier(.17,.67,.83,.67)"
-        }}>
-          {segments.map((seg, i) => (
-            <div key={i} style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: `rotate(${i * segmentAngle + segmentAngle / 2}deg) translate(90px) rotate(90deg)`,
-              transformOrigin: "center",
-              fontWeight: "900",
-              fontSize: 12,
-              color: "#fff"
-            }}>
-              {seg.label}
-            </div>
-          ))}
-        </div>
+        }} />
 
         <button onClick={spin}>
           {spinning ? "Spinning..." : "SPIN"}
@@ -222,13 +305,24 @@ export default function CasinoWheel({ goBack }) {
         <h3>{result}</h3>
         <h2>₦{won}</h2>
 
+        {popup === "win" && (
+          <div style={{
+            position: "fixed",
+            top: "40%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "#000",
+            padding: 20,
+            borderRadius: 10
+          }}>
+            🎉 ₦{won.toLocaleString()}
+          </div>
+        )}
       </div>
 
-      {/* RIGHT FEED */}
-      <div style={{ width: 140, padding: 10 }}>
-        {feed.map(f => (
-          <div key={f.id}>{f.msg}</div>
-        ))}
+      {/* RIGHT */}
+      <div style={{ width: 150 }}>
+        {feed.map(f => <div key={f.id}>{f.msg}</div>)}
       </div>
 
     </div>
