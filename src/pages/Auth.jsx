@@ -94,7 +94,7 @@ export default function Auth({ onLogin }) {
           ID.unique(),
           {
             userId: currentUser.$id,
-            balance: 0,
+            balance: 50,
             locked: 0
           }
         );
