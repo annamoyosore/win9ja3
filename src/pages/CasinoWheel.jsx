@@ -28,15 +28,16 @@ export default function CasinoWheel() {
   const [feed, setFeed] = useState([]);
   const [error, setError] = useState("");
 
+  // 🎯 FINAL SEGMENTS (4 LOSS TYPES)
   const segments = [
-    { label: "LOSE", type: "LOSE", color: "#ef4444" },
-    { label: "x2", type: "X2", color: "#3b82f6" },
-    { label: "FREE", type: "FREE", color: "#06b6d4" },
-    { label: "x3", type: "X3", color: "#a855f7" },
-    { label: "LOSE", type: "LOSE2", color: "#ef4444" },
+    { label: "❌ Try Again", type: "LOSE_A", color: "#ef4444" },
+    { label: "😢 So Close", type: "LOSE_B", color: "#dc2626" },
+    { label: "🔁 Next Time", type: "LOSE_C", color: "#b91c1c" },
+    { label: "💔 Missed It", type: "LOSE_D", color: "#991b1b" },
     { label: "x1", type: "X1", color: "#f59e0b" },
-    { label: "x10", type: "X10", color: "#f97316" },
-    { label: "💎30", type: "JACKPOT", color: "#eab308" }
+    { label: "x2", type: "X2", color: "#3b82f6" },
+    { label: "x3", type: "X3", color: "#a855f7" },
+    { label: "x10", type: "X10", color: "#f97316" }
   ];
 
   const segmentAngle = 360 / segments.length;
@@ -82,7 +83,7 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
-  // 🎯 GET RESULT FROM POINTER
+  // 🎯 POINTER-BASED RESULT
   const getIndexFromRotation = (rot) => {
     const normalized = ((rot % 360) + 360) % 360;
     const pointerAngle = (360 - normalized) % 360;
@@ -107,7 +108,6 @@ export default function CasinoWheel() {
     setError("");
     setSpinning(true);
 
-    // deduct first
     const deducted = wallet.balance - bet;
 
     await databases.updateDocument(
@@ -119,12 +119,11 @@ export default function CasinoWheel() {
 
     setWallet(prev => ({ ...prev, balance: deducted }));
 
-    // 🎯 RANDOM SPIN ONLY
+    // 🎡 RANDOM SPIN
     const spinAmount = 360 * (5 + Math.random() * 3);
     setRotation(prev => prev + spinAmount);
   };
 
-  // 🎯 TRUE RESULT AFTER SPIN ENDS
   const handleSpinEnd = async () => {
     if (!spinning) return;
 
@@ -138,19 +137,22 @@ export default function CasinoWheel() {
       X1:1,
       X2:2,
       X3:3,
-      X10:10,
-      JACKPOT:30
+      X10:10
     }[outcome];
 
-    if (outcome === "FREE") {
-      win = bet;
-      setResult("🎁 FREE SPIN");
-    } else if (mult) {
+    if (mult) {
       win = bet * mult;
       setResult(`🎉 WON ₦${win}`);
       setWon(win);
     } else {
-      setResult("❌ LOST");
+      // 🎯 DIFFERENT LOSS MESSAGES
+      const messages = {
+        LOSE_A: "❌ Try Again",
+        LOSE_B: "😢 So Close",
+        LOSE_C: "🔁 Next Time",
+        LOSE_D: "💔 Missed It"
+      };
+      setResult(messages[outcome]);
     }
 
     const finalBalance = wallet.balance + win;
@@ -163,6 +165,7 @@ export default function CasinoWheel() {
     );
 
     setWallet(prev => ({ ...prev, balance: finalBalance }));
+
     setSpinning(false);
 
     setTimeout(() => {
@@ -193,7 +196,7 @@ export default function CasinoWheel() {
         </div>
       )}
 
-      {/* RETURNS */}
+      {/* 💰 ESTIMATED RETURNS */}
       {amount > 0 && (
         <div style={{
           position: "fixed",
@@ -210,11 +213,10 @@ export default function CasinoWheel() {
           <div>x2 → ₦{amount * 2}</div>
           <div>x3 → ₦{amount * 3}</div>
           <div>x10 → ₦{amount * 10}</div>
-          <div>💎 → ₦{amount * 30}</div>
         </div>
       )}
 
-      {/* FEED */}
+      {/* 🏆 FEED */}
       <div style={{ position: "fixed", top: 10, right: 10 }}>
         {feed.map(f => (
           <div key={f.id} style={{
@@ -238,9 +240,10 @@ export default function CasinoWheel() {
         onChange={e => setStake(e.target.value)}
       />
 
-      {/* WHEEL */}
+      {/* 🎡 WHEEL */}
       <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
 
+        {/* POINTER */}
         <div style={{
           position: "absolute",
           top: -5,
@@ -268,16 +271,17 @@ export default function CasinoWheel() {
               position: "absolute",
               top: "50%",
               left: "50%",
-              width: 70,
-              marginLeft: -35,
+              width: 90,
+              marginLeft: -45,
               textAlign: "center",
               transform: `
                 rotate(${(i + 0.5) * segmentAngle}deg)
-                translateY(-95px)
+                translateY(-100px)
                 rotate(-${(i + 0.5) * segmentAngle}deg)
               `,
               color: "#fff",
-              fontWeight: "bold"
+              fontWeight: "bold",
+              fontSize: 12
             }}>
               {s.label}
             </div>
