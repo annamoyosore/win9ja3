@@ -44,6 +44,7 @@ WALLET_COLLECTION,
 if (w.documents.length) setWallet(w.documents[0]);
 }
 
+// ================= SEGMENTS =================
 const segments = [
 "❌ Lose",
 "x2",
@@ -57,6 +58,7 @@ const segments = [
 
 const segmentAngle = 360 / segments.length;
 
+// ================= LOGIC =================
 const pool = [
 { type: "LOSE", weight: 0.39 },
 { type: "LOSE2", weight: 0.05 },
@@ -76,6 +78,7 @@ if (r <= sum) return p.type;
 }
 };
 
+// ================= SOUND =================
 const playTick = () => {
 if (!audioCtxRef.current) {
 audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -101,7 +104,6 @@ let speed = 40;
 const tickLoop = () => {
 playTick();
 speed += 6;
-
 tickerRef.current = setTimeout(tickLoop, speed);
 };
 
@@ -112,6 +114,7 @@ const stopTicking = () => {
 clearTimeout(tickerRef.current);
 };
 
+// ================= EFFECTS =================
 const spawnFlowers = () => {
 const items = Array.from({ length: 40 }).map((_, i) => ({
 id: i,
@@ -121,6 +124,7 @@ setFlowers(items);
 setTimeout(() => setFlowers([]), 3000);
 };
 
+// ================= RESET =================
 const startCountdown = () => {
 let t = 4;
 setCountdown(t);
@@ -144,6 +148,7 @@ setCountdown(null);
 setPopup(null);
 };
 
+// ================= SPIN =================
 const spin = async () => {
 if (spinning) return;
 
@@ -184,10 +189,8 @@ const index = map[outcome];
 const targetAngle = index * segmentAngle + segmentAngle / 2;
 const stopAngle = 360 - targetAngle;
 
-// 🎯 RANDOM SPIN TIME
 const spinDuration = 4500 + Math.random() * 1000;
 
-// 🔊 START SOUND
 startTicking();
 
 setRotation(prev => {
@@ -195,7 +198,7 @@ const base = prev % 360;
 return base + 1800 + stopAngle;
 });
 
-// 🔥 MAGNETIC SNAP (final correction)
+// 🧲 MAGNETIC SNAP
 setTimeout(() => {
 setRotation(prev => {
 const snapped = Math.round(prev / segmentAngle) * segmentAngle;
@@ -290,6 +293,7 @@ startCountdown();
 }, spinDuration);
 };
 
+// ================= UI =================
 return (
 <>
 
@@ -316,10 +320,6 @@ display:flex;
 align-items:center;
 justify-content:center;
 clip-path: polygon(0% 0%, 100% 50%, 0% 100%);
-font-weight:900;
-font-size:14px;
-color:white;
-text-shadow:0 0 6px black;
 }
 
 .label {
@@ -327,50 +327,20 @@ position:absolute;
 top:50%;
 left:50%;
 transform-origin:0 0;
-width:90px;
+width:110px;
 text-align:center;
 font-weight:900;
-font-size:14px;
+font-size:13px;
+color:white;
+text-shadow:0 0 6px black;
+pointer-events:none;
 }
 
 .pointer {
 font-size:26px;
 text-align:center;
-}
-
-.spinBtn {
-margin-top:15px;
-padding:16px 40px;
-font-size:20px;
-font-weight:bold;
-background:gold;
-border:none;
-border-radius:12px;
-}
-
-.popup {
-position:fixed;
-top:40%;
-left:50%;
-transform:translate(-50%,-50%);
-padding:30px;
-font-size:28px;
-font-weight:900;
-border-radius:20px;
-z-index:999;
-animation:pop 0.5s ease;
-box-shadow:0 0 30px gold;
-}
-
-.win { background:gold; color:black; }
-.lose { background:red; }
-.free { background:purple; }
-.neutral { background:#333; }
-
-@keyframes pop {
-0% { transform:translate(-50%,-50%) scale(0.5); opacity:0; }
-60% { transform:translate(-50%,-50%) scale(1.2); }
-100% { transform:translate(-50%,-50%) scale(1); opacity:1; }
+position:relative;
+z-index:10;
 }
 `}</style><div style={{ textAlign:"center", color:"#fff", padding:20 }}><button onClick={goBack}>← Exit</button>
 
@@ -398,9 +368,9 @@ background:`hsl(${i*45},80%,50%)`
 className="label"
 style={{
 transform:`
-rotate(${i * segmentAngle + segmentAngle/2}deg)
-translate(35px,-50%)
-rotate(90deg)
+rotate(${i * segmentAngle + segmentAngle / 2}deg)
+translate(55px,-50%)
+rotate(${-(i * segmentAngle + segmentAngle / 2)}deg)
 `
 }}
 >
@@ -408,25 +378,10 @@ rotate(90deg)
 </span>
 </div>
 ))}
-</div><button className="spinBtn" onClick={spin}>
+</div><button onClick={spin}>
 {spinning ? "Spinning..." : "🎡 SPIN"}
 </button><p>{result}</p>
-<p>🏆 ₦{won}</p>{countdown && <p>Next spin in {countdown}s...</p>}
-
-{popup && (
-
-<div className={`popup ${popup}`}>
-{popup === "win" && `🎉 ₦${won}`}
-{popup === "lose" && "❌ LOST"}
-{popup === "free" && "🎁 FREE SPIN"}
-{popup === "neutral" && "⚖️ SAME"}
-</div>
-)}{flowers.map(f=>(
-
-<div key={f.id} className="confetti" style={{left:`${f.left}%`}}>
-🌸
-</div>
-))}</div>
+<p>🏆 ₦{won}</p></div>
 </>
 );
 }
