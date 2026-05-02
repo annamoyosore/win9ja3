@@ -159,8 +159,9 @@ X10: 6
 };
 
 const index = map[outcome];
-const randomOffset = (Math.random() - 0.5) * (segmentAngle * 0.6);
-const stopAngle = 360 - (index * segmentAngle) - (segmentAngle / 2) + randomOffset;
+
+// ✅ PERFECT CENTER ALIGNMENT (no random drift)
+const stopAngle = 360 - (index * segmentAngle) - (segmentAngle / 2);
 
 let spinSound = setInterval(playTick, 120);
 
@@ -225,9 +226,7 @@ wallet.$id,
 { balance: newBalance }
 );
 setWallet({ ...wallet, balance: newBalance });
-} catch (err) {
-console.error("Wallet update failed:", err);
-}
+} catch {}
 
 try {
 const u = await account.get();
@@ -249,29 +248,7 @@ await databases.createDocument(
   }
 );
 
-const history = await databases.listDocuments(
-  DATABASE_ID,
-  CASINO_COLLECTION,
-  [
-    Query.equal("userId", u.$id),
-    Query.orderDesc("$createdAt")
-  ]
-);
-
-if (history.documents.length > 5) {
-  const toDelete = history.documents.slice(5);
-  for (let doc of toDelete) {
-    await databases.deleteDocument(
-      DATABASE_ID,
-      CASINO_COLLECTION,
-      doc.$id
-    );
-  }
-}
-
-} catch (err) {
-console.error("Transaction/log cleanup failed:", err);
-}
+} catch {}
 
 setSpinning(false);
 startCountdown();
@@ -306,18 +283,18 @@ align-items:center;
 justify-content:center;
 clip-path: polygon(0% 0%, 100% 50%, 0% 100%);
 font-weight:900;
-font-size:13px;
+font-size:14px;
 color:white;
 text-shadow:0 0 6px black;
 }
 
 .label {
 position:absolute;
-width:120px;
-text-align:center;
-left:50%;
 top:50%;
+left:50%;
 transform-origin:0 0;
+width:90px;
+text-align:center;
 font-weight:900;
 font-size:14px;
 }
@@ -348,10 +325,10 @@ font-weight:900;
 border-radius:20px;
 z-index:999;
 animation:pop 0.5s ease;
-box-shadow:0 0 30px rgba(255,215,0,0.8);
+box-shadow:0 0 30px gold;
 }
 
-.win { background:linear-gradient(45deg,gold,orange); color:black; }
+.win { background:gold; color:black; }
 .lose { background:red; }
 .free { background:purple; }
 .neutral { background:#333; }
@@ -360,17 +337,6 @@ box-shadow:0 0 30px rgba(255,215,0,0.8);
 0% { transform:translate(-50%,-50%) scale(0.5); opacity:0; }
 60% { transform:translate(-50%,-50%) scale(1.2); }
 100% { transform:translate(-50%,-50%) scale(1); opacity:1; }
-}
-
-.confetti {
-position:fixed;
-top:-20px;
-font-size:22px;
-animation:fall 3s linear forwards;
-}
-
-@keyframes fall {
-to { transform:translateY(110vh); opacity:0; }
 }
 `}</style><div style={{ textAlign:"center", color:"#fff", padding:20 }}><button onClick={goBack}>← Exit</button>
 
@@ -397,7 +363,7 @@ background:`hsl(${i*45},80%,50%)`
 <span
 className="label"
 style={{
-transform:`rotate(${90 - i * segmentAngle}deg)`
+transform:`rotate(${90 - i*segmentAngle}deg) translate(20px,-50%)`
 }}
 >
 {s}
@@ -417,12 +383,7 @@ transform:`rotate(${90 - i * segmentAngle}deg)`
 {popup === "free" && "🎁 FREE SPIN"}
 {popup === "neutral" && "⚖️ SAME"}
 </div>
-)}{flowers.map(f=>(
-
-<div key={f.id} className="confetti" style={{left:`${f.left}%`}}>
-🌸
-</div>
-))}</div>
+)}</div>
 </>
 );
 }
