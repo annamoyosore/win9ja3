@@ -84,9 +84,11 @@ export default function CasinoWheel() {
         WALLET_COLLECTION,
         [Query.equal("userId", u.$id)]
       );
-      if (res.documents.length) setWallet(res.documents[0]);
+      if (res.documents.length) {
+        setWallet(res.documents[0]);
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Wallet load failed:", err);
     }
   }
 
@@ -118,8 +120,16 @@ export default function CasinoWheel() {
     if (spinning || !wallet) return;
 
     const amount = Number(stake);
-    if (!amount || amount < 50) return setResult("Minimum ₦50");
-    if (wallet.balance < amount) return setResult("No balance");
+
+    if (!amount || amount < 50) {
+      setResult("Minimum ₦50");
+      return;
+    }
+
+    if (wallet.balance < amount) {
+      setResult("No balance");
+      return;
+    }
 
     setSpinning(true);
     setResult("");
@@ -147,7 +157,12 @@ export default function CasinoWheel() {
           setResult("⚖️ RETURNED");
 
         } else {
-          const mult = { X2: 2, X3: 3, X10: 10, JACKPOT: 30 }[outcome];
+          const mult = {
+            X2: 2,
+            X3: 3,
+            X10: 10,
+            JACKPOT: 30
+          }[outcome];
 
           if (mult) {
             win = amount * mult;
@@ -161,6 +176,7 @@ export default function CasinoWheel() {
           }
         }
 
+        // ✅ UPDATE WALLET
         await databases.updateDocument(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -168,6 +184,7 @@ export default function CasinoWheel() {
           { balance: newBalance }
         );
 
+        // ✅ SAVE GAME
         await databases.createDocument(
           DATABASE_ID,
           CASINO_COLLECTION,
@@ -181,7 +198,8 @@ export default function CasinoWheel() {
           }
         );
 
-        setWallet(prev => ({ ...prev, balance: newBalance });
+        // ✅ FIXED SYNTAX ERROR HERE
+        setWallet(prev => ({ ...prev, balance: newBalance }));
 
       } catch (err) {
         console.error("Spin error:", err);
@@ -192,10 +210,13 @@ export default function CasinoWheel() {
     }, 4000);
   };
 
+  // =========================
+  // UI
+  // =========================
   return (
     <div style={{ textAlign: "center", padding: 20 }}>
 
-      {/* RETURNS TOP LEFT */}
+      {/* RETURNS */}
       <div style={{
         position: "fixed",
         top: 10,
@@ -216,7 +237,7 @@ export default function CasinoWheel() {
         <div>💎 x30 → jackpot</div>
       </div>
 
-      {/* LIVE FEED TOP RIGHT */}
+      {/* LIVE FEED */}
       <div style={{ position: "fixed", top: 10, right: 10 }}>
         {feed.map(f => (
           <div key={f.id} style={{
@@ -258,8 +279,7 @@ export default function CasinoWheel() {
             transform: `rotate(${rotation}deg)`,
             transition: spinning
               ? "transform 4s cubic-bezier(0.2,0.8,0.2,1)"
-              : "none",
-            position: "relative"
+              : "none"
           }}
         >
           {segments.map((s, i) => (
