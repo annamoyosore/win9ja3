@@ -21,6 +21,7 @@ export default function CasinoWheel() {
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [feed, setFeed] = useState([]);
+  const [flowers, setFlowers] = useState([]);
 
   const segments = [
     { label: "❌", type: "LOSE", color: "#ef4444" },
@@ -62,8 +63,8 @@ export default function CasinoWheel() {
       const amount = Math.floor(Math.random() * 50000) + 2000;
 
       const msg = `💰 ${name} from ${city} won ₦${amount}`;
-
       const id = Date.now();
+
       setFeed(prev => [...prev, { id, msg }]);
 
       setTimeout(() => {
@@ -89,9 +90,6 @@ export default function CasinoWheel() {
     }
   }
 
-  // =========================
-  // RESULT ENGINE
-  // =========================
   const getResult = () => {
     const r = Math.random();
     if (r < 0.60) return "LOSE";
@@ -103,6 +101,15 @@ export default function CasinoWheel() {
     if (r < 0.998) return "X10";
     return "JACKPOT";
   };
+
+  function spawnFlowers() {
+    const items = Array.from({ length: 25 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100
+    }));
+    setFlowers(items);
+    setTimeout(() => setFlowers([]), 3000);
+  }
 
   // =========================
   // SPIN
@@ -122,118 +129,158 @@ export default function CasinoWheel() {
     const index = map[outcome];
 
     const target = index * segmentAngle + segmentAngle / 2;
-    const final = (360 - target + 90) % 360;
+    const final = (360 - target) % 360;
 
     setRotation(prev => (prev % 360) + 360 * 5 + final);
 
     setTimeout(async () => {
-      let newBalance = wallet.balance - amount;
-      let win = 0;
+      try {
+        let newBalance = wallet.balance - amount;
+        let win = 0;
 
-      if (outcome === "FREE") {
-        newBalance += amount;
-        setResult("🎁 FREE SPIN");
+        if (outcome === "FREE") {
+          newBalance += amount;
+          setResult("🎁 FREE SPIN");
 
-      } else if (outcome === "X1") {
-        newBalance += amount;
-        setResult("⚖️ RETURNED");
+        } else if (outcome === "X1") {
+          newBalance += amount;
+          setResult("⚖️ RETURNED");
 
-      } else {
-        const mult = { X2: 2, X3: 3, X10: 10, JACKPOT: 30 }[outcome];
-
-        if (mult) {
-          win = amount * mult;
-          newBalance += win;
-          setResult(`🎉 WON ₦${win}`);
-          setWon(win);
         } else {
-          setResult("❌ LOST");
+          const mult = { X2: 2, X3: 3, X10: 10, JACKPOT: 30 }[outcome];
+
+          if (mult) {
+            win = amount * mult;
+            newBalance += win;
+            setResult(`🎉 WON ₦${win}`);
+            setWon(win);
+
+            if (mult >= 10) spawnFlowers();
+          } else {
+            setResult("❌ LOST");
+          }
         }
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          wallet.$id,
+          { balance: newBalance }
+        );
+
+        await databases.createDocument(
+          DATABASE_ID,
+          CASINO_COLLECTION,
+          ID.unique(),
+          {
+            userId: wallet.userId,
+            stake: amount,
+            win,
+            result: outcome,
+            createdAt: new Date().toISOString()
+          }
+        );
+
+        setWallet(prev => ({ ...prev, balance: newBalance });
+
+      } catch (err) {
+        console.error("Spin error:", err);
+        setResult("Error occurred");
       }
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        { balance: newBalance }
-      );
-
-      setWallet(prev => ({ ...prev, balance: newBalance }));
       setSpinning(false);
-
     }, 4000);
   };
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={{ textAlign: "center", padding: 20 }}>
 
-      <h2>🎡 Casino Wheel</h2>
-
-      {/* POINTER */}
+      {/* RETURNS TOP LEFT */}
       <div style={{
-        width: 0,
-        height: 0,
-        borderLeft: "18px solid transparent",
-        borderRight: "18px solid transparent",
-        borderBottom: "28px solid gold",
-        margin: "0 auto"
-      }} />
+        position: "fixed",
+        top: 10,
+        left: 10,
+        background: "#000",
+        color: "gold",
+        padding: 12,
+        borderRadius: 10,
+        border: "1px solid gold",
+        fontWeight: "bold",
+        zIndex: 999
+      }}>
+        🎯 RETURNS
+        <div>x1 → stake</div>
+        <div>x2 → double</div>
+        <div>x3 → triple</div>
+        <div>x10 → big</div>
+        <div>💎 x30 → jackpot</div>
+      </div>
 
-      {/* WHEEL */}
-      <div
-        style={{
-          width: 280,
-          height: 280,
-          borderRadius: "50%",
-          margin: "10px auto",
-          background: gradient,
-          transform: `rotate(${rotation}deg)`,
-          transition: spinning
-            ? "transform 4s cubic-bezier(0.2, 0.8, 0.2, 1)"
-            : "none",
-          position: "relative",
-          boxShadow: "0 0 25px gold"
-        }}
-      >
-        {segments.map((s, i) => (
-          <div
-            key={i}
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: `rotate(${i * segmentAngle}deg) translate(0, -120px) rotate(-${i * segmentAngle}deg)`,
-              fontSize: 14,
-              fontWeight: "bold",
-              color: "#fff"
-            }}
-          >
-            {s.label}
+      {/* LIVE FEED TOP RIGHT */}
+      <div style={{ position: "fixed", top: 10, right: 10 }}>
+        {feed.map(f => (
+          <div key={f.id} style={{
+            background: "#000",
+            color: "gold",
+            fontWeight: "bold",
+            padding: 8,
+            margin: 4,
+            border: "1px solid gold",
+            borderRadius: 6
+          }}>
+            {f.msg}
           </div>
         ))}
       </div>
 
-      {/* RETURNS PANEL */}
-      <div style={{
-        background: "#111",
-        padding: 10,
-        borderRadius: 10,
-        margin: "10px auto",
-        width: 200,
-        color: "#fff"
-      }}>
-        <b>Possible Returns</b>
-        <p>x1 → stake back</p>
-        <p>x2 → double</p>
-        <p>x3 → triple</p>
-        <p>x10 → big win</p>
-        <p>💎30 → jackpot</p>
+      <h2>🎡 Casino Wheel</h2>
+
+      {/* POINTER + WHEEL */}
+      <div style={{ position: "relative", width: 300, margin: "0 auto" }}>
+
+        <div style={{
+          position: "absolute",
+          top: -5,
+          left: "50%",
+          transform: "translateX(-50%)",
+          borderLeft: "14px solid transparent",
+          borderRight: "14px solid transparent",
+          borderBottom: "24px solid gold",
+          zIndex: 10
+        }} />
+
+        <div
+          style={{
+            width: 280,
+            height: 280,
+            borderRadius: "50%",
+            background: gradient,
+            transform: `rotate(${rotation}deg)`,
+            transition: spinning
+              ? "transform 4s cubic-bezier(0.2,0.8,0.2,1)"
+              : "none",
+            position: "relative"
+          }}
+        >
+          {segments.map((s, i) => (
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: `rotate(${i * segmentAngle}deg) translate(0,-120px) rotate(-${i * segmentAngle}deg)`,
+                fontSize: 13,
+                fontWeight: "bold",
+                color: "#fff"
+              }}
+            >
+              {s.label}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* INPUT */}
       <input
         type="number"
         placeholder="Stake"
@@ -254,26 +301,15 @@ export default function CasinoWheel() {
 
       <h4>Balance: ₦{wallet?.balance || 0}</h4>
 
-      {/* GOLD LIVE FEED */}
-      <div style={{ position: "fixed", top: 10, right: 10 }}>
-        {feed.map(f => (
-          <div
-            key={f.id}
-            style={{
-              background: "black",
-              color: "gold",
-              fontWeight: "bold",
-              padding: 8,
-              margin: 5,
-              border: "1px solid gold",
-              borderRadius: 6,
-              boxShadow: "0 0 10px gold"
-            }}
-          >
-            {f.msg}
-          </div>
-        ))}
-      </div>
+      {/* FLOWERS */}
+      {flowers.map(f => (
+        <div key={f.id} style={{
+          position: "fixed",
+          top: "-10px",
+          left: `${f.left}%`,
+          animation: "fall 3s linear"
+        }}>🌸</div>
+      ))}
 
     </div>
   );
