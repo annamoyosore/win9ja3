@@ -100,12 +100,14 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
+  // ✅ UPDATED PROBABILITY
   const getResult = () => {
     const r = Math.random();
-    if (r < 0.50) return "LOSE";
-    if (r < 0.65) return "LOSE2";
-    if (r < 0.75) return "FREE";
-    if (r < 0.95) return "X1";
+
+    if (r < 0.40) return "LOSE";
+    if (r < 0.55) return "LOSE2";
+    if (r < 0.65) return "FREE";
+    if (r < 0.85) return "X1";
     if (r < 0.975) return "X2";
     if (r < 0.985) return "X3";
     if (r < 0.995) return "X10";
