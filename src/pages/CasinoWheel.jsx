@@ -16,7 +16,6 @@ export default function CasinoWheel({ goBack }) {
   const [won, setWon] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [feed, setFeed] = useState([]);
-  const [flowers, setFlowers] = useState([]);
 
   const audioCtxRef = useRef(null);
   const tickerRef = useRef(null);
@@ -35,14 +34,14 @@ export default function CasinoWheel({ goBack }) {
 
   // 🎡 SEGMENTS
   const segments = [
-    { label: "❌", type: "LOSE", color: "#ef4444" },
+    { label: "❌ LOSE", type: "LOSE", color: "#ef4444" },
     { label: "x2", type: "X2", color: "#22c55e" },
-    { label: "🎁", type: "FREE", color: "#3b82f6" },
+    { label: "🎁 FREE", type: "FREE", color: "#3b82f6" },
     { label: "x3", type: "X3", color: "#a855f7" },
-    { label: "❌", type: "LOSE2", color: "#ef4444" },
+    { label: "❌ LOSE", type: "LOSE2", color: "#ef4444" },
     { label: "x1", type: "X1", color: "#f59e0b" },
-    { label: "x10", type: "X10", color: "#f97316" },
-    { label: "💎", type: "JACKPOT", color: "#eab308" }
+    { label: "🔥 x10", type: "X10", color: "#f97316" },
+    { label: "💎 ×30", type: "JACKPOT", color: "#eab308" }
   ];
 
   const segmentAngle = 360 / segments.length;
@@ -69,7 +68,6 @@ export default function CasinoWheel({ goBack }) {
       { type: "X10", w: 0.009 },
       { type: "JACKPOT", w: 0.001 }
     ];
-
     let r = Math.random(), sum = 0;
     for (let p of pool) {
       sum += p.w;
@@ -105,31 +103,18 @@ export default function CasinoWheel({ goBack }) {
 
   const stopTicking = () => clearTimeout(tickerRef.current);
 
-  // 🌸 WIN EFFECT
-  const spawnFlowers = () => {
-    const f = Array.from({ length: 30 }).map((_, i) => ({
-      id: i,
-      left: Math.random() * 100
-    }));
-    setFlowers(f);
-    setTimeout(() => setFlowers([]), 2500);
-  };
-
   // 🔥 FEED
   useEffect(() => {
     const i = setInterval(() => {
-      const names = ["John", "Emma", "David"];
+      const names = ["David", "Emma", "Mike"];
       const name = names[Math.floor(Math.random() * names.length)];
       const win = [200, 500, 3000][Math.floor(Math.random() * 3)];
-
       const id = Date.now();
       setFeed(f => [...f, { id, msg: `🎉 ${name} won ₦${win}` }]);
-
       setTimeout(() => {
         setFeed(f => f.filter(x => x.id !== id));
       }, 3000);
     }, 3000);
-
     return () => clearInterval(i);
   }, []);
 
@@ -170,8 +155,7 @@ export default function CasinoWheel({ goBack }) {
 
       if (win > 0) {
         setWon(win);
-        setResult(`🎉 ₦${win}`);
-        spawnFlowers();
+        setResult(`🎉 ₦${win.toLocaleString()}`);
       } else {
         setResult("❌ Lose");
       }
@@ -194,8 +178,8 @@ export default function CasinoWheel({ goBack }) {
   return (
     <div style={{ display: "flex", color: "#fff" }}>
 
-      {/* LEFT */}
-      <div style={{ width: 120 }}>
+      {/* LEFT PANEL */}
+      <div style={{ width: 120, padding: 10 }}>
         <h4>Returns</h4>
         {getWinInfo(stake).map((w,i)=>(
           <div key={i}>{w.l} → ₦{w.v}</div>
@@ -207,7 +191,7 @@ export default function CasinoWheel({ goBack }) {
 
         <button onClick={goBack}>← Exit</button>
 
-        <h2>🎡 Wheel</h2>
+        <h2>🎡 Casino Wheel</h2>
 
         <input
           value={stake}
@@ -216,42 +200,51 @@ export default function CasinoWheel({ goBack }) {
         />
 
         {/* POINTER */}
-        <div style={{ fontSize:24 }}>🔻</div>
+        <div style={{ fontSize:24, zIndex:10 }}>🔻</div>
 
-        {/* WHEEL FIX */}
+        {/* WHEEL CONTAINER (STRICT) */}
         <div style={{
-          width:260,
-          height:260,
+          width:240,
+          height:240,
           margin:"20px auto",
-          borderRadius:"50%",
-          overflow:"hidden",
           position:"relative",
-          transform:`rotate(${rotation}deg)`,
-          transition:"transform 4.5s cubic-bezier(.17,.67,.83,.67)"
+          zIndex:1
         }}>
-          {segments.map((seg,i)=>(
-            <div key={i} style={{
-              position:"absolute",
-              width:"50%",
-              height:"50%",
-              top:"50%",
-              left:"50%",
-              transformOrigin:"0% 0%",
-              transform:`rotate(${i*segmentAngle}deg) skewY(${90-segmentAngle}deg)`,
-              background:seg.color
-            }}>
-              <span style={{
+
+          <div style={{
+            width:"100%",
+            height:"100%",
+            borderRadius:"50%",
+            overflow:"hidden",
+            transform:`rotate(${rotation}deg)`,
+            transition:"transform 4.5s cubic-bezier(.17,.67,.83,.67)"
+          }}>
+            {segments.map((seg,i)=>(
+              <div key={i} style={{
                 position:"absolute",
-                top:"-90%",
-                left:"10%",
-                transform:`skewY(-${90-segmentAngle}deg) rotate(${segmentAngle/2}deg)`,
-                fontSize:10,
-                fontWeight:"bold"
+                width:"50%",
+                height:"50%",
+                top:"50%",
+                left:"50%",
+                transformOrigin:"0% 0%",
+                transform:`rotate(${i*segmentAngle}deg) skewY(${90-segmentAngle}deg)`,
+                background:seg.color
               }}>
-                {seg.label}
-              </span>
-            </div>
-          ))}
+                <span style={{
+                  position:"absolute",
+                  top:"-85%",
+                  left:"15%",
+                  transform:`skewY(-${90-segmentAngle}deg) rotate(${segmentAngle/2}deg)`,
+                  fontSize:11,
+                  fontWeight:"900",
+                  color:"#fff"
+                }}>
+                  {seg.label}
+                </span>
+              </div>
+            ))}
+          </div>
+
         </div>
 
         <button onClick={spin}>
@@ -261,19 +254,10 @@ export default function CasinoWheel({ goBack }) {
         <h3>{result}</h3>
         <h2>₦{won}</h2>
 
-        {/* FLOWERS */}
-        {flowers.map(f=>(
-          <div key={f.id} style={{
-            position:"fixed",
-            top:0,
-            left:`${f.left}%`
-          }}>🌸</div>
-        ))}
-
       </div>
 
-      {/* RIGHT */}
-      <div style={{ width:140 }}>
+      {/* RIGHT PANEL */}
+      <div style={{ width:140, padding:10 }}>
         {feed.map(f=>(
           <div key={f.id}>{f.msg}</div>
         ))}
