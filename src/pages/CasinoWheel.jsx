@@ -46,6 +46,8 @@ export default function CasinoWheel() {
     .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
     .join(",")})`;
 
+  const amount = Number(stake) || 0;
+
   function tick() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -101,7 +103,6 @@ export default function CasinoWheel() {
     if (res.documents.length) setWallet(res.documents[0]);
   }
 
-  // ✅ FINAL PROBABILITY
   const getResult = () => {
     const r = Math.random();
 
@@ -126,22 +127,15 @@ export default function CasinoWheel() {
   const spin = async () => {
     if (spinning || !wallet) return;
 
-    const amount = Number(stake);
-    if (!amount || amount < 50) return;
-    if (wallet.balance < amount) return;
+    const bet = Number(stake);
+    if (!bet || bet < 50) return;
+    if (wallet.balance < bet) return;
 
     setSpinning(true);
     setCanStop(true);
     setGlow(true);
 
-    let ticks = 0;
-    const sound = setInterval(() => {
-      tick();
-      ticks++;
-      if (ticks > 40) clearInterval(sound);
-    }, 60);
-
-    let deducted = wallet.balance - amount;
+    let deducted = wallet.balance - bet;
 
     await databases.updateDocument(
       DATABASE_ID,
@@ -164,10 +158,9 @@ export default function CasinoWheel() {
     const spins = 360 * 5;
     const finalAngle = spins + (360 - centerAngle);
 
-    spinDataRef.current = { outcome, amount, deducted, index };
+    spinDataRef.current = { outcome, bet, deducted, index };
 
     setRotation(finalAngle);
-
     timeoutRef.current = setTimeout(finishSpin, 4000);
   };
 
@@ -175,21 +168,21 @@ export default function CasinoWheel() {
     const data = spinDataRef.current;
     if (!data) return;
 
-    const { outcome, amount, deducted, index } = data;
+    const { outcome, bet, deducted, index } = data;
 
     let win = 0;
     const mult = { X1:1, X2:2, X3:3 }[outcome];
 
     if (outcome === "FREE") {
-      win = amount;
+      win = bet;
       setResult("🎁 FREE SPIN");
     } else if (outcome === "ALMOST") {
-      setResult("😬 SO CLOSE! TRY AGAIN");
+      setResult("😬 ALMOST! TRY AGAIN");
     } else if (mult) {
-      win = amount * mult;
+      win = bet * mult;
       setResult(`🎉 YOU WON ₦${win}`);
       setWon(win);
-      if (win > amount) spawnFlowers();
+      if (win > bet) spawnFlowers();
     } else {
       setResult("❌ YOU LOST");
     }
@@ -212,7 +205,7 @@ export default function CasinoWheel() {
         ID.unique(),
         {
           userId: wallet.userId || wallet.$id,
-          stake: amount,
+          stake: bet,
           win,
           result: outcome,
           createdAt: new Date().toISOString()
@@ -243,7 +236,7 @@ export default function CasinoWheel() {
   return (
     <div style={{ textAlign: "center", paddingTop: 120 }}>
 
-      {/* RETURNS (UNCHANGED) */}
+      {/* RETURNS (dynamic now) */}
       <div style={{
         position: "fixed",
         top: 10,
@@ -256,14 +249,12 @@ export default function CasinoWheel() {
         border: "1px solid gold"
       }}>
         🎯 RETURNS
-        <div>x1 → ₦same</div>
-        <div>x2 → double</div>
-        <div>x3 → triple</div>
-        <div>x10 → big</div>
-        <div>💎 x30</div>
+        <div>x1 → ₦{amount}</div>
+        <div>x2 → ₦{amount * 2}</div>
+        <div>x3 → ₦{amount * 3}</div>
       </div>
 
-      {/* FEED (UNCHANGED) */}
+      {/* FEED unchanged */}
       <div style={{ position: "fixed", top: 10, right: 10 }}>
         {feed.map(f => (
           <div key={f.id} style={{
@@ -335,49 +326,36 @@ export default function CasinoWheel() {
         </div>
       </div>
 
-      {/* BUTTONS */}
-      <div style={{ marginTop: 10 }}>
-        <button
-          onClick={spin}
-          disabled={spinning}
-          style={{
-            padding: "18px 30px",
-            fontSize: 20,
-            fontWeight: "bold",
-            borderRadius: 14,
-            background: "linear-gradient(135deg, gold, orange)",
-            border: "none",
-            boxShadow: "0 0 15px gold",
-            marginBottom: 10
-          }}
-        >
-          {spinning ? "Spinning..." : "SPIN"}
-        </button>
+      <button
+        onClick={spin}
+        disabled={spinning}
+        style={{
+          padding: "18px 30px",
+          fontSize: 20,
+          fontWeight: "bold",
+          borderRadius: 14,
+          background: "linear-gradient(135deg, gold, orange)",
+          border: "none",
+          boxShadow: "0 0 15px gold"
+        }}
+      >
+        {spinning ? "Spinning..." : "SPIN"}
+      </button>
 
-        {spinning && (
-          <div>
-            <button
-              onClick={handleStop}
-              style={{
-                padding: "10px 20px",
-                background: "#111",
-                color: "white",
-                borderRadius: 8
-              }}
-            >
-              STOP
-            </button>
-          </div>
-        )}
-      </div>
+      {spinning && (
+        <div style={{ marginTop: 10 }}>
+          <button onClick={handleStop}>STOP</button>
+        </div>
+      )}
 
-      {/* BIG RESULT */}
       <div style={{
         fontSize: 36,
         fontWeight: "bold",
         marginTop: 20,
-        color: result.includes("WON") ? "gold" :
-               result.includes("LOST") ? "red" : "#fff"
+        color:
+          result.includes("WON") ? "gold" :
+          result.includes("LOST") ? "red" :
+          result.includes("ALMOST") ? "orange" : "#fff"
       }}>
         {result}
       </div>
