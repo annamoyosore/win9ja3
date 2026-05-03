@@ -68,6 +68,9 @@ export default function Wallet() {
     }
   }
 
+  // =========================
+  // PROMO
+  // =========================
   function generatePromoCode(name) {
     const safe = name || "USER";
     const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
@@ -132,7 +135,6 @@ export default function Wallet() {
     const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;
 
     const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-
     window.open(url, "_blank");
   }
 
@@ -293,14 +295,14 @@ export default function Wallet() {
         ⬅ Back
       </button>
 
-      {/* INVITE BUTTON */}
+      {/* INVITE */}
       <button style={styles.inviteBtn} onClick={inviteWhatsApp}>
         📲 Invite via WhatsApp
       </button>
 
       {/* WHATSAPP GROUP */}
       <a
-        href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"
+        href="https://chat.whatsapp.com/YOUR_NEW_LINK_HERE"
         target="_blank"
         rel="noreferrer"
         style={styles.whatsapp}
@@ -317,7 +319,6 @@ export default function Wallet() {
 const styles = {
   container: {
     padding: 20,
-    paddingBottom: 80,
     background: "#0f172a",
     color: "white",
     minHeight: "100vh"
@@ -381,12 +382,14 @@ const styles = {
     fontWeight: "bold"
   },
   whatsapp: {
-    position: "fixed",
-    bottom: 0,
+    marginTop: 10,
     width: "100%",
     padding: 14,
     background: "#128C7E",
     textAlign: "center",
-    color: "#fff"
+    color: "#fff",
+    display: "block",
+    borderRadius: 8,
+    textDecoration: "none"
   }
 };
