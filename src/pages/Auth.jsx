@@ -20,6 +20,12 @@ export default function Auth({ onLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  function generatePromoCode(name) {
+    const clean = name.replace(/\s+/g, "").toUpperCase().slice(0, 5);
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    return clean + rand;
+  }
+
   async function hasActiveSession() {
     try {
       await account.get();
@@ -35,7 +41,6 @@ export default function Auth({ onLogin }) {
     } catch {}
   }
 
-  // Normalize Nigerian phone
   function normalizePhone(input) {
     let p = input.replace(/\D/g, "");
 
@@ -82,12 +87,12 @@ export default function Auth({ onLogin }) {
         const formattedPhone = normalizePhone(phone);
 
         if (!formattedPhone) {
-          alert("Enter valid phone number (e.g. 080XXXXXXXX or 234XXXXXXXXXX)");
+          alert("Enter valid phone number");
           setLoading(false);
           return;
         }
 
-        // 🔒 CHECK IF PHONE EXISTS
+        // Check duplicate phone
         const existing = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -113,7 +118,7 @@ export default function Auth({ onLogin }) {
 
         const currentUser = await account.get();
 
-        // ================= PROMO (NO BONUS) =================
+        // ================= PROMO USED =================
         let promoUsed = false;
         let savedPromoCode = null;
 
@@ -132,8 +137,7 @@ export default function Auth({ onLogin }) {
             if (
               promo &&
               promo.isActive &&
-              (!promo.maxUses || promo.usedCount < promo.maxUses) &&
-              (!promo.expiresAt || new Date(promo.expiresAt) > new Date())
+              (!promo.maxUses || promo.usedCount < promo.maxUses)
             ) {
               promoUsed = true;
               savedPromoCode = code;
@@ -158,6 +162,29 @@ export default function Auth({ onLogin }) {
           }
         }
 
+        // ================= CREATE USER PROMO =================
+        let userPromo = null;
+
+        try {
+          userPromo = generatePromoCode(name);
+
+          await databases.createDocument(
+            DATABASE_ID,
+            PROMO_COLLECTION,
+            ID.unique(),
+            {
+              code: userPromo,
+              ownerId: currentUser.$id,
+              usedCount: 0,
+              isActive: true
+            }
+          );
+
+        } catch (err) {
+          console.log("Promo create failed, retrying...");
+          userPromo = generatePromoCode(name + Date.now());
+        }
+
         // ================= WALLET =================
         await databases.createDocument(
           DATABASE_ID,
@@ -170,7 +197,8 @@ export default function Auth({ onLogin }) {
             balance: 500,
             locked: 0,
             promoUsed: promoUsed,
-            promoCode: savedPromoCode
+            promoCode: savedPromoCode,
+            promoOwned: userPromo // ✅ user's own code
           }
         );
       }
@@ -187,7 +215,7 @@ export default function Auth({ onLogin }) {
 
   function openSupport() {
     const message = `Hello Win9ja Support, I need help`;
-    const url = `https://wa.me/+1862272-6355?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/18622726355?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
   }
 
@@ -209,7 +237,7 @@ export default function Auth({ onLogin }) {
 
             <input
               style={styles.input}
-              placeholder="Phone Number (required)"
+              placeholder="Phone Number"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
             />
@@ -238,26 +266,16 @@ export default function Auth({ onLogin }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <span
-            style={styles.eye}
-            onClick={() => setShowPassword(!showPassword)}
-          >
+          <span style={styles.eye} onClick={() => setShowPassword(!showPassword)}>
             {showPassword ? "🙈" : "👁️"}
           </span>
         </div>
 
-        <button
-          style={styles.button}
-          onClick={handle}
-          disabled={loading}
-        >
+        <button style={styles.button} onClick={handle} disabled={loading}>
           {loading ? "Please wait..." : isLogin ? "Login" : "Register"}
         </button>
 
-        <p
-          style={styles.switch}
-          onClick={() => setIsLogin(!isLogin)}
-        >
+        <p style={styles.switch} onClick={() => setIsLogin(!isLogin)}>
           {isLogin ? "Create account" : "Login instead"}
         </p>
 
@@ -266,7 +284,7 @@ export default function Auth({ onLogin }) {
         </button>
 
         <p style={styles.license}>
-          © {new Date().getFullYear()} Win9ja. All rights reserved. Licensed platform.
+          © {new Date().getFullYear()} Win9ja. All rights reserved.
         </p>
       </div>
     </div>
@@ -289,10 +307,7 @@ const styles = {
     width: 300,
     textAlign: "center"
   },
-  logo: {
-    color: "gold",
-    marginBottom: 10
-  },
+  logo: { color: "gold" },
   input: {
     width: "100%",
     padding: 10,
@@ -300,11 +315,7 @@ const styles = {
     borderRadius: 6,
     border: "none"
   },
-  passwordWrapper: {
-    position: "relative",
-    width: "100%",
-    margin: "10px 0"
-  },
+  passwordWrapper: { position: "relative" },
   passwordInput: {
     width: "100%",
     padding: 10,
@@ -324,15 +335,9 @@ const styles = {
     padding: 12,
     background: "gold",
     border: "none",
-    borderRadius: 8,
-    fontWeight: "bold",
-    cursor: "pointer"
+    borderRadius: 8
   },
-  switch: {
-    marginTop: 10,
-    cursor: "pointer",
-    color: "lightblue"
-  },
+  switch: { marginTop: 10, cursor: "pointer", color: "lightblue" },
   supportBtn: {
     marginTop: 15,
     width: "100%",
@@ -340,13 +345,7 @@ const styles = {
     background: "#25D366",
     border: "none",
     borderRadius: 8,
-    color: "#fff",
-    fontWeight: "bold",
-    cursor: "pointer"
+    color: "#fff"
   },
-  license: {
-    marginTop: 15,
-    fontSize: 12,
-    color: "#9ca3af"
-  }
+  license: { marginTop: 10, fontSize: 12 }
 };
