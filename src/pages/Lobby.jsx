@@ -18,38 +18,16 @@ const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
-// AVATAR
-// =========================
-function avatar(name) {
-  if (!name) return "👤";
-  return name.charAt(0).toUpperCase();
-}
-
-// =========================
-// GET USER NAME (fallback safe)
-// =========================
-async function getUserName(userId) {
-  try {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", userId)]
-    );
-
-    return res.documents[0]?.name || "Player";
-  } catch {
-    return "Player";
-  }
-}
-
-// =========================
 // COMPONENT
 // =========================
 export default function Lobby({ goGame, back }) {
+
   const [available, setAvailable] = useState([]);
   const [waiting, setWaiting] = useState([]);
   const [running, setRunning] = useState([]);
   const [finished, setFinished] = useState([]);
+
+  const [names, setNames] = useState({}); // ✅ cache names
 
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
@@ -76,6 +54,31 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
+  // LOAD USER NAMES ONCE
+  // =========================
+  async function loadNames(userIds) {
+    const map = {};
+
+    for (let id of userIds) {
+      if (names[id]) continue;
+
+      try {
+        const res = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", id)]
+        );
+
+        map[id] = res.documents[0]?.name || "Player";
+      } catch {
+        map[id] = "Player";
+      }
+    }
+
+    setNames(prev => ({ ...prev, ...map }));
+  }
+
+  // =========================
   // REFRESH
   // =========================
   async function refresh(userId) {
@@ -91,7 +94,13 @@ export default function Lobby({ goGame, back }) {
     const run = [];
     const fin = [];
 
+    let ids = new Set();
+
     for (let m of list) {
+
+      ids.add(m.hostId);
+      if (m.opponentId) ids.add(m.opponentId);
+
       if (m.status === "finished") {
         fin.push(m);
       } else if (m.status === "waiting" && !m.opponentId) {
@@ -106,6 +115,8 @@ export default function Lobby({ goGame, back }) {
     setWaiting(wait);
     setRunning(run);
     setFinished(fin);
+
+    loadNames([...ids]);
   }
 
   // =========================
@@ -131,6 +142,7 @@ export default function Lobby({ goGame, back }) {
           stake: amount,
           pot: amount,
           status: "waiting",
+          adminPaid: false,
           createdAt: new Date().toISOString()
         }
       );
@@ -158,8 +170,7 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      if (fresh.hostId === user.$id)
-        throw new Error("You can't join your own match");
+      if (fresh.adminPaid) throw new Error("Already joined");
 
       if ((wallet?.balance || 0) < fresh.stake)
         throw new Error("Insufficient balance");
@@ -169,7 +180,7 @@ export default function Lobby({ goGame, back }) {
       const total = fresh.stake * 2;
       const adminCut = Math.floor(total * 0.1);
 
-      // ✅ CREDIT ADMIN
+      // ✅ PAY ADMIN
       const adminWallet = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -196,7 +207,9 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          pot: total - adminCut
+          pot: total - adminCut,
+          adminCut,
+          adminPaid: true
         }
       );
 
@@ -224,9 +237,7 @@ export default function Lobby({ goGame, back }) {
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id,
-        {
-          status: "cancelled"
-        }
+        { status: "cancelled" }
       );
 
       refresh(user.$id);
@@ -239,78 +250,68 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // UI CARD
-  // =========================
-  async function renderCard(m, type) {
-    const hostName = await getUserName(m.hostId);
-    const oppName = m.opponentId
-      ? await getUserName(m.opponentId)
-      : "Waiting...";
+  // CARD UI (SYNC NOW ✅)
+// =========================
+function Card({ m, type }) {
+  const host = names[m.hostId] || "Player";
+  const opp = m.opponentId ? names[m.opponentId] || "Player" : "Waiting...";
 
-    return (
-      <div key={m.$id} style={styles.card}>
-        <div>
-          <p>{avatar(hostName)} {hostName}</p>
-          <p>VS</p>
-          <p>{avatar(oppName)} {oppName}</p>
-          <p>₦{m.stake}</p>
-        </div>
+  const avatar = (n) => n.charAt(0).toUpperCase();
 
-        {/* ACTIONS */}
-        {type === "available" && (
-          <button
-            style={styles.join}
-            onClick={() => joinMatch(m)}
-          >
-            Join
-          </button>
-        )}
-
-        {type === "waiting" && (
-          <button
-            style={styles.cancel}
-            onClick={() => cancelMatch(m)}
-          >
-            Cancel
-          </button>
-        )}
-
-        {type === "running" && (
-          <button
-            style={styles.play}
-            onClick={() => goGame(m.gameId, m.stake)}
-          >
-            ▶ Play
-          </button>
-        )}
-
-        {type === "finished" && (
-          <button style={styles.finished} disabled>
-            Finished
-          </button>
-        )}
+  return (
+    <div style={styles.card}>
+      <div>
+        <p>{avatar(host)} {host}</p>
+        <p>VS</p>
+        <p>{avatar(opp)} {opp}</p>
+        <p>₦{m.stake}</p>
       </div>
-    );
-  }
+
+      {type === "available" && (
+        <button style={styles.join} onClick={() => joinMatch(m)}>
+          Join
+        </button>
+      )}
+
+      {type === "waiting" && (
+        <button style={styles.cancel} onClick={() => cancelMatch(m)}>
+          Cancel
+        </button>
+      )}
+
+      {type === "running" && (
+        <button style={styles.play} onClick={() => goGame(m.gameId, m.stake)}>
+          ▶ Play
+        </button>
+      )}
+
+      {type === "finished" && (
+        <button style={styles.finished} disabled>
+          Finished
+        </button>
+      )}
+    </div>
+  );
+}
 
   // =========================
-  // RENDER
+  // UI
   // =========================
   return (
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
 
       <h2>🟢 Available</h2>
-      {available.map(m => renderCard(m, "available"))}
+      {available.map(m => <Card key={m.$id} m={m} type="available" />)}
 
       <h2>🟡 Waiting</h2>
-      {waiting.map(m => renderCard(m, "waiting"))}
+      {waiting.map(m => <Card key={m.$id} m={m} type="waiting" />)}
 
       <h2>🔵 Running</h2>
-      {running.map(m => renderCard(m, "running"))}
+      {running.map(m => <Card key={m.$id} m={m} type="running" />)}
 
       <h2>✅ Finished</h2>
-      {finished.map(m => renderCard(m, "finished"))}
+      {finished.map(m => <Card key={m.$id} m={m} type="finished" />)}
 
       <div style={styles.createBox}>
         <input
