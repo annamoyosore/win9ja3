@@ -271,6 +271,80 @@ export default function Wallet() {
         ➖ Withdraw
       </button>
 
+      {/* ================= DEPOSIT MODAL ================= */}
+      {showDeposit && (
+        <div style={styles.modal}>
+          <h3>Deposit</h3>
+
+          <input
+            placeholder="Min ₦200"
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Full Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={styles.input}
+          />
+
+          <button style={styles.btn} onClick={makeDeposit}>
+            Make Payment
+          </button>
+
+          <button style={styles.cancel} onClick={() => setShowDeposit(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ================= WITHDRAW MODAL ================= */}
+      {showWithdraw && (
+        <div style={styles.modal}>
+          <h3>Withdraw</h3>
+
+          <input
+            placeholder="Min ₦1500"
+            type="number"
+            value={withdrawAmount}
+            onChange={(e) => setWithdrawAmount(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Bank Name"
+            value={bank}
+            onChange={(e) => setBank(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Account Number"
+            value={accountNumber}
+            onChange={(e) => setAccountNumber(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Account Name"
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            style={styles.input}
+          />
+
+          <button style={styles.btn} onClick={requestWithdraw}>
+            Submit Request
+          </button>
+
+          <button style={styles.cancel} onClick={() => setShowWithdraw(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
       {/* BACK */}
       <button style={styles.back} onClick={() => navigate("/dashboard")}>
         ⬅ Back
@@ -285,11 +359,14 @@ export default function Wallet() {
             https://win9jalife.vercel.app
           </p>
 
-          <button style={styles.copyInviteBtn} onClick={() => {
-            const text = `Join Win9ja and earn rewards 🎮\nUse my promo code: ${promoStats.code}\nhttps://win9jalife.vercel.app`;
-            navigator.clipboard.writeText(text);
-            alert("Invite text copied ✅");
-          }}>
+          <button
+            style={styles.copyInviteBtn}
+            onClick={() => {
+              const text = `Join Win9ja and earn rewards 🎮\nUse my promo code: ${promoStats.code}\nhttps://win9jalife.vercel.app`;
+              navigator.clipboard.writeText(text);
+              alert("Invite text copied ✅");
+            }}
+          >
             📋 Copy Invite
           </button>
         </div>
@@ -362,6 +439,33 @@ const styles = {
     background: "gold",
     border: "none",
     borderRadius: 8
+  },
+  modal: {
+    position: "fixed",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    background: "#111827",
+    padding: 20,
+    borderRadius: 10,
+    width: "85%",
+    maxWidth: 320,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10
+  },
+  input: {
+    width: "100%",
+    padding: 10,
+    borderRadius: 6,
+    border: "none"
+  },
+  cancel: {
+    padding: 10,
+    background: "#ef4444",
+    border: "none",
+    borderRadius: 6,
+    color: "#fff"
   },
   back: {
     marginTop: 20,
