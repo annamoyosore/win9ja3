@@ -37,9 +37,6 @@ export default function Wallet() {
 
   const [processing, setProcessing] = useState(false);
 
-  // =========================
-  // LOAD
-  // =========================
   useEffect(() => {
     load();
   }, []);
@@ -50,7 +47,6 @@ export default function Wallet() {
       const w = await getWallet(user.$id);
       setWallet(w);
 
-      // Promo fetch
       const res = await databases.listDocuments(
         DATABASE_ID,
         PROMO_COLLECTION,
@@ -72,9 +68,6 @@ export default function Wallet() {
     }
   }
 
-  // =========================
-  // SAFE PROMO GENERATOR
-  // =========================
   function generatePromoCode(name) {
     const safe = name || "USER";
     const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
@@ -89,9 +82,7 @@ export default function Wallet() {
       setProcessing(true);
 
       const user = await account.get();
-
-      const safeName = wallet?.name || "USER";
-      const code = generatePromoCode(safeName);
+      const code = generatePromoCode(wallet?.name);
 
       await databases.createDocument(
         DATABASE_ID,
@@ -127,6 +118,22 @@ export default function Wallet() {
     if (!promoStats.code) return;
     navigator.clipboard.writeText(promoStats.code);
     alert("Copied ✅");
+  }
+
+  // =========================
+  // INVITE WHATSAPP
+  // =========================
+  function inviteWhatsApp() {
+    if (!promoStats.code) {
+      alert("Generate your promo code first");
+      return;
+    }
+
+    const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;
+
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+
+    window.open(url, "_blank");
   }
 
   // =========================
@@ -231,9 +238,6 @@ export default function Wallet() {
     setProcessing(false);
   }
 
-  // =========================
-  // LOADING
-  // =========================
   if (loading) {
     return (
       <div style={styles.container}>
@@ -242,9 +246,6 @@ export default function Wallet() {
     );
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={styles.container}>
 
@@ -287,84 +288,17 @@ export default function Wallet() {
         ➖ Withdraw
       </button>
 
-      {/* DEPOSIT MODAL */}
-      {showDeposit && (
-        <div style={styles.modal}>
-          <h3>Deposit</h3>
-
-          <input
-            placeholder="Min ₦200"
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Full Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={styles.input}
-          />
-
-          <button style={styles.btn} onClick={makeDeposit}>
-            Make Payment
-          </button>
-
-          <button style={styles.cancel} onClick={() => setShowDeposit(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {/* WITHDRAW MODAL */}
-      {showWithdraw && (
-        <div style={styles.modal}>
-          <h3>Withdraw</h3>
-
-          <input
-            placeholder="Min ₦1500"
-            type="number"
-            value={withdrawAmount}
-            onChange={(e) => setWithdrawAmount(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Bank Name"
-            value={bank}
-            onChange={(e) => setBank(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Account Number"
-            value={accountNumber}
-            onChange={(e) => setAccountNumber(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Account Name"
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-            style={styles.input}
-          />
-
-          <button style={styles.btn} onClick={requestWithdraw}>
-            Submit Request
-          </button>
-
-          <button style={styles.cancel} onClick={() => setShowWithdraw(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
-
+      {/* BACK */}
       <button style={styles.back} onClick={() => navigate("/dashboard")}>
         ⬅ Back
       </button>
 
+      {/* INVITE BUTTON */}
+      <button style={styles.inviteBtn} onClick={inviteWhatsApp}>
+        📲 Invite via WhatsApp
+      </button>
+
+      {/* WHATSAPP GROUP */}
       <a
         href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"
         target="_blank"
@@ -432,39 +366,26 @@ const styles = {
     border: "none",
     borderRadius: 8
   },
-  modal: {
-    position: "fixed",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "#111827",
-    padding: 20,
-    borderRadius: 10,
-    width: "85%"
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    marginTop: 10,
-    borderRadius: 6
-  },
-  cancel: {
-    marginTop: 10,
-    background: "red",
-    padding: 10,
-    border: "none",
-    borderRadius: 6
-  },
   back: {
     marginTop: 20,
     padding: 10
+  },
+  inviteBtn: {
+    marginTop: 15,
+    width: "100%",
+    padding: 12,
+    background: "#25D366",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff",
+    fontWeight: "bold"
   },
   whatsapp: {
     position: "fixed",
     bottom: 0,
     width: "100%",
     padding: 14,
-    background: "#25D366",
+    background: "#128C7E",
     textAlign: "center",
     color: "#fff"
   }
