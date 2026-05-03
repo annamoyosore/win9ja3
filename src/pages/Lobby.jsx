@@ -18,10 +18,10 @@ const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
-// AVATAR GENERATOR
+// AVATAR
 // =========================
 function getAvatar(name = "U") {
-  return name.charAt(0).toUpperCase();
+  return name?.charAt(0)?.toUpperCase() || "U";
 }
 
 // =========================
@@ -103,7 +103,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD NAMES (SAFE)
+  // LOAD NAMES
   // =========================
   async function loadNames(userIds) {
     let map = {};
@@ -166,6 +166,54 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
+  // CANCEL MATCH
+  // =========================
+  async function cancelMatch(match) {
+    if (loadingMatchId) return;
+
+    if (match.hostId !== user.$id) {
+      return alert("Only host can cancel");
+    }
+
+    if (match.opponentId) {
+      return alert("Opponent already joined");
+    }
+
+    setLoadingMatchId(match.$id);
+
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        match.$id
+      );
+
+      if (fresh.status !== "waiting") {
+        throw new Error("Match already started");
+      }
+
+      await unlockFunds(user.$id, fresh.stake);
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        fresh.$id,
+        {
+          status: "cancelled",
+          refunded: true
+        }
+      );
+
+      refresh(user.$id);
+
+    } catch (err) {
+      alert(err.message);
+    }
+
+    setLoadingMatchId(null);
+  }
+
+  // =========================
   // JOIN MATCH
   // =========================
   async function joinMatch(match) {
@@ -194,7 +242,7 @@ export default function Lobby({ goGame, back }) {
       const adminCut = Math.floor(total * 0.1);
       const pot = total - adminCut;
 
-      // ✅ CREDIT ADMIN
+      // 💰 PAY ADMIN
       const adminWalletRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -308,18 +356,17 @@ export default function Lobby({ goGame, back }) {
       </div>
 
       {/* AVAILABLE */}
-      <h3>🟢 Available</h3>
+      <h3 style={{ color: "#22c55e" }}>🟢 Available</h3>
       {available.map((m) => (
         <div key={m.$id} style={styles.card}>
           <div>
-            <b>{getAvatar(names[m.hostId])}</b>{" "}
-            {names[m.hostId]}
+            <b>{getAvatar(names[m.hostId])}</b> {names[m.hostId]}
             <p>₦{m.stake}</p>
           </div>
 
           <button
+            style={styles.joinBtn}
             onClick={() => joinMatch(m)}
-            disabled={loadingMatchId === m.$id}
           >
             Join
           </button>
@@ -327,29 +374,43 @@ export default function Lobby({ goGame, back }) {
       ))}
 
       {/* MY MATCHES */}
-      <h3>🎯 My Matches</h3>
+      <h3 style={{ color: "gold" }}>🎯 My Matches</h3>
       {myMatches.map((m) => {
-        const host = names[m.hostId];
-        const opp = names[m.opponentId];
+        const isFinished = m.status === "finished";
+        const isWaiting = m.status === "waiting";
+        const isPlaying =
+          m.status === "matched" || m.status === "running";
 
         return (
           <div key={m.$id} style={styles.card}>
             <div>
-              <b>{getAvatar(host)}</b> {host}
-              {" vs "}
-              <b>{getAvatar(opp)}</b> {opp || "Waiting..."}
+              {names[m.hostId]} vs {names[m.opponentId] || "Waiting..."}
               <p>₦{m.stake}</p>
             </div>
 
-            {m.status === "finished" ? (
-              <span>✅ Finished</span>
-            ) : m.status === "waiting" ? (
-              <span>⏳ Waiting</span>
-            ) : (
-              <button onClick={() => goGame(m.gameId, m.stake)}>
-                ▶ Play
+            {isFinished ? (
+              <button style={styles.finishedBtn} disabled>
+                Finished
               </button>
-            )}
+            ) : isWaiting && m.hostId === user.$id && !m.opponentId ? (
+              <button
+                style={styles.cancelBtn}
+                onClick={() => cancelMatch(m)}
+              >
+                Cancel
+              </button>
+            ) : isWaiting ? (
+              <button style={styles.waitBtn} disabled>
+                Waiting
+              </button>
+            ) : isPlaying ? (
+              <button
+                style={styles.playBtn}
+                onClick={() => goGame(m.gameId, m.stake)}
+              >
+                Play
+              </button>
+            ) : null}
           </div>
         );
       })}
@@ -379,9 +440,11 @@ const styles = {
   },
   createBox: { marginBottom: 20 },
   input: { width: "100%", padding: 10 },
-  createBtn: {
-    width: "100%",
-    padding: 10,
-    background: "gold"
-  }
+  createBtn: { width: "100%", padding: 10, background: "gold" },
+
+  joinBtn: { background: "gold", padding: 8 },
+  playBtn: { background: "green", color: "#fff", padding: 8 },
+  waitBtn: { background: "gray", color: "#fff", padding: 8 },
+  finishedBtn: { background: "#1f2937", color: "#9ca3af", padding: 8 },
+  cancelBtn: { background: "#ef4444", color: "#fff", padding: 8 }
 };
