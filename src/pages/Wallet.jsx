@@ -23,8 +23,23 @@ export default function Wallet() {
     usedCount: 0
   });
 
+  // Deposit states
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [name, setName] = useState("");
+
+  // Withdraw states
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [bank, setBank] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountName, setAccountName] = useState("");
+
   const [processing, setProcessing] = useState(false);
 
+  // =========================
+  // LOAD
+  // =========================
   useEffect(() => {
     load();
   }, []);
@@ -35,7 +50,7 @@ export default function Wallet() {
       const w = await getWallet(user.$id);
       setWallet(w);
 
-      // Fetch promo
+      // Promo fetch
       const res = await databases.listDocuments(
         DATABASE_ID,
         PROMO_COLLECTION,
@@ -57,9 +72,12 @@ export default function Wallet() {
     }
   }
 
-  // ================= GENERATE PROMO =================
+  // =========================
+  // SAFE PROMO GENERATOR
+  // =========================
   function generatePromoCode(name) {
-    const clean = name.replace(/\s+/g, "").toUpperCase().slice(0, 5);
+    const safe = name || "USER";
+    const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
     const rand = Math.floor(1000 + Math.random() * 9000);
     return clean + rand;
   }
@@ -72,7 +90,8 @@ export default function Wallet() {
 
       const user = await account.get();
 
-      const code = generatePromoCode(wallet.name);
+      const safeName = wallet?.name || "USER";
+      const code = generatePromoCode(safeName);
 
       await databases.createDocument(
         DATABASE_ID,
@@ -104,15 +123,117 @@ export default function Wallet() {
     }
   }
 
-  // ================= COPY =================
   function copyCode() {
     if (!promoStats.code) return;
-
     navigator.clipboard.writeText(promoStats.code);
     alert("Copied ✅");
   }
 
-  // ================= LOADING =================
+  // =========================
+  // DEPOSIT
+  // =========================
+  async function makeDeposit() {
+    if (processing) return;
+
+    if (!amount || Number(amount) < 200) {
+      return alert("Minimum deposit ₦200");
+    }
+
+    if (!name) {
+      return alert("Enter full name");
+    }
+
+    setProcessing(true);
+
+    try {
+      const user = await account.get();
+      const ref = "DEP-" + Date.now();
+
+      await databases.createDocument(
+        DATABASE_ID,
+        "deposit_requests",
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: Number(amount),
+          name,
+          status: "pending",
+          reference: ref,
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
+
+    } catch (err) {
+      alert(err.message);
+    }
+
+    setProcessing(false);
+  }
+
+  // =========================
+  // WITHDRAW
+  // =========================
+  async function requestWithdraw() {
+    if (processing) return;
+
+    if (!withdrawAmount || Number(withdrawAmount) < 1500) {
+      return alert("Minimum withdrawal ₦1500");
+    }
+
+    if (Number(withdrawAmount) > (wallet?.balance || 0)) {
+      return alert("Insufficient balance");
+    }
+
+    if (!bank) return alert("Enter bank name");
+
+    if (!accountNumber || accountNumber.length < 10) {
+      return alert("Enter valid account number");
+    }
+
+    if (!accountName) {
+      return alert("Enter account name");
+    }
+
+    setProcessing(true);
+
+    try {
+      const user = await account.get();
+
+      await databases.createDocument(
+        DATABASE_ID,
+        "withdrawal_requests",
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: Number(withdrawAmount),
+          bank,
+          accountNumber,
+          accountName,
+          status: "pending",
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      alert("Withdrawal request sent");
+
+      setShowWithdraw(false);
+      setWithdrawAmount("");
+      setBank("");
+      setAccountNumber("");
+      setAccountName("");
+
+    } catch (err) {
+      alert(err.message);
+    }
+
+    setProcessing(false);
+  }
+
+  // =========================
+  // LOADING
+  // =========================
   if (loading) {
     return (
       <div style={styles.container}>
@@ -121,10 +242,12 @@ export default function Wallet() {
     );
   }
 
-  // ================= UI =================
+  // =========================
+  // UI
+  // =========================
   return (
     <div style={styles.container}>
-      
+
       {/* HEADER */}
       <div style={styles.header}>
         <h1>💳 Wallet</h1>
@@ -133,9 +256,7 @@ export default function Wallet() {
           {promoStats.code ? (
             <>
               <span style={styles.code}>{promoStats.code}</span>
-              <button style={styles.copyBtn} onClick={copyCode}>
-                📋
-              </button>
+              <button style={styles.copyBtn} onClick={copyCode}>📋</button>
             </>
           ) : (
             <button style={styles.genBtn} onClick={createPromo}>
@@ -145,31 +266,107 @@ export default function Wallet() {
         </div>
       </div>
 
-      {/* PROMO STATS */}
       {promoStats.code && (
         <p style={styles.usedText}>
-          👥 {promoStats.usedCount} users joined with your code
+          👥 {promoStats.usedCount} users joined
         </p>
       )}
 
-      {/* WALLET CARD */}
+      {/* WALLET */}
       <div style={styles.card}>
         <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>
         <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
       </div>
 
       {/* ACTIONS */}
-      <button style={styles.btn}>➕ Deposit</button>
-      <button style={styles.btn}>➖ Withdraw</button>
+      <button style={styles.btn} onClick={() => setShowDeposit(true)}>
+        ➕ Deposit
+      </button>
 
-      {/* BACK */}
+      <button style={styles.btn} onClick={() => setShowWithdraw(true)}>
+        ➖ Withdraw
+      </button>
+
+      {/* DEPOSIT MODAL */}
+      {showDeposit && (
+        <div style={styles.modal}>
+          <h3>Deposit</h3>
+
+          <input
+            placeholder="Min ₦200"
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Full Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={styles.input}
+          />
+
+          <button style={styles.btn} onClick={makeDeposit}>
+            Make Payment
+          </button>
+
+          <button style={styles.cancel} onClick={() => setShowDeposit(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* WITHDRAW MODAL */}
+      {showWithdraw && (
+        <div style={styles.modal}>
+          <h3>Withdraw</h3>
+
+          <input
+            placeholder="Min ₦1500"
+            type="number"
+            value={withdrawAmount}
+            onChange={(e) => setWithdrawAmount(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Bank Name"
+            value={bank}
+            onChange={(e) => setBank(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Account Number"
+            value={accountNumber}
+            onChange={(e) => setAccountNumber(e.target.value)}
+            style={styles.input}
+          />
+
+          <input
+            placeholder="Account Name"
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            style={styles.input}
+          />
+
+          <button style={styles.btn} onClick={requestWithdraw}>
+            Submit Request
+          </button>
+
+          <button style={styles.cancel} onClick={() => setShowWithdraw(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
       <button style={styles.back} onClick={() => navigate("/dashboard")}>
         ⬅ Back
       </button>
 
-      {/* WHATSAPP */}
       <a
-        href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L?mode=gi_t"
+        href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"
         target="_blank"
         rel="noreferrer"
         style={styles.whatsapp}
@@ -191,84 +388,84 @@ const styles = {
     color: "white",
     minHeight: "100vh"
   },
-
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center"
   },
-
   promoHeader: {
     display: "flex",
-    alignItems: "center",
     gap: 5
   },
-
   code: {
     background: "#111827",
     padding: "6px 10px",
-    borderRadius: 6,
-    fontWeight: "bold"
+    borderRadius: 6
   },
-
   copyBtn: {
-    padding: "6px 10px",
     background: "#22c55e",
     border: "none",
     borderRadius: 6,
-    cursor: "pointer"
+    padding: "6px 10px"
   },
-
   genBtn: {
-    padding: "6px 10px",
     background: "gold",
     border: "none",
     borderRadius: 6,
-    cursor: "pointer"
+    padding: "6px 10px"
   },
-
   usedText: {
-    marginTop: 5,
     fontSize: 12,
     color: "#9ca3af"
   },
-
   card: {
     padding: 20,
     background: "#111827",
     borderRadius: 10,
     marginTop: 20
   },
-
   btn: {
     width: "100%",
     padding: 12,
     marginTop: 10,
     background: "gold",
     border: "none",
-    borderRadius: 8,
-    fontWeight: "bold"
+    borderRadius: 8
   },
-
+  modal: {
+    position: "fixed",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    background: "#111827",
+    padding: 20,
+    borderRadius: 10,
+    width: "85%"
+  },
+  input: {
+    width: "100%",
+    padding: 10,
+    marginTop: 10,
+    borderRadius: 6
+  },
+  cancel: {
+    marginTop: 10,
+    background: "red",
+    padding: 10,
+    border: "none",
+    borderRadius: 6
+  },
   back: {
     marginTop: 20,
-    padding: 10,
-    background: "#475569",
-    border: "none",
-    borderRadius: 8,
-    color: "#fff"
+    padding: 10
   },
-
   whatsapp: {
     position: "fixed",
     bottom: 0,
-    left: 0,
     width: "100%",
     padding: 14,
-    background: "linear-gradient(135deg, #25D366, #128C7E)",
-    color: "#fff",
+    background: "#25D366",
     textAlign: "center",
-    fontWeight: "bold",
-    textDecoration: "none"
+    color: "#fff"
   }
 };
