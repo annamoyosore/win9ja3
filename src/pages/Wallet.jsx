@@ -23,18 +23,6 @@ export default function Wallet() {
     usedCount: 0
   });
 
-  // Deposit states
-  const [showDeposit, setShowDeposit] = useState(false);
-  const [amount, setAmount] = useState("");
-  const [name, setName] = useState("");
-
-  // Withdraw states
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [bank, setBank] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [accountName, setAccountName] = useState("");
-
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
@@ -124,122 +112,28 @@ export default function Wallet() {
   }
 
   // =========================
-  // INVITE WHATSAPP
+  // COPY INVITE TEXT
   // =========================
-  function inviteWhatsApp() {
+  function copyInviteText() {
     if (!promoStats.code) {
       alert("Generate your promo code first");
       return;
     }
 
-    const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;
+    const text = `Join Win9ja 🎮
 
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
+Use my promo code: ${promoStats.code}
+
+Play now:
+https://win9jalife.vercel.app`;
+
+    navigator.clipboard.writeText(text);
+    alert("Invite text copied ✅");
   }
 
   // =========================
-  // DEPOSIT
+  // LOADING
   // =========================
-  async function makeDeposit() {
-    if (processing) return;
-
-    if (!amount || Number(amount) < 200) {
-      return alert("Minimum deposit ₦200");
-    }
-
-    if (!name) {
-      return alert("Enter full name");
-    }
-
-    setProcessing(true);
-
-    try {
-      const user = await account.get();
-      const ref = "DEP-" + Date.now();
-
-      await databases.createDocument(
-        DATABASE_ID,
-        "deposit_requests",
-        ID.unique(),
-        {
-          userId: user.$id,
-          amount: Number(amount),
-          name,
-          status: "pending",
-          reference: ref,
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
-
-    } catch (err) {
-      alert(err.message);
-    }
-
-    setProcessing(false);
-  }
-
-  // =========================
-  // WITHDRAW
-  // =========================
-  async function requestWithdraw() {
-    if (processing) return;
-
-    if (!withdrawAmount || Number(withdrawAmount) < 1500) {
-      return alert("Minimum withdrawal ₦1500");
-    }
-
-    if (Number(withdrawAmount) > (wallet?.balance || 0)) {
-      return alert("Insufficient balance");
-    }
-
-    if (!bank) return alert("Enter bank name");
-
-    if (!accountNumber || accountNumber.length < 10) {
-      return alert("Enter valid account number");
-    }
-
-    if (!accountName) {
-      return alert("Enter account name");
-    }
-
-    setProcessing(true);
-
-    try {
-      const user = await account.get();
-
-      await databases.createDocument(
-        DATABASE_ID,
-        "withdrawal_requests",
-        ID.unique(),
-        {
-          userId: user.$id,
-          amount: Number(withdrawAmount),
-          bank,
-          accountNumber,
-          accountName,
-          status: "pending",
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      alert("Withdrawal request sent");
-
-      setShowWithdraw(false);
-      setWithdrawAmount("");
-      setBank("");
-      setAccountNumber("");
-      setAccountName("");
-
-    } catch (err) {
-      alert(err.message);
-    }
-
-    setProcessing(false);
-  }
-
   if (loading) {
     return (
       <div style={styles.container}>
@@ -281,13 +175,9 @@ export default function Wallet() {
         <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
       </div>
 
-      {/* ACTIONS */}
-      <button style={styles.btn} onClick={() => setShowDeposit(true)}>
-        ➕ Deposit
-      </button>
-
-      <button style={styles.btn} onClick={() => setShowWithdraw(true)}>
-        ➖ Withdraw
+      {/* COPY INVITE TEXT */}
+      <button style={styles.inviteBtn} onClick={copyInviteText}>
+        📋 Copy Invite Text
       </button>
 
       {/* BACK */}
@@ -295,12 +185,7 @@ export default function Wallet() {
         ⬅ Back
       </button>
 
-      {/* INVITE */}
-      <button style={styles.inviteBtn} onClick={inviteWhatsApp}>
-        📲 Invite via WhatsApp
-      </button>
-
-      {/* WHATSAPP GROUP */}
+      {/* WHATSAPP GROUP (RESTORED TO BOTTOM) */}
       <a
         href="https://chat.whatsapp.com/YOUR_NEW_LINK_HERE"
         target="_blank"
@@ -319,6 +204,7 @@ export default function Wallet() {
 const styles = {
   container: {
     padding: 20,
+    paddingBottom: 80,
     background: "#0f172a",
     color: "white",
     minHeight: "100vh"
@@ -359,20 +245,8 @@ const styles = {
     borderRadius: 10,
     marginTop: 20
   },
-  btn: {
-    width: "100%",
-    padding: 12,
-    marginTop: 10,
-    background: "gold",
-    border: "none",
-    borderRadius: 8
-  },
-  back: {
-    marginTop: 20,
-    padding: 10
-  },
   inviteBtn: {
-    marginTop: 15,
+    marginTop: 20,
     width: "100%",
     padding: 12,
     background: "#25D366",
@@ -381,15 +255,19 @@ const styles = {
     color: "#fff",
     fontWeight: "bold"
   },
-  whatsapp: {
+  back: {
     marginTop: 10,
+    padding: 10
+  },
+  whatsapp: {
+    position: "fixed",
+    bottom: 0,
+    left: 0,
     width: "100%",
     padding: 14,
     background: "#128C7E",
     textAlign: "center",
     color: "#fff",
-    display: "block",
-    borderRadius: 8,
     textDecoration: "none"
   }
 };
