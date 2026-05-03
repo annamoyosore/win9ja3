@@ -9,12 +9,19 @@ import { ID, Query } from "appwrite";
 
 const PROMO_COLLECTION = "promocodes";
 
+// =========================
+// COMPONENT
+// =========================
 export default function Wallet() {
   const navigate = useNavigate();
 
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [promo, setPromo] = useState(null);
+
+  const [promoStats, setPromoStats] = useState({
+    code: null,
+    usedCount: 0
+  });
 
   // Deposit states
   const [showDeposit, setShowDeposit] = useState(false);
@@ -47,8 +54,13 @@ export default function Wallet() {
       );
 
       if (res.documents.length > 0) {
-        setPromo(res.documents[0]);
+        const promo = res.documents[0];
+        setPromoStats({
+          code: promo.code,
+          usedCount: promo.usedCount || 0
+        });
       }
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -56,22 +68,32 @@ export default function Wallet() {
     }
   }
 
-  // ================= PROMO =================
-  function generateCode(name) {
-    const base = (name || "USER")
-      .replace(/\s+/g, "")
-      .toUpperCase()
-      .slice(0, 5);
-
-    return base + Math.floor(1000 + Math.random() * 9000);
+  // =========================
+  // GENERATE PROMO
+  // =========================
+  function generatePromoCode(name) {
+    const safe = name || "USER";
+    const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    return clean + rand;
   }
 
   async function createPromo() {
-    try {
-      const user = await account.get();
-      const code = generateCode(wallet?.name);
+    if (processing) return;
 
-      const doc = await databases.createDocument(
+    try {
+      setProcessing(true);
+
+      // prevent duplicate
+      if (promoStats.code) {
+        alert("You already have a promo code");
+        return;
+      }
+
+      const user = await account.get();
+      const code = generatePromoCode(wallet?.name);
+
+      await databases.createDocument(
         DATABASE_ID,
         PROMO_COLLECTION,
         ID.unique(),
@@ -83,30 +105,41 @@ export default function Wallet() {
         }
       );
 
-      setPromo(doc);
-      alert("Promo created ✅");
+      setPromoStats({ code, usedCount: 0 });
+
+      alert("Promo code created ✅");
+
     } catch (err) {
       alert(err.message);
+    } finally {
+      setProcessing(false);
     }
   }
 
   function copyCode() {
-    navigator.clipboard.writeText(promo.code);
+    if (!promoStats.code) return;
+    navigator.clipboard.writeText(promoStats.code);
     alert("Copied ✅");
   }
 
-  function copyInvite() {
-    if (!promo?.code) return alert("Generate code first");
+  // =========================
+  // INVITE WHATSAPP
+  // =========================
+  function inviteWhatsApp() {
+    if (!promoStats.code) {
+      alert("Generate your promo code first");
+      return;
+    }
 
-    const text = `Join Win9ja 🎮
-Use my promo code: ${promo.code}
-https://win9jalife.vercel.app`;
+    const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;
 
-    navigator.clipboard.writeText(text);
-    alert("Invite copied ✅");
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(url, "_blank");
   }
 
-  // ================= DEPOSIT =================
+  // =========================
+  // DEPOSIT
+  // =========================
   async function makeDeposit() {
     if (processing) return;
 
@@ -139,6 +172,7 @@ https://win9jalife.vercel.app`;
       );
 
       window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
+
     } catch (err) {
       alert(err.message);
     }
@@ -146,7 +180,9 @@ https://win9jalife.vercel.app`;
     setProcessing(false);
   }
 
-  // ================= WITHDRAW =================
+  // =========================
+  // WITHDRAW
+  // =========================
   async function requestWithdraw() {
     if (processing) return;
 
@@ -159,9 +195,11 @@ https://win9jalife.vercel.app`;
     }
 
     if (!bank) return alert("Enter bank name");
+
     if (!accountNumber || accountNumber.length < 10) {
       return alert("Enter valid account number");
     }
+
     if (!accountName) {
       return alert("Enter account name");
     }
@@ -189,6 +227,11 @@ https://win9jalife.vercel.app`;
       alert("Withdrawal request sent");
 
       setShowWithdraw(false);
+      setWithdrawAmount("");
+      setBank("");
+      setAccountNumber("");
+      setAccountName("");
+
     } catch (err) {
       alert(err.message);
     }
@@ -199,7 +242,6 @@ https://win9jalife.vercel.app`;
   if (loading) {
     return (
       <div style={styles.container}>
-        <h2>💳 Wallet</h2>
         <p>Loading wallet...</p>
       </div>
     );
@@ -207,29 +249,38 @@ https://win9jalife.vercel.app`;
 
   return (
     <div style={styles.container}>
-      <h1>
-        💳 Wallet{" "}
-        {promo ? (
-          <>
-            <span style={{ fontSize: 12 }}>{promo.code}</span>
-            <span style={{ cursor: "pointer" }} onClick={copyCode}> 📋</span>
-          </>
-        ) : (
-          <span style={{ cursor: "pointer" }} onClick={createPromo}> +Code</span>
-        )}
-      </h1>
 
-      {promo && (
-        <p style={{ fontSize: 12 }}>
-          👥 {promo.usedCount || 0} users joined
+      {/* HEADER */}
+      <div style={styles.header}>
+        <h1>💳 Wallet</h1>
+
+        <div style={styles.promoHeader}>
+          {promoStats.code ? (
+            <>
+              <span style={styles.code}>{promoStats.code}</span>
+              <button style={styles.copyBtn} onClick={copyCode}>📋</button>
+            </>
+          ) : (
+            <button style={styles.genBtn} onClick={createPromo}>
+              + Code
+            </button>
+          )}
+        </div>
+      </div>
+
+      {promoStats.code && (
+        <p style={styles.usedText}>
+          👥 {promoStats.usedCount} users joined
         </p>
       )}
 
+      {/* WALLET */}
       <div style={styles.card}>
         <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>
         <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
       </div>
 
+      {/* ACTIONS */}
       <button style={styles.btn} onClick={() => setShowDeposit(true)}>
         ➕ Deposit
       </button>
@@ -238,8 +289,25 @@ https://win9jalife.vercel.app`;
         ➖ Withdraw
       </button>
 
-      <button style={styles.btn} onClick={copyInvite}>
-        📋 Copy Invite Text
+      {/* BACK */}
+      <button style={styles.back} onClick={() => navigate("/dashboard")}>
+        ⬅ Back
       </button>
 
-      {/* keep your modals EXACTLY same below */}
+      {/* INVITE BUTTON */}
+      <button style={styles.inviteBtn} onClick={inviteWhatsApp}>
+        📲 Invite via WhatsApp
+      </button>
+
+      {/* WHATSAPP GROUP */}
+      <a
+        href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"
+        target="_blank"
+        rel="noreferrer"
+        style={styles.whatsapp}
+      >
+        💬 Join WhatsApp Updates Group
+      </a>
+    </div>
+  );
+}
