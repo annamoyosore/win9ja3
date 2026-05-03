@@ -135,7 +135,6 @@ export default function CasinoWheel() {
     const outcome = getResult();
     let index = segments.findIndex(s => s.type === outcome);
 
-    // never land on jackpot
     const jackpotIndex = segments.findIndex(s => s.type === "JACKPOT");
     if (index === jackpotIndex || index === -1) {
       index = segments.findIndex(s => s.type === "LOSE");
@@ -189,6 +188,21 @@ export default function CasinoWheel() {
 
     setWallet(prev => ({ ...prev, balance: finalBalance }));
 
+    try {
+      await databases.createDocument(
+        DATABASE_ID,
+        CASINO_COLLECTION,
+        ID.unique(),
+        {
+          userId: wallet.userId || wallet.$id,
+          stake: bet,
+          win,
+          result: outcome,
+          createdAt: new Date().toISOString()
+        }
+      );
+    } catch {}
+
     setFlashIndex(index);
     setGlow(false);
     setSpinning(false);
@@ -228,16 +242,127 @@ export default function CasinoWheel() {
         <div>x1 → ₦{amount}</div>
         <div>x2 → ₦{amount * 2}</div>
         <div>x3 → ₦{amount * 3}</div>
-
-        <div style={{
-          marginTop: 6,
-          textShadow: "0 0 6px gold"
-        }}>
+        <div style={{ marginTop: 6, textShadow: "0 0 6px gold" }}>
           💎 JACKPOT → ₦100,000
         </div>
       </div>
 
-      {/* rest unchanged... */}
+      {/* FEED */}
+      <div style={{ position: "fixed", top: 10, right: 10 }}>
+        {feed.map(f => (
+          <div key={f.id} style={{
+            background: "#000",
+            color: "gold",
+            fontWeight: "bold",
+            padding: 8,
+            margin: 4,
+            borderRadius: 6,
+            border: "1px solid gold"
+          }}>
+            {f.msg}
+          </div>
+        ))}
+      </div>
+
+      <h3>💰 ₦{wallet?.balance || 0}</h3>
+
+      <input
+        type="number"
+        placeholder="Min ₦50"
+        value={stake}
+        onChange={e => setStake(e.target.value)}
+        style={{ padding: 10, textAlign: "center" }}
+      />
+
+      <p style={{ color: "red", fontWeight: "bold" }}>
+        Stake: ₦{stake || 0}
+      </p>
+
+      {/* WHEEL */}
+      <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
+        <div style={{
+          position: "absolute",
+          top: -5,
+          left: "50%",
+          transform: "translateX(-50%)",
+          borderLeft: "14px solid transparent",
+          borderRight: "14px solid transparent",
+          borderBottom: "24px solid gold",
+          zIndex: 10
+        }} />
+
+        <div style={{
+          width: 280,
+          height: 280,
+          borderRadius: "50%",
+          background: gradient,
+          transform: `rotate(${rotation}deg)`,
+          transition: spinning ? "transform 4s cubic-bezier(0.1,0.7,0.2,1)" : "none",
+          boxShadow: glow ? "0 0 30px gold" : ""
+        }}>
+          {segments.map((s, i) => (
+            <div key={i} style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: `rotate(${i * segmentAngle}deg) translate(0,-140px) rotate(-${i * segmentAngle}deg)`,
+              color: flashIndex === i ? "gold" : "#fff",
+              fontWeight: "bold"
+            }}>
+              {s.label}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* BUTTONS */}
+      <button
+        onClick={spin}
+        disabled={spinning}
+        style={{
+          padding: "18px 30px",
+          fontSize: 20,
+          fontWeight: "bold",
+          borderRadius: 14,
+          background: "linear-gradient(135deg, gold, orange)",
+          border: "none",
+          boxShadow: "0 0 15px gold"
+        }}
+      >
+        {spinning ? "Spinning..." : "SPIN"}
+      </button>
+
+      {spinning && (
+        <div style={{ marginTop: 10 }}>
+          <button onClick={handleStop}>STOP</button>
+        </div>
+      )}
+
+      {/* RESULT */}
+      <div style={{
+        fontSize: 36,
+        fontWeight: "bold",
+        marginTop: 20,
+        color:
+          result.includes("WON") ? "gold" :
+          result.includes("LOST") ? "red" :
+          result.includes("ALMOST") ? "orange" : "#fff"
+      }}>
+        {result}
+      </div>
+
+      {won > 0 && <h2 style={{ color: "gold" }}>₦{won}</h2>}
+
+      {/* FLOWERS */}
+      {flowers.map(f => (
+        <div key={f.id} style={{
+          position: "fixed",
+          top: "-10px",
+          left: `${f.left}%`,
+          animation: "fall 3s linear"
+        }}>🌸</div>
+      ))}
+
     </div>
   );
 }
