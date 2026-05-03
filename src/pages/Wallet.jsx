@@ -120,22 +120,6 @@ export default function Wallet() {
   }
 
   // =========================
-  // INVITE WHATSAPP
-  // =========================
-  function inviteWhatsApp() {
-    if (!promoStats.code) {
-      alert("Generate your promo code first");
-      return;
-    }
-
-    const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;
-
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-
-    window.open(url, "_blank");
-  }
-
-  // =========================
   // DEPOSIT
   // =========================
   async function makeDeposit() {
@@ -292,10 +276,24 @@ export default function Wallet() {
         ⬅ Back
       </button>
 
-      {/* INVITE BUTTON */}
-      <button style={styles.inviteBtn} onClick={inviteWhatsApp}>
-        📲 Invite via WhatsApp
-      </button>
+      {/* INVITE TEXT */}
+      {promoStats.code && (
+        <div style={styles.inviteBox}>
+          <p style={styles.inviteText}>
+            Join Win9ja and earn rewards 🎮{"\n"}
+            Use my promo code: {promoStats.code}{"\n"}
+            https://win9jalife.vercel.app
+          </p>
+
+          <button style={styles.copyInviteBtn} onClick={() => {
+            const text = `Join Win9ja and earn rewards 🎮\nUse my promo code: ${promoStats.code}\nhttps://win9jalife.vercel.app`;
+            navigator.clipboard.writeText(text);
+            alert("Invite text copied ✅");
+          }}>
+            📋 Copy Invite
+          </button>
+        </div>
+      )}
 
       {/* WHATSAPP GROUP */}
       <a
@@ -369,13 +367,24 @@ const styles = {
     marginTop: 20,
     padding: 10
   },
-  inviteBtn: {
-    marginTop: 15,
-    width: "100%",
+  inviteBox: {
+    marginTop: 20,
+    background: "#111827",
     padding: 12,
-    background: "#25D366",
+    borderRadius: 8
+  },
+  inviteText: {
+    fontSize: 13,
+    color: "#e5e7eb",
+    whiteSpace: "pre-line",
+    marginBottom: 10
+  },
+  copyInviteBtn: {
+    width: "100%",
+    padding: 10,
+    background: "#22c55e",
     border: "none",
-    borderRadius: 8,
+    borderRadius: 6,
     color: "#fff",
     fontWeight: "bold"
   },
