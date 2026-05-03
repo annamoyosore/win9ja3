@@ -157,7 +157,7 @@ export default function Auth({ onLogin }) {
   // =========================
   function openSupport() {
     const message = `Hello Win9ja Support, I need help`;
-    const url = `https://wa.me/2348012345678?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/+18622726355?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
   }
 
