@@ -13,6 +13,7 @@ const PROMO_COLLECTION = "promocodes";
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [promoCode, setPromoCode] = useState("");
@@ -34,8 +35,23 @@ export default function Auth({ onLogin }) {
     } catch {}
   }
 
+  // Normalize Nigerian phone
+  function normalizePhone(input) {
+    let p = input.replace(/\D/g, "");
+
+    if (p.startsWith("0")) {
+      p = "234" + p.slice(1);
+    }
+
+    if (!p.startsWith("234") || p.length !== 13) {
+      return null;
+    }
+
+    return p;
+  }
+
   async function handle() {
-    if (!email || !password || (!isLogin && !name)) {
+    if (!email || !password || (!isLogin && (!name || !phone))) {
       alert("Fill all fields");
       return;
     }
@@ -43,9 +59,7 @@ export default function Auth({ onLogin }) {
     try {
       setLoading(true);
 
-      // =========================
-      // LOGIN
-      // =========================
+      // ================= LOGIN =================
       if (isLogin) {
         const alreadyLoggedIn = await hasActiveSession();
 
@@ -63,34 +77,54 @@ export default function Auth({ onLogin }) {
         }
 
       } else {
-        // =========================
-        // REGISTER
-        // =========================
+        // ================= REGISTER =================
+
+        const formattedPhone = normalizePhone(phone);
+
+        if (!formattedPhone) {
+          alert("Enter valid phone number (e.g. 080XXXXXXXX or 234XXXXXXXXXX)");
+          setLoading(false);
+          return;
+        }
+
+        // 🔒 CHECK IF PHONE EXISTS
+        const existing = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("phone", formattedPhone)]
+        );
+
+        if (existing.documents.length > 0) {
+          alert("This phone number is already registered");
+          setLoading(false);
+          return;
+        }
+
         await clearSession();
 
         await account.create(
           ID.unique(),
           email,
           password,
-          name
+          name.trim()
         );
 
         await account.createEmailSession(email, password);
 
         const currentUser = await account.get();
 
-        // =========================
-        // PROMO VALIDATION
-        // =========================
-        let bonus = 0;
-        let promoValid = false;
+        // ================= PROMO (NO BONUS) =================
+        let promoUsed = false;
+        let savedPromoCode = null;
 
         if (promoCode.trim()) {
           try {
+            const code = promoCode.trim().toUpperCase();
+
             const res = await databases.listDocuments(
               DATABASE_ID,
               PROMO_COLLECTION,
-              [Query.equal("code", promoCode.trim().toUpperCase())]
+              [Query.equal("code", code)]
             );
 
             const promo = res.documents[0];
@@ -101,8 +135,8 @@ export default function Auth({ onLogin }) {
               (!promo.maxUses || promo.usedCount < promo.maxUses) &&
               (!promo.expiresAt || new Date(promo.expiresAt) > new Date())
             ) {
-              promoValid = true;
-              bonus = promo.reward || 0;
+              promoUsed = true;
+              savedPromoCode = code;
 
               await databases.updateDocument(
                 DATABASE_ID,
@@ -112,32 +146,31 @@ export default function Auth({ onLogin }) {
                   usedCount: (promo.usedCount || 0) + 1
                 }
               );
+
+              alert("Promo code accepted ✅");
+
+            } else {
+              alert("Invalid promo code. Continuing without it.");
             }
 
           } catch (err) {
             console.log("Promo error:", err.message);
           }
-
-          if (!promoValid) {
-            alert("Invalid promo code. Continuing without it.");
-          } else {
-            alert(`Promo applied! You received ${bonus} bonus 🎉`);
-          }
         }
 
-        // =========================
-        // CREATE WALLET
-        // =========================
+        // ================= WALLET =================
         await databases.createDocument(
           DATABASE_ID,
           WALLET_COLLECTION,
           ID.unique(),
           {
             userId: currentUser.$id,
-            balance: 50 + bonus,
+            name: name.trim(),
+            phone: formattedPhone,
+            balance: 50,
             locked: 0,
-            promoUsed: promoValid,
-            bonus: bonus
+            promoUsed: promoUsed,
+            promoCode: savedPromoCode
           }
         );
       }
@@ -152,12 +185,9 @@ export default function Auth({ onLogin }) {
     }
   }
 
-  // =========================
-  // SUPPORT BUTTON HANDLER
-  // =========================
   function openSupport() {
     const message = `Hello Win9ja Support, I need help`;
-    const url = `https://wa.me/+18622726355?text=${encodeURIComponent(message)}`;
+    const url = `https://wa.me/+1862272-6355?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
   }
 
@@ -172,9 +202,16 @@ export default function Auth({ onLogin }) {
           <>
             <input
               style={styles.input}
-              placeholder="Username"
+              placeholder="Full Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+            />
+
+            <input
+              style={styles.input}
+              placeholder="Phone Number (required)"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
             />
 
             <input
@@ -193,7 +230,6 @@ export default function Auth({ onLogin }) {
           onChange={(e) => setEmail(e.target.value.trim())}
         />
 
-        {/* PASSWORD WITH EYE TOGGLE */}
         <div style={styles.passwordWrapper}>
           <input
             style={styles.passwordInput}
@@ -215,11 +251,7 @@ export default function Auth({ onLogin }) {
           onClick={handle}
           disabled={loading}
         >
-          {loading
-            ? "Please wait..."
-            : isLogin
-            ? "Login"
-            : "Register"}
+          {loading ? "Please wait..." : isLogin ? "Login" : "Register"}
         </button>
 
         <p
@@ -229,12 +261,10 @@ export default function Auth({ onLogin }) {
           {isLogin ? "Create account" : "Login instead"}
         </p>
 
-        {/* ✅ SUPPORT BUTTON */}
         <button style={styles.supportBtn} onClick={openSupport}>
           💬 Contact Support
         </button>
 
-        {/* ✅ LICENSE TEXT */}
         <p style={styles.license}>
           © {new Date().getFullYear()} Win9ja. All rights reserved. Licensed platform.
         </p>
