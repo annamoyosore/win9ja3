@@ -16,7 +16,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
-const APP_VERSION = "1.0.5";
+const APP_VERSION = "1.0.6";
 
 // =========================
 // CREATE DECK
@@ -79,17 +79,6 @@ export default function Lobby({ goGame, back }) {
     init();
   }, []);
 
-  // AUTO UPDATE
-  useEffect(() => {
-    const v = localStorage.getItem("app_version");
-    if (v && v !== APP_VERSION) {
-      localStorage.setItem("app_version", APP_VERSION);
-      window.location.reload(true);
-    } else {
-      localStorage.setItem("app_version", APP_VERSION);
-    }
-  }, []);
-
   async function init() {
     const u = await account.get();
     setUser(u);
@@ -106,48 +95,17 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // REALTIME
+  // REALTIME (FORCE REFRESH)
   // =========================
   useEffect(() => {
     if (!user) return;
 
-    const unsubMatch = databases.client.subscribe(
+    const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      (res) => {
-        if (res.events.some(e => e.includes(".create") || e.includes(".update"))) {
-          refresh(user.$id);
-        }
-      }
+      () => refresh(user.$id)
     );
 
-    const unsubGame = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
-      async (res) => {
-        const g = res.payload;
-
-        setGameMap(prev => ({
-          ...prev,
-          [g.$id]: g
-        }));
-
-        // sync finished state
-        if (g.status === "finished" && g.matchId) {
-          try {
-            await databases.updateDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              g.matchId,
-              { status: "finished" }
-            );
-          } catch {}
-        }
-      }
-    );
-
-    return () => {
-      unsubMatch();
-      unsubGame();
-    };
+    return () => unsub();
   }, [user]);
 
   async function refresh(userId) {
@@ -158,64 +116,63 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD MATCHES (AVAILABLE)
+  // AVAILABLE MATCHES
   // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       MATCH_COLLECTION,
-      [
-        Query.equal("status", "waiting"),
-        Query.isNull("opponentId"),
-        Query.notEqual("hostId", userId),
-        Query.limit(100)
-      ]
+      [Query.limit(100)]
     );
 
-    setMatches(res.documents);
+    const available = res.documents.filter(
+      (m) =>
+        m.status === "waiting" &&
+        !m.opponentId &&
+        m.hostId !== userId
+    );
+
+    setMatches(available);
   }
 
   // =========================
-  // LOAD ACTIVE MATCHES
-  // =========================
-  async function loadActiveMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.or([
-          Query.equal("hostId", userId),
-          Query.equal("opponentId", userId)
-        ]),
-        Query.orderDesc("$createdAt"),
-        Query.limit(100)
-      ]
-    );
+  // 🔥 ACTIVE MATCHES (FIXED)
+// =========================
+async function loadActiveMatches(userId) {
+  const res = await databases.listDocuments(
+    DATABASE_ID,
+    MATCH_COLLECTION,
+    [Query.limit(100), Query.orderDesc("$createdAt")]
+  );
 
-    const mine = res.documents.filter(m => m.status !== "cancelled");
-    setActiveMatches(mine);
+  const mine = res.documents.filter(
+    (m) =>
+      (m.hostId === userId || m.opponentId === userId) &&
+      m.status !== "cancelled"
+  );
 
-    const gameIds = mine.map(m => m.gameId).filter(Boolean);
+  setActiveMatches(mine);
 
-    if (!gameIds.length) return;
+  // fetch games safely
+  const map = {};
 
-    const map = {};
+  await Promise.all(
+    mine.map(async (m) => {
+      if (!m.gameId) return;
 
-    await Promise.all(
-      gameIds.map(async (id) => {
-        try {
-          const g = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            id
-          );
-          map[id] = g;
-        } catch {}
-      })
-    );
+      try {
+        const g = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          m.gameId
+        );
+        map[m.gameId] = g;
+      } catch {}
+    })
+  );
 
-    setGameMap(map);
-  }
+  setGameMap(map);
+}
 
   // =========================
   // CANCEL MATCH
@@ -226,16 +183,12 @@ export default function Lobby({ goGame, back }) {
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id,
-        {
-          status: "cancelled",
-          refunded: true
-        }
+        { status: "cancelled", refunded: true }
       );
 
       await unlockFunds(user.$id, match.stake);
       refresh(user.$id);
-
-    } catch (err) {
+    } catch {
       alert("Cancel failed");
     }
   }
@@ -299,7 +252,6 @@ export default function Lobby({ goGame, back }) {
       const adminCut = Math.floor(totalPot * 0.1);
       const finalPot = totalPot - adminCut;
 
-      // admin credit
       const adminRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
