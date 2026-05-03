@@ -62,12 +62,12 @@ export default function CasinoWheel() {
     const interval = setInterval(() => {
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
-      const amount = Math.floor(Math.random() * 50000) + 2000;
+      const amt = Math.floor(Math.random() * 50000) + 2000;
 
       const id = Date.now();
       setFeed(prev => [...prev, {
         id,
-        msg: `💰 ${name} from ${city} won ₦${amount}`
+        msg: `💰 ${name} from ${city} won ₦${amt}`
       }]);
 
       setTimeout(() => {
@@ -184,21 +184,6 @@ export default function CasinoWheel() {
 
     setWallet(prev => ({ ...prev, balance: finalBalance }));
 
-    try {
-      await databases.createDocument(
-        DATABASE_ID,
-        CASINO_COLLECTION,
-        ID.unique(),
-        {
-          userId: wallet.userId || wallet.$id,
-          stake: bet,
-          win,
-          result: outcome,
-          createdAt: new Date().toISOString()
-        }
-      );
-    } catch {}
-
     setFlashIndex(index);
     setGlow(false);
     setSpinning(false);
@@ -222,7 +207,6 @@ export default function CasinoWheel() {
   return (
     <div style={{ textAlign: "center", paddingTop: 120 }}>
 
-      {/* RETURNS UPDATED */}
       <div style={{
         position: "fixed",
         top: 10,
@@ -246,11 +230,9 @@ export default function CasinoWheel() {
           <div key={f.id} style={{
             background: "#000",
             color: "gold",
-            fontWeight: "bold",
             padding: 8,
             margin: 4,
-            borderRadius: 6,
-            border: "1px solid gold"
+            borderRadius: 6
           }}>
             {f.msg}
           </div>
@@ -264,15 +246,29 @@ export default function CasinoWheel() {
         placeholder="Min ₦50"
         value={stake}
         onChange={e => setStake(e.target.value)}
-        style={{ padding: 10, textAlign: "center" }}
       />
 
-      <p style={{ color: "red", fontWeight: "bold" }}>
-        Stake: ₦{stake || 0}
-      </p>
+      <p style={{ color: "red" }}>Stake: ₦{stake || 0}</p>
 
-      {/* wheel + buttons unchanged */}
+      <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
+        <div style={{
+          position: "absolute",
+          top: -5,
+          left: "50%",
+          transform: "translateX(-50%)",
+          borderLeft: "14px solid transparent",
+          borderRight: "14px solid transparent",
+          borderBottom: "24px solid gold"
+        }} />
 
-    </div>
-  );
-}
+        <div style={{
+          width: 280,
+          height: 280,
+          borderRadius: "50%",
+          background: gradient,
+          transform: `rotate(${rotation}deg)`,
+          transition: spinning ? "transform 4s ease-out" : "none"
+        }}>
+          {segments.map((s, i) => (
+            <div key={i} style={{
+              position
