@@ -16,7 +16,7 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
-const APP_VERSION = "1.0.3";
+const APP_VERSION = "1.0.4";
 
 // =========================
 // CREATE DECK
@@ -69,6 +69,7 @@ async function createGame(match, opponentId) {
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
+  const [gameMap, setGameMap] = useState({});
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
@@ -105,7 +106,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // REALTIME (FIXED)
+  // REALTIME (MATCH + GAME)
   // =========================
   useEffect(() => {
     if (!user) return;
@@ -120,8 +121,13 @@ export default function Lobby({ goGame, back }) {
       async (res) => {
         const g = res.payload;
 
-        if (!g.players?.includes(user.$id)) return;
+        // 🔄 update gameMap instantly
+        setGameMap(prev => ({
+          ...prev,
+          [g.$id]: g
+        }));
 
+        // ✅ finish sync
         if (g.status === "finished" && g.matchId) {
           try {
             const m = await databases.getDocument(
@@ -138,9 +144,7 @@ export default function Lobby({ goGame, back }) {
                 { status: "finished" }
               );
             }
-          } catch (e) {
-            console.log("Sync error:", e.message);
-          }
+          } catch {}
         }
 
         refresh(user.$id);
@@ -158,6 +162,9 @@ export default function Lobby({ goGame, back }) {
     await loadActiveMatches(userId);
   }
 
+  // =========================
+  // LOAD MATCHES
+  // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -174,13 +181,31 @@ export default function Lobby({ goGame, back }) {
       MATCH_COLLECTION
     );
 
-    setActiveMatches(
-      res.documents.filter(
-        m =>
-          (m.hostId === userId || m.opponentId === userId) &&
-          m.status !== "cancelled"
-      )
+    const mine = res.documents.filter(
+      (m) =>
+        (m.hostId === userId || m.opponentId === userId) &&
+        m.status !== "cancelled"
     );
+
+    setActiveMatches(mine);
+
+    // 🔥 fetch games
+    const gameIds = mine.map(m => m.gameId).filter(Boolean);
+
+    if (!gameIds.length) return;
+
+    const gamesRes = await databases.listDocuments(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      [Query.equal("$id", gameIds)]
+    );
+
+    const map = {};
+    gamesRes.documents.forEach(g => {
+      map[g.$id] = g;
+    });
+
+    setGameMap(map);
   }
 
   // =========================
@@ -215,7 +240,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN MATCH (UNCHANGED CORE)
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loadingMatchId) return;
@@ -341,31 +366,50 @@ export default function Lobby({ goGame, back }) {
 
       <h2 style={styles.section}>🔥 Your Matches</h2>
 
-      {activeMatches.map(m => (
-        <div key={m.$id} style={styles.card}>
-          <div>
-            <p>₦{m.stake}</p>
-            <p>{m.status}</p>
-          </div>
+      {activeMatches.map(m => {
+        const game = gameMap[m.gameId];
 
-          {m.status === "finished" ? (
-            <button disabled style={styles.finishedBtn}>
-              ✅ Finished
-            </button>
-          ) : m.status === "waiting" && !m.opponentId ? (
-            <button onClick={() => cancelMatch(m)} style={styles.cancelBtn}>
-              ❌ Cancel
-            </button>
-          ) : (
-            <button
-              style={styles.resumeBtn}
-              onClick={() => safeResume(m)}
-            >
-              ▶ Resume
-            </button>
-          )}
-        </div>
-      ))}
+        let turnLabel = "";
+        if (game && game.status !== "finished") {
+          turnLabel =
+            game.turn === user.$id
+              ? "🟢 Your Turn"
+              : "🔴 Opponent Turn";
+        }
+
+        return (
+          <div key={m.$id} style={styles.card}>
+            <div>
+              <p>₦{m.stake}</p>
+              <p>{m.status}</p>
+
+              {turnLabel && (
+                <p style={{ fontSize: 12 }}>{turnLabel}</p>
+              )}
+            </div>
+
+            {m.status === "finished" ? (
+              <button disabled style={styles.finishedBtn}>
+                ✅ Finished
+              </button>
+            ) : m.status === "waiting" && !m.opponentId ? (
+              <button
+                onClick={() => cancelMatch(m)}
+                style={styles.cancelBtn}
+              >
+                ❌ Cancel
+              </button>
+            ) : (
+              <button
+                style={styles.resumeBtn}
+                onClick={() => safeResume(m)}
+              >
+                ▶ Resume
+              </button>
+            )}
+          </div>
+        );
+      })}
 
       <h2 style={styles.section}>🎯 Available</h2>
 
