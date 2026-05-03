@@ -285,7 +285,7 @@ export default function Wallet() {
 
       {/* WHATSAPP */}
       <a
-        href="https://wa.me/2340000000000"
+        href="https://wa.me/+1862272-6355"
         target="_blank"
         rel="noreferrer"
         style={styles.whatsapp}
