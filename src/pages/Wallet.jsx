@@ -9,9 +9,6 @@ import { ID, Query } from "appwrite";
 
 const PROMO_COLLECTION = "promocodes";
 
-// =========================
-// COMPONENT
-// =========================
 export default function Wallet() {
   const navigate = useNavigate();
 
@@ -22,6 +19,18 @@ export default function Wallet() {
     code: null,
     usedCount: 0
   });
+
+  // Deposit
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [name, setName] = useState("");
+
+  // Withdraw
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [bank, setBank] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountName, setAccountName] = useState("");
 
   const [processing, setProcessing] = useState(false);
 
@@ -48,7 +57,6 @@ export default function Wallet() {
           usedCount: promo.usedCount || 0
         });
       }
-
     } catch (err) {
       console.error(err);
     } finally {
@@ -56,9 +64,7 @@ export default function Wallet() {
     }
   }
 
-  // =========================
-  // PROMO
-  // =========================
+  // ================= PROMO =================
   function generatePromoCode(name) {
     const safe = name || "USER";
     const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
@@ -71,7 +77,6 @@ export default function Wallet() {
 
     try {
       setProcessing(true);
-
       const user = await account.get();
       const code = generatePromoCode(wallet?.name);
 
@@ -87,16 +92,8 @@ export default function Wallet() {
         }
       );
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        wallet.$collectionId,
-        wallet.$id,
-        { promoOwned: code }
-      );
-
       setPromoStats({ code, usedCount: 0 });
-
-      alert("Promo code created ✅");
+      alert("Promo created ✅");
 
     } catch (err) {
       alert(err.message);
@@ -106,86 +103,150 @@ export default function Wallet() {
   }
 
   function copyCode() {
-    if (!promoStats.code) return;
     navigator.clipboard.writeText(promoStats.code);
     alert("Copied ✅");
   }
 
-  // =========================
-  // COPY INVITE TEXT
-  // =========================
   function copyInviteText() {
-    if (!promoStats.code) {
-      alert("Generate your promo code first");
-      return;
-    }
+    if (!promoStats.code) return alert("Generate code first");
 
-    const text = `Join Win9ja 🎮
-
-Use my promo code: ${promoStats.code}
-
-Play now:
-https://win9jalife.vercel.app`;
+    const text = `Join Win9ja 🎮\nUse my promo code: ${promoStats.code}\nhttps://win9jalife.vercel.app`;
 
     navigator.clipboard.writeText(text);
-    alert("Invite text copied ✅");
+    alert("Invite copied ✅");
   }
 
-  // =========================
-  // LOADING
-  // =========================
-  if (loading) {
-    return (
-      <div style={styles.container}>
-        <p>Loading wallet...</p>
-      </div>
-    );
+  // ================= DEPOSIT =================
+  async function makeDeposit() {
+    if (!amount || Number(amount) < 200) {
+      return alert("Minimum ₦200");
+    }
+
+    if (!name) {
+      return alert("Enter full name");
+    }
+
+    try {
+      const user = await account.get();
+
+      await databases.createDocument(
+        DATABASE_ID,
+        "deposit_requests",
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: Number(amount),
+          name,
+          status: "pending"
+        }
+      );
+
+      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
+
+    } catch (err) {
+      alert(err.message);
+    }
   }
+
+  // ================= WITHDRAW =================
+  async function requestWithdraw() {
+    if (!withdrawAmount || Number(withdrawAmount) < 1500) {
+      return alert("Minimum ₦1500");
+    }
+
+    if (Number(withdrawAmount) > (wallet?.balance || 0)) {
+      return alert("Insufficient balance");
+    }
+
+    if (!bank || !accountNumber || !accountName) {
+      return alert("Fill all fields");
+    }
+
+    try {
+      const user = await account.get();
+
+      await databases.createDocument(
+        DATABASE_ID,
+        "withdrawal_requests",
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: Number(withdrawAmount),
+          bank,
+          accountNumber,
+          accountName,
+          status: "pending"
+        }
+      );
+
+      alert("Withdrawal sent ✅");
+
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  if (loading) return <p style={{ color: "#fff" }}>Loading...</p>;
 
   return (
     <div style={styles.container}>
 
       {/* HEADER */}
       <div style={styles.header}>
-        <h1>💳 Wallet</h1>
+        <h2>💳 Wallet</h2>
 
-        <div style={styles.promoHeader}>
-          {promoStats.code ? (
-            <>
-              <span style={styles.code}>{promoStats.code}</span>
-              <button style={styles.copyBtn} onClick={copyCode}>📋</button>
-            </>
-          ) : (
-            <button style={styles.genBtn} onClick={createPromo}>
-              + Code
-            </button>
-          )}
-        </div>
+        {promoStats.code ? (
+          <div>
+            <span>{promoStats.code}</span>
+            <button onClick={copyCode}>📋</button>
+          </div>
+        ) : (
+          <button onClick={createPromo}>+ Code</button>
+        )}
       </div>
 
-      {promoStats.code && (
-        <p style={styles.usedText}>
-          👥 {promoStats.usedCount} users joined
-        </p>
-      )}
-
-      {/* WALLET */}
+      {/* BALANCE */}
       <div style={styles.card}>
-        <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>
-        <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
+        <p>Balance: ₦{wallet?.balance}</p>
+        <p>Locked: ₦{wallet?.locked}</p>
       </div>
 
-      {/* COPY INVITE TEXT */}
+      {/* ACTIONS */}
+      <button style={styles.btn} onClick={() => setShowDeposit(true)}>
+        Deposit
+      </button>
+
+      <button style={styles.btn} onClick={() => setShowWithdraw(true)}>
+        Withdraw
+      </button>
+
+      {/* INVITE */}
       <button style={styles.inviteBtn} onClick={copyInviteText}>
         📋 Copy Invite Text
       </button>
 
-      {/* BACK */}
-      <button style={styles.back} onClick={() => navigate("/dashboard")}>
-        ⬅ Back
-      </button>
+      {/* MODALS */}
+      {showDeposit && (
+        <div style={styles.modal}>
+          <input placeholder="Amount" onChange={e => setAmount(e.target.value)} />
+          <input placeholder="Full Name" onChange={e => setName(e.target.value)} />
+          <button onClick={makeDeposit}>Pay</button>
+          <button onClick={() => setShowDeposit(false)}>Close</button>
+        </div>
+      )}
 
-      {/* WHATSAPP GROUP (RESTORED TO BOTTOM) */}
+      {showWithdraw && (
+        <div style={styles.modal}>
+          <input placeholder="Amount" onChange={e => setWithdrawAmount(e.target.value)} />
+          <input placeholder="Bank" onChange={e => setBank(e.target.value)} />
+          <input placeholder="Account No" onChange={e => setAccountNumber(e.target.value)} />
+          <input placeholder="Account Name" onChange={e => setAccountName(e.target.value)} />
+          <button onClick={requestWithdraw}>Submit</button>
+          <button onClick={() => setShowWithdraw(false)}>Close</button>
+        </div>
+      )}
+
+      {/* WHATSAPP (BOTTOM FIXED) */}
       <a
         href="https://chat.whatsapp.com/YOUR_NEW_LINK_HERE"
         target="_blank"
@@ -198,76 +259,52 @@ https://win9jalife.vercel.app`;
   );
 }
 
-// =========================
-// STYLES
-// =========================
+// ================= STYLES =================
 const styles = {
   container: {
     padding: 20,
-    paddingBottom: 80,
+    paddingBottom: 100,
     background: "#0f172a",
-    color: "white",
+    color: "#fff",
     minHeight: "100vh"
   },
   header: {
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center"
-  },
-  promoHeader: {
-    display: "flex",
-    gap: 5
-  },
-  code: {
-    background: "#111827",
-    padding: "6px 10px",
-    borderRadius: 6
-  },
-  copyBtn: {
-    background: "#22c55e",
-    border: "none",
-    borderRadius: 6,
-    padding: "6px 10px"
-  },
-  genBtn: {
-    background: "gold",
-    border: "none",
-    borderRadius: 6,
-    padding: "6px 10px"
-  },
-  usedText: {
-    fontSize: 12,
-    color: "#9ca3af"
+    justifyContent: "space-between"
   },
   card: {
-    padding: 20,
     background: "#111827",
-    borderRadius: 10,
+    padding: 20,
     marginTop: 20
   },
+  btn: {
+    width: "100%",
+    marginTop: 10,
+    padding: 12,
+    background: "gold"
+  },
   inviteBtn: {
-    marginTop: 20,
+    marginTop: 15,
     width: "100%",
     padding: 12,
     background: "#25D366",
-    border: "none",
-    borderRadius: 8,
-    color: "#fff",
-    fontWeight: "bold"
+    color: "#fff"
   },
-  back: {
-    marginTop: 10,
-    padding: 10
+  modal: {
+    position: "fixed",
+    top: "50%",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    background: "#111827",
+    padding: 20
   },
   whatsapp: {
     position: "fixed",
     bottom: 0,
-    left: 0,
     width: "100%",
-    padding: 14,
     background: "#128C7E",
     textAlign: "center",
-    color: "#fff",
-    textDecoration: "none"
+    padding: 14,
+    color: "#fff"
   }
 };
