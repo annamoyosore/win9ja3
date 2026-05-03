@@ -17,6 +17,9 @@ import { lockFunds, unlockFunds } from "../lib/wallet";
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
+// 🔁 CHANGE ON EVERY DEPLOY
+const APP_VERSION = "1.0.2";
+
 // =========================
 // CREATE DECK
 // =========================
@@ -77,6 +80,17 @@ export default function Lobby({ goGame, back }) {
     init();
   }, []);
 
+  // 🔥 AUTO UPDATE (CACHE FIX)
+  useEffect(() => {
+    const v = localStorage.getItem("app_version");
+    if (v && v !== APP_VERSION) {
+      localStorage.setItem("app_version", APP_VERSION);
+      window.location.reload(true);
+    } else {
+      localStorage.setItem("app_version", APP_VERSION);
+    }
+  }, []);
+
   async function init() {
     const u = await account.get();
     setUser(u);
@@ -93,19 +107,17 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // 🔴 CANCEL MATCH
+  // CANCEL MATCH
   // =========================
   async function cancelMatch(match) {
     if (loadingMatchId) return;
 
-    // Only host can cancel
     if (match.hostId !== user.$id) {
       return alert("Only host can cancel");
     }
 
-    // Only if no one joined yet
     if (match.opponentId) {
-      return alert("Cannot cancel, opponent already joined");
+      return alert("Opponent already joined");
     }
 
     setLoadingMatchId(match.$id);
@@ -118,24 +130,18 @@ export default function Lobby({ goGame, back }) {
       );
 
       if (fresh.status !== "waiting") {
-        throw new Error("Match already started");
+        throw new Error("Already started");
       }
 
-      // 💰 REFUND
       await unlockFunds(user.$id, fresh.stake);
 
-      // ❌ CANCEL MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
-        {
-          status: "cancelled",
-          refunded: true
-        }
+        { status: "cancelled", refunded: true }
       );
 
-      // 🔄 REFRESH UI
       refresh(user.$id);
 
     } catch (err) {
@@ -151,43 +157,12 @@ export default function Lobby({ goGame, back }) {
   useEffect(() => {
     if (!user) return;
 
-    const unsubMatch = databases.client.subscribe(
+    const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
       () => refresh(user.$id)
     );
 
-    const unsubGame = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
-      async (res) => {
-        const g = res.payload;
-
-        if (g.status === "finished" && g.matchId) {
-          try {
-            const m = await databases.getDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              g.matchId
-            );
-
-            if (m.status !== "finished") {
-              await databases.updateDocument(
-                DATABASE_ID,
-                MATCH_COLLECTION,
-                g.matchId,
-                { status: "finished" }
-              );
-            }
-          } catch {}
-        }
-
-        refresh(user.$id);
-      }
-    );
-
-    return () => {
-      unsubMatch();
-      unsubGame();
-    };
+    return () => unsub();
   }, [user]);
 
   async function refresh(userId) {
@@ -195,43 +170,30 @@ export default function Lobby({ goGame, back }) {
     await loadActiveMatches(userId);
   }
 
-  // =========================
-  // LOAD MATCHES
-  // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       MATCH_COLLECTION,
-      [
-        Query.equal("status", "waiting"),
-        Query.isNull("opponentId")
-      ]
+      [Query.equal("status", "waiting"), Query.isNull("opponentId")]
     );
 
-    const filtered = res.documents.filter(
-      (m) => m.hostId !== userId
-    );
-
-    setMatches(filtered);
+    setMatches(res.documents.filter(m => m.hostId !== userId));
   }
 
   async function loadActiveMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION
-    );
+    const res = await databases.listDocuments(DATABASE_ID, MATCH_COLLECTION);
 
-    const mine = res.documents.filter(
-      (m) =>
-        (m.hostId === userId || m.opponentId === userId) &&
-        m.status !== "cancelled"
+    setActiveMatches(
+      res.documents.filter(
+        m =>
+          (m.hostId === userId || m.opponentId === userId) &&
+          m.status !== "cancelled"
+      )
     );
-
-    setActiveMatches(mine);
   }
 
   // =========================
-  // JOIN MATCH
+  // JOIN MATCH (SAFE)
   // =========================
   async function joinMatch(match) {
     if (loadingMatchId) return;
@@ -257,10 +219,37 @@ export default function Lobby({ goGame, back }) {
         throw new Error("Insufficient balance");
       }
 
+      // 🔒 LOCK OPPONENT FUNDS
       await lockFunds(user.$id, fresh.stake);
 
-      const adminCut = Math.floor(fresh.stake * 0.1);
+      // 💰 CALCULATE
+      const totalPot = fresh.stake * 2;
+      const adminCut = Math.floor(totalPot * 0.1);
+      const finalPot = totalPot - adminCut;
 
+      // 💼 PAY ADMIN
+      const adminRes = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", ADMIN_ID)]
+      );
+
+      if (!adminRes.documents.length) {
+        throw new Error("Admin wallet missing");
+      }
+
+      const adminWallet = adminRes.documents[0];
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        adminWallet.$id,
+        {
+          balance: (adminWallet.balance || 0) + adminCut
+        }
+      );
+
+      // 🧾 UPDATE MATCH
       const updated = await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -268,11 +257,13 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          pot: fresh.stake * 2 - adminCut,
+          pot: finalPot,
+          adminCut,
           adminPaid: true
         }
       );
 
+      // 🎮 CREATE GAME
       const game = await createGame(updated, user.$id);
 
       await databases.updateDocument(
@@ -285,6 +276,8 @@ export default function Lobby({ goGame, back }) {
       goGame(game.$id, updated.stake);
 
     } catch (err) {
+      // 🔄 ROLLBACK
+      await unlockFunds(user.$id, match.stake);
       alert(err.message);
     }
 
@@ -341,25 +334,16 @@ export default function Lobby({ goGame, back }) {
 
       <h2 style={styles.section}>🔥 Your Matches</h2>
 
-      {activeMatches.map((m) => (
+      {activeMatches.map(m => (
         <div key={m.$id} style={styles.card}>
           <div>
             <p>₦{m.stake}</p>
             <p>{m.status}</p>
           </div>
 
-          {/* ✅ CANCEL BUTTON */}
           {m.status === "waiting" && !m.opponentId && m.hostId === user.$id ? (
-            <button
-              style={styles.cancelBtn}
-              onClick={() => cancelMatch(m)}
-              disabled={loadingMatchId === m.$id}
-            >
-              {loadingMatchId === m.$id ? "Cancelling..." : "❌ Cancel"}
-            </button>
-          ) : m.status === "finished" ? (
-            <button disabled style={styles.finishedBtn}>
-              ✅ Finished
+            <button onClick={() => cancelMatch(m)} style={styles.cancelBtn}>
+              ❌ Cancel
             </button>
           ) : (
             <button
@@ -374,16 +358,11 @@ export default function Lobby({ goGame, back }) {
 
       <h2 style={styles.section}>🎯 Available</h2>
 
-      {matches.map((m) => (
+      {matches.map(m => (
         <div key={m.$id} style={styles.card}>
           <span>₦{m.stake}</span>
-
-          <button
-            onClick={() => joinMatch(m)}
-            style={styles.joinBtn}
-            disabled={loadingMatchId === m.$id}
-          >
-            {loadingMatchId === m.$id ? "Joining..." : "Join"}
+          <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
+            Join
           </button>
         </div>
       ))}
@@ -393,7 +372,7 @@ export default function Lobby({ goGame, back }) {
           type="number"
           placeholder="Stake ₦"
           value={stake}
-          onChange={(e) => setStake(e.target.value)}
+          onChange={e => setStake(e.target.value)}
           style={styles.input}
         />
 
@@ -413,27 +392,20 @@ export default function Lobby({ goGame, back }) {
 // STYLES
 // =========================
 const styles = {
-  container: {
-    padding: 20,
-    background: "#020617",
-    color: "#fff",
-    minHeight: "100vh"
-  },
-  title: { fontSize: 28, fontWeight: "bold" },
+  container: { padding: 20, background: "#020617", color: "#fff" },
+  title: { fontSize: 28 },
   section: { marginTop: 20, color: "gold" },
   card: {
     background: "#111827",
     padding: 15,
     margin: "10px 0",
-    borderRadius: 10,
     display: "flex",
     justifyContent: "space-between"
   },
   joinBtn: { background: "gold", padding: 8 },
   resumeBtn: { background: "green", padding: 8, color: "#fff" },
-  cancelBtn: { background: "#ef4444", padding: 8, color: "#fff" },
-  finishedBtn: { background: "#16a34a", padding: 8, color: "#fff" },
+  cancelBtn: { background: "red", padding: 8, color: "#fff" },
   input: { width: "100%", padding: 10 },
   createBtn: { width: "100%", padding: 10, background: "blue", color: "#fff" },
-  back: { marginTop: 20, padding: 10 }
+  back: { marginTop: 20 }
 };
