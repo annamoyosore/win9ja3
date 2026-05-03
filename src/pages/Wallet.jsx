@@ -13,386 +13,379 @@ const PROMO_COLLECTION = "promocodes";
 // COMPONENT
 // =========================
 export default function Wallet() {
-const navigate = useNavigate();
+  const navigate = useNavigate();
 
-const [wallet, setWallet] = useState(null);
-const [loading, setLoading] = useState(true);
+  const [wallet, setWallet] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-const [promoStats, setPromoStats] = useState({
-code: null,
-usedCount: 0
-});
+  const [promoStats, setPromoStats] = useState({
+    code: null,
+    usedCount: 0
+  });
 
-// Deposit states
-const [showDeposit, setShowDeposit] = useState(false);
-const [amount, setAmount] = useState("");
-const [name, setName] = useState("");
+  // Deposit states
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [name, setName] = useState("");
 
-// Withdraw states
-const [showWithdraw, setShowWithdraw] = useState(false);
-const [withdrawAmount, setWithdrawAmount] = useState("");
-const [bank, setBank] = useState("");
-const [accountNumber, setAccountNumber] = useState("");
-const [accountName, setAccountName] = useState("");
+  // Withdraw states
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [bank, setBank] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountName, setAccountName] = useState("");
 
-const [processing, setProcessing] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-useEffect(() => {
-load();
-}, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-async function load() {
-try {
-const user = await account.get();
-const w = await getWallet(user.$id);
-setWallet(w);
+  async function load() {
+    try {
+      const user = await account.get();
 
-const res = await databases.listDocuments(  
-    DATABASE_ID,  
-    PROMO_COLLECTION,  
-    [Query.equal("ownerId", user.$id)]  
-  );  
+      const w = await getWallet(user.$id);
+      setWallet(w);
 
-  if (res.documents.length > 0) {  
-    const promo = res.documents[0];  
-    setPromoStats({  
-      code: promo.code,  
-      usedCount: promo.usedCount || 0  
-    });  
-  }  
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        PROMO_COLLECTION,
+        [Query.equal("ownerId", user.$id)]
+      );
 
-} catch (err) {  
-  console.error(err);  
-} finally {  
-  setLoading(false);  
-}
+      if (res.documents.length > 0) {
+        const promo = res.documents[0];
+        setPromoStats({
+          code: promo.code,
+          usedCount: promo.usedCount || 0
+        });
+      }
 
-}
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-function generatePromoCode(name) {
-const safe = name || "USER";
-const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
-const rand = Math.floor(1000 + Math.random() * 9000);
-return clean + rand;
-}
+  function generatePromoCode(name) {
+    const safe = name || "USER";
+    const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    return clean + rand;
+  }
 
-async function createPromo() {
-if (processing) return;
+  async function createPromo() {
+    if (processing) return;
 
-try {  
-  setProcessing(true);  
+    if (promoStats.code) {
+      alert("You already have a promo code");
+      return;
+    }
 
-  const user = await account.get();  
-  const code = generatePromoCode(wallet?.name);  
+    try {
+      setProcessing(true);
 
-  await databases.createDocument(  
-    DATABASE_ID,  
-    PROMO_COLLECTION,  
-    ID.unique(),  
-    {  
-      code,  
-      ownerId: user.$id,  
-      usedCount: 0,  
-      isActive: true  
-    }  
-  );  
+      const user = await account.get();
+      const code = generatePromoCode(wallet?.name);
 
-  await databases.updateDocument(  
-    DATABASE_ID,  
-    wallet.$collectionId,  
-    wallet.$id,  
-    { promoOwned: code }  
-  );  
+      await databases.createDocument(
+        DATABASE_ID,
+        PROMO_COLLECTION,
+        ID.unique(),
+        {
+          code,
+          ownerId: user.$id,
+          usedCount: 0,
+          isActive: true
+        }
+      );
 
-  setPromoStats({ code, usedCount: 0 });  
+      setPromoStats({ code, usedCount: 0 });
 
-  alert("Promo code created ✅");  
+      alert("Promo code created ✅");
 
-} catch (err) {  
-  alert(err.message);  
-} finally {  
-  setProcessing(false);  
-}
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setProcessing(false);
+    }
+  }
 
-}
+  function copyCode() {
+    if (!promoStats.code) return;
+    navigator.clipboard.writeText(promoStats.code);
+    alert("Copied ✅");
+  }
 
-function copyCode() {
-if (!promoStats.code) return;
-navigator.clipboard.writeText(promoStats.code);
-alert("Copied ✅");
-}
+  // =========================
+  // INVITE WHATSAPP
+  // =========================
+  function inviteWhatsApp() {
+    if (!promoStats.code) {
+      alert("Generate your promo code first");
+      return;
+    }
 
-// =========================
-// INVITE WHATSAPP
-// =========================
-function inviteWhatsApp() {
-if (!promoStats.code) {
-alert("Generate your promo code first");
-return;
-}
+    const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;
 
-const message = `Join Win9ja and earn rewards 🎮\n\nUse my promo code: ${promoStats.code}\n\nhttps://win9jalife.vercel.app`;  
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
 
-const url = `https://wa.me/?text=${encodeURIComponent(message)}`;  
+    window.open(url, "_blank");
+  }
 
-window.open(url, "_blank");
+  // =========================
+  // DEPOSIT
+  // =========================
+  async function makeDeposit() {
+    if (processing) return;
 
-}
+    if (!amount || Number(amount) < 200) {
+      return alert("Minimum deposit ₦200");
+    }
 
-// =========================
-// DEPOSIT
-// =========================
-async function makeDeposit() {
-if (processing) return;
+    if (!name) {
+      return alert("Enter full name");
+    }
 
-if (!amount || Number(amount) < 200) {  
-  return alert("Minimum deposit ₦200");  
-}  
+    setProcessing(true);
 
-if (!name) {  
-  return alert("Enter full name");  
-}  
+    try {
+      const user = await account.get();
+      const ref = "DEP-" + Date.now();
 
-setProcessing(true);  
+      await databases.createDocument(
+        DATABASE_ID,
+        "deposit_requests",
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: Number(amount),
+          name,
+          status: "pending",
+          reference: ref,
+          createdAt: new Date().toISOString()
+        }
+      );
 
-try {  
-  const user = await account.get();  
-  const ref = "DEP-" + Date.now();  
+      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
 
-  await databases.createDocument(  
-    DATABASE_ID,  
-    "deposit_requests",  
-    ID.unique(),  
-    {  
-      userId: user.$id,  
-      amount: Number(amount),  
-      name,  
-      status: "pending",  
-      reference: ref,  
-      createdAt: new Date().toISOString()  
-    }  
-  );  
+    } catch (err) {
+      alert(err.message);
+    }
 
-  window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;  
+    setProcessing(false);
+  }
 
-} catch (err) {  
-  alert(err.message);  
-}  
+  // =========================
+  // WITHDRAW
+  // =========================
+  async function requestWithdraw() {
+    if (processing) return;
 
-setProcessing(false);
+    if (!withdrawAmount || Number(withdrawAmount) < 1500) {
+      return alert("Minimum withdrawal ₦1500");
+    }
 
-}
+    if (Number(withdrawAmount) > (wallet?.balance || 0)) {
+      return alert("Insufficient balance");
+    }
 
-// =========================
-// WITHDRAW
-// =========================
-async function requestWithdraw() {
-if (processing) return;
+    if (!bank) return alert("Enter bank name");
 
-if (!withdrawAmount || Number(withdrawAmount) < 1500) {  
-  return alert("Minimum withdrawal ₦1500");  
-}  
+    if (!accountNumber || accountNumber.length < 10) {
+      return alert("Enter valid account number");
+    }
 
-if (Number(withdrawAmount) > (wallet?.balance || 0)) {  
-  return alert("Insufficient balance");  
-}  
+    if (!accountName) {
+      return alert("Enter account name");
+    }
 
-if (!bank) return alert("Enter bank name");  
+    setProcessing(true);
 
-if (!accountNumber || accountNumber.length < 10) {  
-  return alert("Enter valid account number");  
-}  
+    try {
+      const user = await account.get();
 
-if (!accountName) {  
-  return alert("Enter account name");  
-}  
+      await databases.createDocument(
+        DATABASE_ID,
+        "withdrawal_requests",
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: Number(withdrawAmount),
+          bank,
+          accountNumber,
+          accountName,
+          status: "pending",
+          createdAt: new Date().toISOString()
+        }
+      );
 
-setProcessing(true);  
+      alert("Withdrawal request sent");
 
-try {  
-  const user = await account.get();  
+      setShowWithdraw(false);
+      setWithdrawAmount("");
+      setBank("");
+      setAccountNumber("");
+      setAccountName("");
 
-  await databases.createDocument(  
-    DATABASE_ID,  
-    "withdrawal_requests",  
-    ID.unique(),  
-    {  
-      userId: user.$id,  
-      amount: Number(withdrawAmount),  
-      bank,  
-      accountNumber,  
-      accountName,  
-      status: "pending",  
-      createdAt: new Date().toISOString()  
-    }  
-  );  
+    } catch (err) {
+      alert(err.message);
+    }
 
-  alert("Withdrawal request sent");  
+    setProcessing(false);
+  }
 
-  setShowWithdraw(false);  
-  setWithdrawAmount("");  
-  setBank("");  
-  setAccountNumber("");  
-  setAccountName("");  
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <p>Loading wallet...</p>
+      </div>
+    );
+  }
 
-} catch (err) {  
-  alert(err.message);  
-}  
+  return (
+    <div style={styles.container}>
 
-setProcessing(false);
+      {/* HEADER */}
+      <div style={styles.header}>
+        <h1>💳 Wallet</h1>
 
-}
+        <div style={styles.promoHeader}>
+          {promoStats.code ? (
+            <>
+              <span style={styles.code}>{promoStats.code}</span>
+              <button style={styles.copyBtn} onClick={copyCode}>📋</button>
+            </>
+          ) : (
+            <button style={styles.genBtn} onClick={createPromo}>
+              + Code
+            </button>
+          )}
+        </div>
+      </div>
 
-if (loading) {
-return (
-<div style={styles.container}>
-<p>Loading wallet...</p>
-</div>
-);
-}
+      {promoStats.code && (
+        <p style={styles.usedText}>
+          👥 {promoStats.usedCount} users joined
+        </p>
+      )}
 
-return (
-<div style={styles.container}>
+      {/* WALLET */}
+      <div style={styles.card}>
+        <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>
+        <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
+      </div>
 
-{/* HEADER */}  
-  <div style={styles.header}>  
-    <h1>💳 Wallet</h1>  
+      {/* ACTIONS */}
+      <button style={styles.btn} onClick={() => setShowDeposit(true)}>
+        ➕ Deposit
+      </button>
 
-    <div style={styles.promoHeader}>  
-      {promoStats.code ? (  
-        <>  
-          <span style={styles.code}>{promoStats.code}</span>  
-          <button style={styles.copyBtn} onClick={copyCode}>📋</button>  
-        </>  
-      ) : (  
-        <button style={styles.genBtn} onClick={createPromo}>  
-          + Code  
-        </button>  
-      )}  
-    </div>  
-  </div>  
+      <button style={styles.btn} onClick={() => setShowWithdraw(true)}>
+        ➖ Withdraw
+      </button>
 
-  {promoStats.code && (  
-    <p style={styles.usedText}>  
-      👥 {promoStats.usedCount} users joined  
-    </p>  
-  )}  
+      {/* BACK */}
+      <button style={styles.back} onClick={() => navigate("/dashboard")}>
+        ⬅ Back
+      </button>
 
-  {/* WALLET */}  
-  <div style={styles.card}>  
-    <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>  
-    <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>  
-  </div>  
+      {/* INVITE BUTTON */}
+      <button style={styles.inviteBtn} onClick={inviteWhatsApp}>
+        📲 Invite via WhatsApp
+      </button>
 
-  {/* ACTIONS */}  
-  <button style={styles.btn} onClick={() => setShowDeposit(true)}>  
-    ➕ Deposit  
-  </button>  
-
-  <button style={styles.btn} onClick={() => setShowWithdraw(true)}>  
-    ➖ Withdraw  
-  </button>  
-
-  {/* BACK */}  
-  <button style={styles.back} onClick={() => navigate("/dashboard")}>  
-    ⬅ Back  
-  </button>  
-
-  {/* INVITE BUTTON */}  
-  <button style={styles.inviteBtn} onClick={inviteWhatsApp}>  
-    📲 Invite via WhatsApp  
-  </button>  
-
-  {/* WHATSAPP GROUP */}  
-  <a  
-    href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"  
-    target="_blank"  
-    rel="noreferrer"  
-    style={styles.whatsapp}  
-  >  
-    💬 Join WhatsApp Updates Group  
-  </a>  
-</div>
-
-);
+      {/* WHATSAPP GROUP */}
+      <a
+        href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"
+        target="_blank"
+        rel="noreferrer"
+        style={styles.whatsapp}
+      >
+        💬 Join WhatsApp Updates Group
+      </a>
+    </div>
+  );
 }
 
 // =========================
 // STYLES
 // =========================
 const styles = {
-container: {
-padding: 20,
-paddingBottom: 80,
-background: "#0f172a",
-color: "white",
-minHeight: "100vh"
-},
-header: {
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center"
-},
-promoHeader: {
-display: "flex",
-gap: 5
-},
-code: {
-background: "#111827",
-padding: "6px 10px",
-borderRadius: 6
-},
-copyBtn: {
-background: "#22c55e",
-border: "none",
-borderRadius: 6,
-padding: "6px 10px"
-},
-genBtn: {
-background: "gold",
-border: "none",
-borderRadius: 6,
-padding: "6px 10px"
-},
-usedText: {
-fontSize: 12,
-color: "#9ca3af"
-},
-card: {
-padding: 20,
-background: "#111827",
-borderRadius: 10,
-marginTop: 20
-},
-btn: {
-width: "100%",
-padding: 12,
-marginTop: 10,
-background: "gold",
-border: "none",
-borderRadius: 8
-},
-back: {
-marginTop: 20,
-padding: 10
-},
-inviteBtn: {
-marginTop: 15,
-width: "100%",
-padding: 12,
-background: "#25D366",
-border: "none",
-borderRadius: 8,
-color: "#fff",
-fontWeight: "bold"
-},
-whatsapp: {
-position: "fixed",
-bottom: 0,
-width: "100%",
-padding: 14,
-background: "#128C7E",
-textAlign: "center",
-color: "#fff"
-}
+  container: {
+    padding: 20,
+    paddingBottom: 80,
+    background: "#0f172a",
+    color: "white",
+    minHeight: "100vh"
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center"
+  },
+  promoHeader: {
+    display: "flex",
+    gap: 5
+  },
+  code: {
+    background: "#111827",
+    padding: "6px 10px",
+    borderRadius: 6
+  },
+  copyBtn: {
+    background: "#22c55e",
+    border: "none",
+    borderRadius: 6,
+    padding: "6px 10px"
+  },
+  genBtn: {
+    background: "gold",
+    border: "none",
+    borderRadius: 6,
+    padding: "6px 10px"
+  },
+  usedText: {
+    fontSize: 12,
+    color: "#9ca3af"
+  },
+  card: {
+    padding: 20,
+    background: "#111827",
+    borderRadius: 10,
+    marginTop: 20
+  },
+  btn: {
+    width: "100%",
+    padding: 12,
+    marginTop: 10,
+    background: "gold",
+    border: "none",
+    borderRadius: 8
+  },
+  back: {
+    marginTop: 20,
+    padding: 10
+  },
+  inviteBtn: {
+    marginTop: 15,
+    width: "100%",
+    padding: 12,
+    background: "#25D366",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff",
+    fontWeight: "bold"
+  },
+  whatsapp: {
+    position: "fixed",
+    bottom: 0,
+    width: "100%",
+    padding: 14,
+    background: "#128C7E",
+    textAlign: "center",
+    color: "#fff"
+  }
 };
