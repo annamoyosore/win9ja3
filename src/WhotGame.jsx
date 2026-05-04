@@ -10,9 +10,7 @@ const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
 const WALLET_COLLECTION = "wallets";
 
-// =========================
-// 🔊 SOUND + ERROR
-// =========================
+// 🔊 SOUND
 function beep(freq = 200, duration = 200) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -40,9 +38,7 @@ function beep(freq = 200, duration = 200) {
   } catch {}
 }
 
-// =========================
 // 🎴 DECK
-// =========================
 function createDeck() {
   const valid = {
     c: [1,2,3,4,5,7,8,10,11,12,13,14],
@@ -60,9 +56,7 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
-// =========================
-// 🎴 DECODE + LABEL
-// =========================
+// 🎴 DECODE
 function decodeCard(str) {
   if (!str) return null;
 
@@ -80,6 +74,7 @@ function decodeCard(str) {
   };
 }
 
+// 🎴 LABEL
 function cardLabel(cardStr) {
   const c = decodeCard(cardStr);
   if (!c) return "";
@@ -95,9 +90,7 @@ function cardLabel(cardStr) {
   return `${shapeMap[c.shape]} ${c.number}`;
 }
 
-// =========================
-// 🎴 DRAW CARD
-// =========================
+// 🎴 DRAW
 const cache = new Map();
 
 function drawCard(card) {
@@ -115,7 +108,6 @@ function drawCard(card) {
   ctx.fillRect(0, 0, 70, 100);
 
   ctx.strokeStyle = "#e11d48";
-  ctx.lineWidth = 2;
   ctx.strokeRect(2, 2, 66, 96);
 
   ctx.fillStyle = "#e11d48";
@@ -140,10 +132,7 @@ function drawCard(card) {
     ctx.fill();
   }
 
-  if (card.shape === "star") {
-    ctx.font = "20px Arial";
-    ctx.fillText("★", cx - 8, cy + 8);
-  }
+  if (card.shape === "star") ctx.fillText("★", cx - 8, cy + 8);
 
   if (card.shape === "cross") {
     ctx.fillRect(cx - 3, cy - 12, 6, 24);
@@ -173,6 +162,7 @@ function drawBack() {
 
   return c.toDataURL();
 }
+
 // =========================
 // PARSE / ENCODE
 // =========================
@@ -259,6 +249,15 @@ export default function WhotGame({ gameId, goHome }) {
       async (res) => {
         const parsed = parseGame(res.payload);
         setGame(parsed);
+
+        if (parsed.status === "finished") {
+          if (parsed.winnerId === userId) {
+            setShowWin(true);
+            setTimeout(goHome, 3000);
+          } else {
+            setTimeout(goHome, 2500);
+          }
+        }
       }
     );
 
@@ -274,90 +273,93 @@ export default function WhotGame({ gameId, goHome }) {
   const oppCards = game.hands[oppIdx].length;
   const top = game.discard ? decodeCard(game.discard) : null;
 
+  async function playCard(i) {
+    if (actionLock.current) return;
+    if (game.turn !== userId) return invalidMove("Not your turn");
+
+    actionLock.current = true;
+
+    const g = JSON.parse(JSON.stringify(game));
+    const card = g.hands[myIdx][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
+
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) {
+      actionLock.current = false;
+      return invalidMove("Wrong card");
+    }
+
+    g.hands[myIdx].splice(i, 1);
+    g.discard = card;
+    g.turn = g.players[oppIdx];
+
+    setGame(g);
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      encodeGame(g)
+    );
+
+    actionLock.current = false;
+  }
+
+  async function drawMarket() {
+    if (actionLock.current) return;
+    if (game.turn !== userId) return;
+
+    actionLock.current = true;
+
+    const g = JSON.parse(JSON.stringify(game));
+
+    if (g.deck.length) {
+      g.hands[myIdx].push(g.deck.pop());
+    }
+
+    g.turn = g.players[oppIdx];
+
+    setGame(g);
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      encodeGame(g)
+    );
+
+    actionLock.current = false;
+  }
+
   return (
-    <div style={styles.bg}>
-      <div style={styles.box}>
-        <h2>🎮 WHOT GAME</h2>
+    <div style={{ padding: 20 }}>
+      <h2>🎮 WHOT GAME</h2>
 
-        {error && <div style={styles.error}>{error}</div>}
-
-        <div style={styles.row}>
-          <span>{game.hostName}</span>
-          <span>VS</span>
-          <span>{game.opponentName}</span>
-        </div>
-
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-        </div>
-
-        <div style={styles.center}>
-          {top && <img src={drawCard(top)} style={styles.card} />}
-        </div>
-
-        <div style={styles.hand}>
-          {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(decodeCard(c))}
-              style={styles.card}
-            />
-          ))}
-        </div>
-
-        <button onClick={goHome}>Exit</button>
+      <div>
+        Opponent: {oppCards} cards
       </div>
+
+      <div>
+        {top && <img src={drawCard(top)} width={60} />}
+      </div>
+
+      <div>
+        {hand.map((c, i) => (
+          <img
+            key={i}
+            src={drawCard(decodeCard(c))}
+            width={50}
+            onClick={() => playCard(i)}
+          />
+        ))}
+      </div>
+
+      <button onClick={drawMarket}>Draw</button>
+      <button onClick={goHome}>Exit</button>
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  bg: {
-    minHeight: "100vh",
-    background: "green",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center"
-  },
-  box: {
-    width: "95%",
-    maxWidth: 450,
-    background: "#000000cc",
-    padding: 12,
-    color: "#fff",
-    borderRadius: 10
-  },
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginBottom: 6
-  },
-  hand: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6,
-    justifyContent: "center",
-    marginTop: 10
-  },
-  card: {
-    width: 65,
-    cursor: "pointer"
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 10,
-    marginTop: 10
-  },
-  error: {
-    background: "red",
-    padding: 6,
-    textAlign: "center",
-    marginBottom: 6
-  }
-};
