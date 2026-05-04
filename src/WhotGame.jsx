@@ -39,7 +39,22 @@ function beep(freq = 200, duration = 200) {
     }, duration);
   } catch {}
 }
-const cache = new Map();
+function createDeck() {
+  const valid = {
+    c: [1,2,3,4,5,7,8,10,11,12,13,14],
+    t: [1,2,3,4,5,7,8,10,11,12,13,14],
+    s: [1,2,3,5,7,10,11,13,14],
+    x: [1,2,3,5,7,10,11,13,14],
+    r: [1,2,3,4,5,7,8]
+  };
+
+  let deck = [];
+  Object.keys(valid).forEach(shape => {
+    valid[shape].forEach(n => deck.push(shape + n));
+  });
+
+  return deck.sort(() => Math.random() - 0.5);
+}
 
 function decodeCard(str) {
   if (!str) return null;
@@ -58,6 +73,40 @@ function decodeCard(str) {
   };
 }
 
+// 🔥 IMPORTANT FIX
+function parseGame(g) {
+  return {
+    ...g,
+    players: g.players?.split(",") || [],
+    deck: g.deck?.split(",").filter(Boolean) || [],
+    hands: g.hands?.split("|").map(p => p.split(",").filter(Boolean)) || [[], []],
+    discard: g.discard || null,
+    turn: g.turn || null,
+    pendingPick: Number(g.pendingPick || 0),
+    history: g.history ? g.history.split("||") : [],
+    scores: g.scores?.split(",").map(Number) || [0, 0],
+    round: Number(g.round || 1),
+    status: g.status || "playing",
+    winnerId: g.winnerId || null,
+    matchId: g.matchId || null
+  };
+}
+
+function encodeGame(g) {
+  return {
+    hands: g.hands.map(p => p.join(",")).join("|"),
+    deck: g.deck.join(","),
+    discard: g.discard || "",
+    turn: g.turn,
+    pendingPick: String(g.pendingPick),
+    history: g.history.slice(-10).join("||"),
+    scores: g.scores.join(","),
+    round: String(g.round),
+    status: g.status
+  };
+}
+const cache = new Map();
+
 function drawCard(card) {
   if (!card) return null;
 
@@ -69,7 +118,7 @@ function drawCard(card) {
   c.height = 100;
 
   const ctx = c.getContext("2d");
-  if (!ctx) return null; // ✅ FIX
+  if (!ctx) return null;
 
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, 70, 100);
@@ -150,13 +199,13 @@ export default function WhotGame({ gameId, goHome }) {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
-  // ✅ LOAD GAME
+  // ✅ LOAD GAME (FIXED)
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
       const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      setGame(g);
+      setGame(parseGame(g)); // 🔥 FIX
 
       if (g.matchId) {
         const m = await databases.getDocument(
@@ -188,20 +237,16 @@ export default function WhotGame({ gameId, goHome }) {
 
     return () => unsub();
   }, [gameId, userId]);
-if (
-    !game ||
-    !userId ||
-    !game.hands ||
-    !game.players
-  ) {
+
+  if (!game || !userId) {
     return <div style={{ color: "white" }}>Loading game...</div>;
   }
 
   const myIdx = game.players.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
 
-  const hand = game.hands?.[myIdx] || [];
-  const oppCards = game.hands?.[oppIdx]?.length || 0;
+  const hand = game.hands[myIdx] || [];
+  const oppCards = game.hands[oppIdx]?.length || 0;
   const top = game.discard ? decodeCard(game.discard) : null;
 
   return (
@@ -234,10 +279,9 @@ if (
         </div>
 
         <button onClick={goHome}>Exit</button>
-
       </div>
 
-      {/* ✅ CHAT BUTTON (BOTTOM RIGHT) */}
+      {/* 💬 CHAT BUTTON */}
       <div
         style={styles.chatBtn}
         onClick={() => {
@@ -248,10 +292,10 @@ if (
         💬
         {unread && <span style={styles.dot} />}
       </div>
-
     </div>
   );
 }
+
 const styles = {
   bg: {
     minHeight: "100vh",
@@ -284,7 +328,6 @@ const styles = {
     marginTop: 10
   },
 
-  // ✅ CHAT BUTTON
   chatBtn: {
     position: "fixed",
     bottom: 20,
@@ -298,7 +341,8 @@ const styles = {
     alignItems: "center",
     fontSize: 24,
     cursor: "pointer",
-    boxShadow: "0 0 10px #000"
+    boxShadow: "0 0 10px #000",
+    zIndex: 999
   },
 
   dot: {
