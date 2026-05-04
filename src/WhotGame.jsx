@@ -285,83 +285,85 @@ useEffect(() => {
     // already paid
     if (fresh.payoutDone) return;
 
-    // 🔒 MARK PAID FIRST
+  // 🔒 GET FRESH GAME
+const fresh = await databases.getDocument(
+  DATABASE_ID,
+  GAME_COLLECTION,
+  parsed.$id
+);
+
+// 🛑 prevent double payout
+if (fresh.payoutDone === true) return;
+
+const pot = Number(fresh.pot || 0);
+
+// 🛑 nothing to pay
+if (pot <= 0) return;
+
+// ✅ get stake safely (FIX)
+const stake = Number(match?.stake || 0);
+
+// 🔒 mark paid FIRST + clear pot (anti double payout)
+await databases.updateDocument(
+  DATABASE_ID,
+  GAME_COLLECTION,
+  parsed.$id,
+  {
+    payoutDone: true,
+    pot: 0
+  }
+);
+
+// 💰 CREDIT WINNER FROM GAME POT
+const winnerWallet = await databases.listDocuments(
+  DATABASE_ID,
+  WALLET_COLLECTION,
+  [Query.equal("userId", parsed.winnerId)]
+);
+
+if (winnerWallet.documents.length) {
+  const w = winnerWallet.documents[0];
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    w.$id,
+    {
+      balance: Number(w.balance || 0) + pot
+    }
+  );
+}
+
+// 🔓 UNLOCK BOTH PLAYERS
+for (let pid of parsed.players) {
+  const wallets = await databases.listDocuments(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    [Query.equal("userId", pid)]
+  );
+
+  if (wallets.documents.length) {
+    const w = wallets.documents[0];
+
     await databases.updateDocument(
       DATABASE_ID,
-      GAME_COLLECTION,
-      parsed.$id,
-      { payoutDone: true }
-    );
-
-    const m = parsed.matchId
-      ? await databases.getDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          parsed.matchId
-        )
-      : null;
-
-    const pot = Number(m?.pot || 0);
-    const stake = Number(m?.stake || 0);
-
-    // 💰 CREDIT WINNER
-    const winnerWallet = await databases.listDocuments(
-      DATABASE_ID,
       WALLET_COLLECTION,
-      [Query.equal("userId", parsed.winnerId)]
-    );
-
-    if (winnerWallet.documents.length) {
-      const w = winnerWallet.documents[0];
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        w.$id,
-        {
-          balance: Number(w.balance || 0) + pot
-        }
-      );
-    }
-
-    // 🔓 UNLOCK BOTH PLAYERS
-    for (let pid of parsed.players) {
-      const wallets = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", pid)]
-      );
-
-      if (wallets.documents.length) {
-        const w = wallets.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          w.$id,
-          {
-            locked: Math.max(
-              0,
-              Number(w.locked || 0) - stake
-            )
-          }
-        );
+      w.$id,
+      {
+        locked: Math.max(0, Number(w.locked || 0) - stake)
       }
-    }
-
-    // ✅ MATCH FINISHED
-    if (parsed.matchId) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        parsed.matchId,
-        { status: "finished" }
-      );
-    }
-
-  } catch (e) {
-    console.log("payout error", e);
+    );
   }
+}
+
+// ✅ MATCH FINISHED
+if (parsed.matchId) {
+  await databases.updateDocument(
+    DATABASE_ID,
+    MATCH_COLLECTION,
+    parsed.matchId,
+    { status: "finished" }
+  );
 }
 // ✅ CORRECT CLEANUP POSITION
 return () => unsub();
