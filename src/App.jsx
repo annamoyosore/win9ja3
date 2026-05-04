@@ -20,9 +20,10 @@ import Lobby from "./pages/Lobby";
 import Transactions from "./pages/Transactions";
 import WhotGame from "./WhotGame";
 import AdminDashboard from "./pages/aaa";
-
-// ✅ CASINO IMPORT
 import CasinoWheel from "./pages/CasinoWheel";
+
+// ✅ ADD THIS
+import Message from "./pages/Message";
 
 // 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
@@ -117,6 +118,21 @@ function GameWrapper() {
 }
 
 // =========================
+// 💬 CHAT WRAPPER (NEW)
+// =========================
+function ChatWrapper() {
+  const { gameId } = useParams();
+  const navigate = useNavigate();
+
+  return (
+    <Message
+      gameId={gameId}
+      goBack={() => navigate(-1)}
+    />
+  );
+}
+
+// =========================
 // ROUTES
 // =========================
 function AppRoutes() {
@@ -145,7 +161,7 @@ function AppRoutes() {
               goWallet={() => navigate("/wallet")}
               goTransactions={() => navigate("/transactions")}
               goAdmin={() => navigate("/admin")}
-              goCasino={() => navigate("/casino")} // ✅ NEW
+              goCasino={() => navigate("/casino")}
               logout={async () => {
                 await account.deleteSession("current");
                 navigate("/auth");
@@ -155,7 +171,7 @@ function AppRoutes() {
         }
       />
 
-      {/* ✅ CASINO ROUTE */}
+      {/* CASINO */}
       <Route
         path="/casino"
         element={
@@ -206,6 +222,16 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <GameWrapper />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 💬 CHAT (NEW ROUTE) */}
+      <Route
+        path="/game/:gameId/chat"
+        element={
+          <ProtectedRoute>
+            <ChatWrapper />
           </ProtectedRoute>
         }
       />
