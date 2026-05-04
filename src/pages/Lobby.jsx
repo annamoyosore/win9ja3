@@ -27,6 +27,7 @@ export default function Lobby({ goGame, back }) {
   const [stake, setStake] = useState("");  
   const [user, setUser] = useState(null);  
   const [wallet, setWallet] = useState(null);  
+  const [loadingId, setLoadingId] = useState(null);  
 
   useEffect(() => { init(); }, []);  
 
@@ -51,19 +52,19 @@ export default function Lobby({ goGame, back }) {
   useEffect(() => {  
     if (!user) return;  
 
-    const unsub1 = databases.client.subscribe(  
+    const unsubMatch = databases.client.subscribe(  
       `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,  
       () => refresh(user.$id)  
     );  
 
-    const unsub2 = databases.client.subscribe(  
+    const unsubGame = databases.client.subscribe(  
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,  
       () => refresh(user.$id)  
     );  
 
     return () => {  
-      unsub1();  
-      unsub2();  
+      unsubMatch();  
+      unsubGame();  
     };  
   }, [user]);  
 
@@ -86,16 +87,15 @@ export default function Lobby({ goGame, back }) {
 
     setMatches(  
       res.documents.filter(  
-        (m) =>  
-          m.status === "waiting" &&  
-          !m.opponentId &&  
-          m.hostId !== userId  
+        m => m.status === "waiting" &&  
+        !m.opponentId &&  
+        m.hostId !== userId  
       )  
     );  
   }  
 
   // =========================  
-  // ACTIVE MATCHES + GAME MAP  
+  // ACTIVE MATCHES  
   // =========================  
   async function loadActiveMatches(userId) {  
     const res = await databases.listDocuments(  
@@ -105,7 +105,7 @@ export default function Lobby({ goGame, back }) {
     );  
 
     const mine = res.documents.filter(  
-      (m) =>  
+      m =>  
         (m.hostId === userId || m.opponentId === userId) &&  
         m.status !== "cancelled"  
     );  
@@ -156,6 +156,9 @@ export default function Lobby({ goGame, back }) {
   // JOIN MATCH  
   // =========================  
   async function joinMatch(match) {  
+    if (loadingId) return;  
+    setLoadingId(match.$id);  
+
     try {  
       const fresh = await databases.getDocument(  
         DATABASE_ID,  
@@ -163,8 +166,12 @@ export default function Lobby({ goGame, back }) {
         match.$id  
       );  
 
+      if (fresh.status !== "waiting" || fresh.opponentId) {  
+        throw new Error("Match already taken");  
+      }  
+
       if ((wallet?.balance || 0) < fresh.stake) {  
-        return alert("Insufficient balance");  
+        throw new Error("Insufficient balance");  
       }  
 
       await lockFunds(user.$id, fresh.stake);  
@@ -173,21 +180,21 @@ export default function Lobby({ goGame, back }) {
       const adminCut = Math.floor(totalPot * 0.1);  
       const gamePot = totalPot - adminCut;  
 
-      // 💰 ADMIN CUT  
-      const adminWallet = await databases.listDocuments(  
+      // ADMIN CUT  
+      const adminRes = await databases.listDocuments(  
         DATABASE_ID,  
         WALLET_COLLECTION,  
         [Query.equal("userId", ADMIN_ID), Query.limit(1)]  
       );  
 
-      if (adminWallet.documents.length) {  
-        const w = adminWallet.documents[0];  
+      if (adminRes.documents.length) {  
+        const adminWallet = adminRes.documents[0];  
 
         await databases.updateDocument(  
           DATABASE_ID,  
           WALLET_COLLECTION,  
-          w.$id,  
-          { balance: (w.balance || 0) + adminCut }  
+          adminWallet.$id,  
+          { balance: (adminWallet.balance || 0) + adminCut }  
         );  
       }  
 
@@ -199,11 +206,11 @@ export default function Lobby({ goGame, back }) {
         {  
           opponentId: user.$id,  
           status: "matched",  
-          pot: 0 // 🚫 CLEAR MATCH POT  
+          pot: 0  
         }  
       );  
 
-      // CREATE GAME WITH POT  
+      // CREATE GAME  
       const game = await databases.createDocument(  
         DATABASE_ID,  
         GAME_COLLECTION,  
@@ -212,7 +219,10 @@ export default function Lobby({ goGame, back }) {
           matchId: updated.$id,  
           players: `${updated.hostId},${user.$id}`,  
           pot: gamePot,  
-          status: "running"  
+          status: "running",  
+
+          // ✅ CRITICAL FIX (TURN EXISTS)
+          turn: updated.hostId  
         }  
       );  
 
@@ -225,9 +235,11 @@ export default function Lobby({ goGame, back }) {
 
       goGame(game.$id);  
 
-    } catch (e) {  
-      alert(e.message);  
+    } catch (err) {  
+      alert(err.message);  
     }  
+
+    setLoadingId(null);  
   }  
 
   // =========================  
@@ -260,40 +272,48 @@ export default function Lobby({ goGame, back }) {
   }  
 
   // =========================  
+  // TURN LABEL (FIXED)  
+  // =========================  
+  function getTurnLabel(game) {  
+    if (!game) return "⏳ Loading...";  
+    if (game.status === "finished") return "✅ Finished";  
+    if (!game.turn) return "⚠️ No turn data";  
+
+    return game.turn === user?.$id  
+      ? "🟢 Your Turn"  
+      : "🔴 Opponent Turn";  
+  }  
+
+  // =========================  
   // UI  
   // =========================  
   return (  
     <div style={styles.container}>  
-      <h1>🎮 Lobby</h1>  
+      <h1>🎮 Game Lobby</h1>  
 
       <h2>🔥 Your Matches</h2>  
 
       {activeMatches.map(m => {  
         const game = gameMap[m.gameId];  
 
-        let turn = "";  
-        if (game && game.status !== "finished") {  
-          turn = game.turn === user?.$id  
-            ? "🟢 Your Turn"  
-            : "🔴 Opponent Turn";  
-        }  
-
         return (  
           <div key={m.$id} style={styles.card}>  
             <div>  
               <p>₦{m.stake}</p>  
               <p>{m.status}</p>  
-              <p>{turn}</p>  
+              <p>{getTurnLabel(game)}</p>  
             </div>  
 
             {m.status === "waiting" && m.hostId === user?.$id ? (  
               <button style={styles.cancel} onClick={() => cancelMatch(m)}>  
-                Cancel  
+                ❌ Cancel  
               </button>  
             ) : (  
-              <button style={styles.play} onClick={() => goGame(m.gameId)}>  
-                Resume  
-              </button>  
+              m.gameId && (  
+                <button style={styles.play} onClick={() => goGame(m.gameId)}>  
+                  ▶ Resume  
+                </button>  
+              )  
             )}  
           </div>  
         );  
@@ -310,19 +330,21 @@ export default function Lobby({ goGame, back }) {
         </div>  
       ))}  
 
-      <input  
-        value={stake}  
-        onChange={e => setStake(e.target.value)}  
-        placeholder="Stake ₦"  
-        style={styles.input}  
-      />  
+      <div style={styles.box}>  
+        <input  
+          value={stake}  
+          onChange={e => setStake(e.target.value)}  
+          placeholder="Stake ₦"  
+          style={styles.input}  
+        />  
 
-      <button style={styles.create} onClick={createMatch}>  
-        Create Match  
-      </button>  
+        <button style={styles.create} onClick={createMatch}>  
+          Create Match  
+        </button>  
+      </div>  
 
       <button style={styles.back} onClick={back}>  
-        Back  
+        ← Back  
       </button>  
     </div>  
   );  
@@ -332,10 +354,10 @@ export default function Lobby({ goGame, back }) {
 // STYLES  
 // =========================  
 const styles = {  
-  container: { padding: 20, color: "#fff", background: "#020617" },  
+  container: { padding: 20, background: "#020617", color: "#fff" },  
   card: {  
     background: "#111827",  
-    padding: 10,  
+    padding: 15,  
     margin: "10px 0",  
     display: "flex",  
     justifyContent: "space-between"  
@@ -344,6 +366,7 @@ const styles = {
   play: { background: "green", color: "#fff", padding: 8 },  
   cancel: { background: "red", color: "#fff", padding: 8 },  
   create: { background: "blue", color: "#fff", padding: 10, width: "100%" },  
-  input: { width: "100%", padding: 10, marginTop: 10 },  
-  back: { marginTop: 10 }  
+  input: { width: "100%", padding: 10 },  
+  box: { marginTop: 10 },  
+  back: { marginTop: 20 }  
 };
