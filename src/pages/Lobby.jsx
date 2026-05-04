@@ -220,8 +220,6 @@ export default function Lobby({ goGame, back }) {
           players: `${updated.hostId},${user.$id}`,  
           pot: gamePot,  
           status: "running",  
-
-          // ✅ CRITICAL FIX (TURN EXISTS)
           turn: updated.hostId  
         }  
       );  
@@ -272,7 +270,7 @@ export default function Lobby({ goGame, back }) {
   }  
 
   // =========================  
-  // TURN LABEL (FIXED)  
+  // TURN LABEL  
   // =========================  
   function getTurnLabel(game) {  
     if (!game) return "⏳ Loading...";  
@@ -304,17 +302,24 @@ export default function Lobby({ goGame, back }) {
               <p>{getTurnLabel(game)}</p>  
             </div>  
 
-            {m.status === "waiting" && m.hostId === user?.$id ? (  
+            {m.status === "finished" ? (  
+              <button style={styles.finished} disabled>  
+                ✅ Finished  
+              </button>  
+
+            ) : m.status === "waiting" && m.hostId === user?.$id ? (  
+
               <button style={styles.cancel} onClick={() => cancelMatch(m)}>  
                 ❌ Cancel  
               </button>  
-            ) : (  
-              m.gameId && (  
-                <button style={styles.play} onClick={() => goGame(m.gameId)}>  
-                  ▶ Resume  
-                </button>  
-              )  
-            )}  
+
+            ) : m.gameId ? (  
+
+              <button style={styles.play} onClick={() => goGame(m.gameId)}>  
+                ▶ Resume  
+              </button>  
+
+            ) : null}  
           </div>  
         );  
       })}  
@@ -365,6 +370,7 @@ const styles = {
   join: { background: "gold", padding: 8 },  
   play: { background: "green", color: "#fff", padding: 8 },  
   cancel: { background: "red", color: "#fff", padding: 8 },  
+  finished: { background: "#16a34a", color: "#fff", padding: 8, opacity: 0.7 },  
   create: { background: "blue", color: "#fff", padding: 10, width: "100%" },  
   input: { width: "100%", padding: 10 },  
   box: { marginTop: 10 },  
