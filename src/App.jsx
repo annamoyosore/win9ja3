@@ -20,10 +20,9 @@ import Lobby from "./pages/Lobby";
 import Transactions from "./pages/Transactions";
 import WhotGame from "./WhotGame";
 import AdminDashboard from "./pages/aaa";
-import CasinoWheel from "./pages/CasinoWheel";
 
-// ✅ ADD THIS (CHAT PAGE)
-import Message from "./pages/Message";
+// ✅ CASINO IMPORT
+import CasinoWheel from "./pages/CasinoWheel";
 
 // 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
@@ -68,7 +67,7 @@ function useUser() {
 function ProtectedRoute({ children }) {
   const { loading, authed } = useAuth();
 
-  if (loading) return null; // cleaner (no flashing text)
+  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
 
   return authed ? children : <Navigate to="/auth" replace />;
 }
@@ -79,7 +78,7 @@ function ProtectedRoute({ children }) {
 function AdminRoute({ children }) {
   const { user, loading } = useUser();
 
-  if (loading) return null;
+  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
 
   if (!user) return <Navigate to="/auth" replace />;
 
@@ -96,7 +95,7 @@ function AdminRoute({ children }) {
 function PublicRoute({ children }) {
   const { loading, authed } = useAuth();
 
-  if (loading) return null;
+  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
 
   return authed ? <Navigate to="/dashboard" replace /> : children;
 }
@@ -113,21 +112,6 @@ function GameWrapper() {
       gameId={gameId}
       stake={Number(stake)}
       goHome={() => navigate("/dashboard")}
-    />
-  );
-}
-
-// =========================
-// MESSAGE WRAPPER
-// =========================
-function MessageWrapper() {
-  const { gameId } = useParams();
-  const navigate = useNavigate();
-
-  return (
-    <Message
-      gameId={gameId}
-      goBack={() => navigate(-1)} // go back to game
     />
   );
 }
@@ -161,7 +145,7 @@ function AppRoutes() {
               goWallet={() => navigate("/wallet")}
               goTransactions={() => navigate("/transactions")}
               goAdmin={() => navigate("/admin")}
-              goCasino={() => navigate("/casino")}
+              goCasino={() => navigate("/casino")} // ✅ NEW
               logout={async () => {
                 await account.deleteSession("current");
                 navigate("/auth");
@@ -171,7 +155,7 @@ function AppRoutes() {
         }
       />
 
-      {/* CASINO */}
+      {/* ✅ CASINO ROUTE */}
       <Route
         path="/casino"
         element={
@@ -222,16 +206,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <GameWrapper />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* ✅ CHAT ROUTE (FIXED) */}
-      <Route
-        path="/message/:gameId"
-        element={
-          <ProtectedRoute>
-            <MessageWrapper />
           </ProtectedRoute>
         }
       />
