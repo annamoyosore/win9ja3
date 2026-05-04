@@ -22,10 +22,13 @@ function beep(freq = 200, duration = 200) {
     const gain = ctx.createGain();
 
     osc.frequency.value = freq;
+    osc.type = "square";
+
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.start();
+
     gain.gain.setValueAtTime(0.3, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(
       0.001,
@@ -99,9 +102,11 @@ function drawCard(card) {
   ctx.fillRect(0, 0, 70, 100);
 
   ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 2;
   ctx.strokeRect(2, 2, 66, 96);
 
   ctx.fillStyle = "#e11d48";
+  ctx.font = "bold 14px Arial";
   ctx.fillText(card.number, 6, 18);
 
   const cx = 35, cy = 55;
@@ -126,6 +131,43 @@ function drawCard(card) {
   cache.set(key, img);
   return img;
 }
+// =========================
+// PARSE / ENCODE
+// =========================
+function parseGame(g) {
+  return {
+    ...g,
+    players: g.players?.split(",") || [],
+    deck: g.deck?.split(",").filter(Boolean) || [],
+    hands: g.hands?.split("|").map(p => p.split(",").filter(Boolean)) || [[], []],
+    discard: g.discard || null,
+    turn: g.turn || null,
+    pendingPick: Number(g.pendingPick || 0),
+    history: g.history ? g.history.split("||").filter(Boolean) : [],
+    scores: g.scores?.split(",").map(Number) || [0, 0],
+    round: Number(g.round || 1),
+    status: g.status || "playing",
+    payoutDone: Boolean(g.payoutDone),
+    hostName: g.hostName || "Player 1",
+    opponentName: g.opponentName || "Player 2",
+    winnerId: g.winnerId || null,
+    matchId: g.matchId || null
+  };
+}
+
+function encodeGame(g) {
+  return {
+    hands: g.hands.map(p => p.join(",")).join("|"),
+    deck: g.deck.join(","),
+    discard: g.discard || "",
+    turn: g.turn,
+    pendingPick: String(g.pendingPick),
+    history: g.history.slice(-10).join("||"),
+    scores: g.scores.join(","),
+    round: String(g.round),
+    status: g.status
+  };
+}
 
 // =========================
 // COMPONENT
@@ -145,30 +187,40 @@ export default function WhotGame({ gameId, goHome }) {
   const payoutRef = useRef(false);
   const actionLock = useRef(false);
 
-  // =========================
-  // 👤 USER LOAD
-  // =========================
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
+useEffect(() => {
+    if (!gameId || !userId) return;
 
-  // =========================
-  // ⚡ FAST GAME LOAD
-  // =========================
-  useEffect(() => {
-    if (!gameId) return;
+    const load = async () => {
+      const g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
 
-    databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId)
-      .then(g => setGame(g));
+      setGame(parseGame(g));
+    };
 
-    databases.getDocument(DATABASE_ID, MATCH_COLLECTION, gameId)
-      .then(m => setMatch(m))
-      .catch(()=>{});
-  }, [gameId]);
+    load();
 
-  // =========================
-  // 💬 CHAT SUBSCRIBE (OPTIMIZED)
-  // =========================
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+      (res) => {
+        const parsed = parseGame(res.payload);
+        setGame(parsed);
+
+        if (parsed.status === "finished") {
+          handlePayout(parsed);
+        }
+      }
+    );
+
+    return () => unsub();
+  }, [gameId, userId]);
+
+  // CHAT
   useEffect(() => {
     if (!gameId) return;
 
@@ -178,31 +230,17 @@ export default function WhotGame({ gameId, goHome }) {
         const msg = res.payload;
         if (msg.gameId !== gameId) return;
 
-        if (!chatOpen) setUnread(c => c + 1);
+        setMessages(prev => [...prev.slice(-3), msg]);
 
-        setMessages(prev => [...prev, msg].slice(-4));
+        if (!chatOpen) setUnread(c => c + 1);
       }
     );
 
     return () => unsub();
   }, [gameId, chatOpen]);
 
-  // =========================
-  // 💬 SEND MESSAGE + AUTO CLEAN
-  // =========================
   async function sendMessage() {
     if (!text.trim() || muted) return;
-
-    if (messages.length >= 4) {
-      for (let m of messages) {
-        databases.deleteDocument(
-          DATABASE_ID,
-          CHAT_COLLECTION,
-          m.$id
-        );
-      }
-      setMessages([]);
-    }
 
     await databases.createDocument(
       DATABASE_ID,
@@ -212,11 +250,22 @@ export default function WhotGame({ gameId, goHome }) {
     );
 
     setText("");
+
+    if (messages.length >= 4) {
+      setTimeout(async () => {
+        await Promise.all(
+          messages.map(m =>
+            databases.deleteDocument(
+              DATABASE_ID,
+              CHAT_COLLECTION,
+              m.$id
+            )
+          )
+        );
+      }, 0);
+    }
   }
 
-  // =========================
-  // 💰 PAYOUT (POT ONLY SAFE)
-  // =========================
   async function handlePayout(parsed) {
     if (parsed.winnerId !== userId) return;
     if (payoutRef.current) return;
@@ -248,7 +297,6 @@ export default function WhotGame({ gameId, goHome }) {
 
     if (wallet.documents.length) {
       const w = wallet.documents[0];
-
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -257,66 +305,61 @@ export default function WhotGame({ gameId, goHome }) {
       );
     }
   }
+if (!game || !userId) return <div>Loading...</div>;
 
-  if (!game || !userId) return <div>Loading...</div>;
-
-  // =========================
-  // 🎮 GAME STATE
-  // =========================
-  const myIdx = game.players?.indexOf(userId);
-  const oppIdx = myIdx === 0 ? 1 : 0;
-
-  const hand = game.hands?.[myIdx] || [];
-  const oppCards = game.hands?.[oppIdx]?.length || 0;
-  const top = game.discard ? decodeCard(game.discard) : null;
-
-  const myName = myIdx === 0 ? game.hostName : game.opponentName;
-  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
+  const myIdx = game.players.indexOf(userId);
+  const hand = game.hands[myIdx];
 
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
         <h2>🎮 WHOT GAME</h2>
 
-        <div style={styles.row}>
-          <span>{myName}</span>
-          <span>VS</span>
-          <span>{oppName}</span>
-        </div>
-
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawCard({shape:"circle",number:0})} style={{ width: 40 }} />
+        <div style={styles.hand}>
+          {hand.map((c, i) => (
+            <img
+              key={i}
+              src={drawCard(decodeCard(c))}
+              style={styles.card}
+            />
           ))}
-        </div>
-
-        <div style={styles.center}>
-          {top && <img src={drawCard(top)} style={styles.card} />}
         </div>
 
         <button onClick={goHome}>Exit</button>
       </div>
 
       {/* CHAT BUTTON */}
-      <div onClick={()=>{setChatOpen(true);setUnread(0);}}
-        style={styles.chatBtn}>
-        💬 {unread > 0 && <span style={styles.badge}>{unread}</span>}
+      <div
+        onClick={() => {
+          setChatOpen(true);
+          setUnread(0);
+        }}
+        style={styles.chatBtn}
+      >
+        💬 {unread}
       </div>
 
       {/* CHAT BOX */}
       {chatOpen && (
         <div style={styles.chatBox}>
-          <button onClick={()=>setChatOpen(false)}>X</button>
+          <button onClick={() => setChatOpen(false)}>X</button>
 
-          {messages.map(m => (
-            <div key={m.$id}>
-              {m.sender === userId ? "You" : "Opponent"}: {m.text}
-            </div>
-          ))}
+          <div style={{ maxHeight: 150, overflow: "auto" }}>
+            {messages.map(m => (
+              <div key={m.$id}>
+                {m.sender === userId ? "You" : "Opponent"}: {m.text}
+              </div>
+            ))}
+          </div>
 
-          <input value={text} onChange={e=>setText(e.target.value)} />
+          <input
+            value={text}
+            onChange={e => setText(e.target.value)}
+          />
+
           <button onClick={sendMessage}>Send</button>
-          <button onClick={()=>setMuted(!muted)}>
+
+          <button onClick={() => setMuted(!muted)}>
             {muted ? "Unmute" : "Mute"}
           </button>
         </div>
@@ -326,15 +369,48 @@ export default function WhotGame({ gameId, goHome }) {
 }
 
 // =========================
-// 🎨 STYLES (UNCHANGED)
+// STYLES
 // =========================
 const styles = {
-  bg:{minHeight:"100vh",background:"green",display:"flex",justifyContent:"center",alignItems:"center"},
-  box:{width:"95%",maxWidth:450,background:"#000000cc",padding:12,color:"#fff",borderRadius:10},
-  row:{display:"flex",justifyContent:"space-between"},
-  center:{display:"flex",justifyContent:"center",marginTop:10},
-  card:{width:65},
-  chatBtn:{position:"fixed",bottom:20,right:20,background:"#000",color:"#fff",padding:12,borderRadius:"50%",cursor:"pointer"},
-  badge:{background:"red",borderRadius:"50%",padding:"2px 6px",fontSize:10},
-  chatBox:{position:"fixed",bottom:80,right:20,width:250,background:"#fff",padding:10}
+  bg: {
+    minHeight: "100vh",
+    background: "green",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  box: {
+    width: "95%",
+    maxWidth: 450,
+    background: "#000000cc",
+    padding: 12,
+    color: "#fff",
+    borderRadius: 10
+  },
+  hand: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center"
+  },
+  card: {
+    width: 65
+  },
+  chatBtn: {
+    position: "fixed",
+    bottom: 20,
+    right: 20,
+    background: "#000",
+    color: "#fff",
+    padding: 12,
+    borderRadius: "50%"
+  },
+  chatBox: {
+    position: "fixed",
+    bottom: 80,
+    right: 20,
+    width: 250,
+    background: "#fff",
+    padding: 10
+  }
 };
