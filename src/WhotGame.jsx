@@ -104,7 +104,7 @@ const cache = new Map();
 function drawCard(card) {
 if (!card) return null;
 
-const key = ${card.shape}_${card.number};
+const key = `${card.shape}_${card.number}`;
 if (cache.has(key)) return cache.get(key);
 
 const c = document.createElement("canvas");
