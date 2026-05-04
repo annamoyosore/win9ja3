@@ -20,7 +20,7 @@ const WHATSAPP_NUMBER = "+1862 272-6355";
 // FAKE ACTIVITY DATA
 // =========================
 const names = [
-  "Emeka","Tunde","Blessing","Chioma","Ibrahim",
+  "seun","Tunde","lateef","Chioma","Ibrahim",
   "Sadiq","Zainab","Kelvin","Uche","Mary",
   "Aisha","David","Samuel","Joy","Paul",
   "Esther","Yusuf","Musa","Favour","Henry",
@@ -28,7 +28,7 @@ const names = [
 ];
 
 const cities = [
-  "Lagos","Abuja","Port Harcourt","Ibadan","Kano",
+  "Lagos","Abuja","Ogun","Ibadan","Kano",
   "Enugu","Benin","Jos","Owerri","Abeokuta"
 ];
 
