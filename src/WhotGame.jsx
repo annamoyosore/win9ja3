@@ -9,10 +9,9 @@ import {
 const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
 const WALLET_COLLECTION = "wallets";
-const CHAT_COLLECTION = "messages";
 
 // =========================
-// 🔊 SOUND
+// 🔊 SOUND + ERROR
 // =========================
 function beep(freq = 200, duration = 200) {
   try {
@@ -21,11 +20,18 @@ function beep(freq = 200, duration = 200) {
     const gain = ctx.createGain();
 
     osc.frequency.value = freq;
+    osc.type = "square";
+
     osc.connect(gain);
     gain.connect(ctx.destination);
 
     osc.start();
+
     gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      ctx.currentTime + duration / 1000
+    );
 
     setTimeout(() => {
       osc.stop();
@@ -35,38 +41,152 @@ function beep(freq = 200, duration = 200) {
 }
 
 // =========================
-// 🎴 SAFE PARSER (OLD + NEW)
+// 🎴 DECK
+// =========================
+function createDeck() {
+  const valid = {
+    c: [1,2,3,4,5,7,8,10,11,12,13,14],
+    t: [1,2,3,4,5,7,8,10,11,12,13,14],
+    s: [1,2,3,5,7,10,11,13,14],
+    x: [1,2,3,5,7,10,11,13,14],
+    r: [1,2,3,4,5,7,8]
+  };
+
+  let deck = [];
+  Object.keys(valid).forEach(shape => {
+    valid[shape].forEach(n => deck.push(shape + n));
+  });
+
+  return deck.sort(() => Math.random() - 0.5);
+}
+
+// =========================
+// 🎴 DECODE
+// =========================
+function decodeCard(str) {
+  if (!str || typeof str !== "string") return null;
+
+  const map = {
+    c: "circle",
+    t: "triangle",
+    s: "square",
+    r: "star",
+    x: "cross"
+  };
+
+  return {
+    shape: map[str[0]],
+    number: Number(str.slice(1))
+  };
+}
+
+// =========================
+// 🎴 DRAW CARD
+// =========================
+const cache = new Map();
+
+function drawCard(card) {
+  if (!card) return null;
+
+  const key = `${card.shape}_${card.number}`;
+  if (cache.has(key)) return cache.get(key);
+
+  const c = document.createElement("canvas");
+  c.width = 70;
+  c.height = 100;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, 70, 100);
+
+  ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, 66, 96);
+
+  ctx.fillStyle = "#e11d48";
+  ctx.font = "bold 14px Arial";
+  ctx.fillText(card.number, 6, 18);
+
+  const cx = 35, cy = 55;
+
+  if (card.shape === "circle") {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+
+  if (card.shape === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 12);
+    ctx.lineTo(cx - 12, cy + 12);
+    ctx.lineTo(cx + 12, cy + 12);
+    ctx.fill();
+  }
+
+  if (card.shape === "star") {
+    ctx.font = "20px Arial";
+    ctx.fillText("★", cx - 8, cy + 8);
+  }
+
+  if (card.shape === "cross") {
+    ctx.fillRect(cx - 3, cy - 12, 6, 24);
+    ctx.fillRect(cx - 12, cy - 3, 24, 6);
+  }
+
+  const img = c.toDataURL();
+  cache.set(key, img);
+  return img;
+}
+
+function drawBack() {
+  const c = document.createElement("canvas");
+  c.width = 65;
+  c.height = 100;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, 65, 100);
+
+  ctx.strokeStyle = "#fff";
+  ctx.strokeRect(2, 2, 61, 96);
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 20px Arial";
+  ctx.fillText("🂠", 18, 60);
+
+  return c.toDataURL();
+}
+
+// =========================
+// ✅ SAFE PARSER
 // =========================
 function parseGame(g) {
-  const players =
-    typeof g.players === "string"
-      ? g.players.split(",")
-      : g.players || [];
+  const safeSplit = (v, sep) =>
+    typeof v === "string" ? v.split(sep).filter(Boolean) : [];
 
-  const handsRaw =
-    typeof g.hands === "string"
-      ? g.hands.split("|")
-      : ["", ""];
+  const players = Array.isArray(g.players)
+    ? g.players
+    : safeSplit(g.players, ",");
 
-  const hands = handsRaw.map(p =>
-    p ? p.split(",").filter(Boolean) : []
-  );
+  const handsRaw = safeSplit(g.hands, "|");
 
-  const deck =
-    typeof g.deck === "string"
-      ? g.deck.split(",").filter(Boolean)
-      : [];
+  const hands =
+    handsRaw.length === 2
+      ? handsRaw.map(p => safeSplit(p, ","))
+      : [[], []];
 
   return {
     ...g,
     players,
-    hands: hands.length === 2 ? hands : [[], []],
-    deck,
+    hands,
+    deck: safeSplit(g.deck, ","),
     discard: g.discard || null,
     turn: g.turn || null,
     pendingPick: Number(g.pendingPick || 0),
-    history: g.history ? g.history.split("||").filter(Boolean) : [],
-    scores: g.scores?.split(",").map(Number) || [0, 0],
+    history: safeSplit(g.history, "||"),
+    scores: safeSplit(g.scores, ",").map(Number) || [0, 0],
     round: Number(g.round || 1),
     status: g.status || "playing",
     payoutDone: Boolean(g.payoutDone),
@@ -77,30 +197,47 @@ function parseGame(g) {
   };
 }
 
+function encodeGame(g) {
+  return {
+    hands: g.hands.map(p => p.join(",")).join("|"),
+    deck: g.deck.join(","),
+    discard: g.discard || "",
+    turn: g.turn,
+    pendingPick: String(g.pendingPick),
+    history: (g.history || []).slice(-10).join("||"),
+    scores: g.scores.join(","),
+    round: String(g.round),
+    status: g.status
+  };
+}
+
 // =========================
 // COMPONENT
 // =========================
-export default function WhotGame({ gameId, goHome }) {
+export default function WhotGame({ gameId, goHome, openChat }) {
+
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-
-  const [chatOpen, setChatOpen] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [msg, setMsg] = useState("");
-  const [unread, setUnread] = useState(false);
+  const [showWin, setShowWin] = useState(false);
+  const [error, setError] = useState("");
+  const [unread, setUnread] = useState(0);
 
   const payoutRef = useRef(false);
+  const actionLock = useRef(false);
 
-  // =========================
-  // INIT
-  // =========================
+  function invalidMove(msg) {
+    beep(120, 300);
+    setError(msg);
+    setTimeout(() => setError(""), 1000);
+  }
+
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
   // =========================
-  // LOAD GAME
+  // LOAD + SUBSCRIBE GAME
   // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
@@ -110,7 +247,11 @@ export default function WhotGame({ gameId, goHome }) {
       setGame(parseGame(g));
 
       if (g.matchId) {
-        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
+        const m = await databases.getDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          g.matchId
+        );
         setMatch(m);
       }
     };
@@ -123,47 +264,55 @@ export default function WhotGame({ gameId, goHome }) {
         const parsed = parseGame(res.payload);
         setGame(parsed);
 
-        // ===== FINISH + PAYOUT =====
         if (parsed.status === "finished") {
-          setTimeout(goHome, 2500);
+          if (parsed.winnerId === userId) {
+            setShowWin(true);
+            setTimeout(goHome, 3000);
+          } else {
+            setTimeout(goHome, 2500);
+          }
 
           if (parsed.winnerId !== userId) return;
           if (payoutRef.current) return;
-
           payoutRef.current = true;
 
-          const fresh = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id
-          );
+          try {
+            const fresh = await databases.getDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              parsed.$id
+            );
 
-          if (fresh.payoutDone) return;
+            if (fresh.payoutDone === true) return;
 
-          const pot = Number(fresh.pot || 0);
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            parsed.$id,
-            { payoutDone: true, pot: 0 }
-          );
-
-          const wallet = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            [Query.equal("userId", parsed.winnerId)]
-          );
-
-          if (wallet.documents.length) {
-            const w = wallet.documents[0];
+            const pot = Number(fresh.pot || 0);
+            if (pot <= 0) return;
 
             await databases.updateDocument(
               DATABASE_ID,
-              WALLET_COLLECTION,
-              w.$id,
-              { balance: Number(w.balance || 0) + pot }
+              GAME_COLLECTION,
+              parsed.$id,
+              { payoutDone: true, pot: 0 }
             );
+
+            const winnerWallet = await databases.listDocuments(
+              DATABASE_ID,
+              WALLET_COLLECTION,
+              [Query.equal("userId", parsed.winnerId)]
+            );
+
+            if (winnerWallet.documents.length) {
+              const w = winnerWallet.documents[0];
+              await databases.updateDocument(
+                DATABASE_ID,
+                WALLET_COLLECTION,
+                w.$id,
+                { balance: Number(w.balance || 0) + pot }
+              );
+            }
+
+          } catch (e) {
+            console.error("❌ payout error:", e);
           }
         }
       }
@@ -173,122 +322,207 @@ export default function WhotGame({ gameId, goHome }) {
   }, [gameId, userId]);
 
   // =========================
-  // CHAT SYSTEM
+  // UNREAD COUNT (SAFE)
   // =========================
   useEffect(() => {
-    if (!gameId) return;
+    if (!gameId || !userId) return;
 
-    const load = async () => {
+    const loadUnread = async () => {
       const res = await databases.listDocuments(
         DATABASE_ID,
-        CHAT_COLLECTION,
+        "messages",
         [
           Query.equal("gameId", gameId),
-          Query.orderAsc("$createdAt")
+          Query.notEqual("sender", userId)
         ]
       );
-
-      setMessages(res.documents);
-
-      if (!chatOpen && res.documents.length) {
-        const last = res.documents[res.documents.length - 1];
-        if (last.sender !== userId) setUnread(true);
-      }
+      setUnread(res.total || 0);
     };
 
-    load();
+    loadUnread();
+  }, [gameId, userId]);
 
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${CHAT_COLLECTION}.documents`,
-      (res) => {
-        if (res.payload.gameId !== gameId) return;
-
-        setMessages(prev => [...prev, res.payload]);
-
-        if (!chatOpen && res.payload.sender !== userId) {
-          setUnread(true);
-        }
-      }
-    );
-
-    return () => unsub();
-  }, [gameId, chatOpen]);
-
-  async function sendMsg() {
-    if (!msg.trim()) return;
-
-    await databases.createDocument(
-      DATABASE_ID,
-      CHAT_COLLECTION,
-      "unique()",
-      {
-        gameId,
-        sender: userId,
-        text: msg
-      }
-    );
-
-    setMsg("");
-  }
-
-  if (!game) return <div>Loading...</div>;
+  if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
+  const oppIdx = myIdx === 0 ? 1 : 0;
 
-  // =========================
-  // END GAME RULE (FIRST TO 2)
-  // =========================
-  useEffect(() => {
-    if (!game) return;
+  const hand = game.hands[myIdx] || [];
+  const oppCards = game.hands[oppIdx]?.length || 0;
+  const top = game.discard ? decodeCard(game.discard) : null;
 
-    if (game.scores[0] === 2 || game.scores[1] === 2) {
-      const winnerIdx = game.scores[0] === 2 ? 0 : 1;
+  const myName = myIdx === 0 ? game.hostName : game.opponentName;
+  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
-      databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          status: "finished",
-          winnerId: game.players[winnerIdx]
-        }
-      );
+  async function endRound(g, winnerIdx) {
+    g = JSON.parse(JSON.stringify(g));
+    g.scores[winnerIdx]++;
+
+    if (g.round >= 3) {
+      let finalWinner = g.scores[0] > g.scores[1] ? 0 : 1;
+
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g),
+        status: "finished",
+        winnerId: g.players[finalWinner]
+      });
+      return;
     }
-  }, [game]);
+
+    const deck = createDeck();
+    g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
+    g.discard = deck.pop();
+    g.deck = deck;
+    g.pendingPick = 0;
+    g.round++;
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
+  }
+
+  async function playCard(i) {
+    if (actionLock.current) return;
+    if (game.turn !== userId) return invalidMove("Not your turn");
+
+    actionLock.current = true;
+
+    const g = JSON.parse(JSON.stringify(game));
+    const card = g.hands[myIdx][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
+
+    if (!topDecoded) {
+      actionLock.current = false;
+      return;
+    }
+
+    if (g.pendingPick > 0 && ![2,14].includes(current.number)) {
+      actionLock.current = false;
+      return invalidMove("Respond with 2 or 14");
+    }
+
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) {
+      actionLock.current = false;
+      return invalidMove("Wrong card");
+    }
+
+    g.hands[myIdx].splice(i, 1);
+
+    let nextTurn = g.players[oppIdx];
+
+    if (current.number === 2) g.pendingPick += 2;
+    if (current.number === 14) g.pendingPick += 1;
+    if (current.number === 1 || current.number === 8) nextTurn = userId;
+
+    if (!g.hands[myIdx].length) {
+      await endRound(g, myIdx);
+      actionLock.current = false;
+      return;
+    }
+
+    setGame({ ...g, discard: card, turn: nextTurn });
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      discard: card,
+      turn: nextTurn
+    });
+
+    actionLock.current = false;
+  }
+
+  async function drawMarket() {
+    if (actionLock.current) return;
+    if (game.turn !== userId) return invalidMove("Wait your turn");
+
+    actionLock.current = true;
+
+    const g = JSON.parse(JSON.stringify(game));
+    let count = g.pendingPick > 0 ? g.pendingPick : 1;
+
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
+    }
+
+    g.pendingPick = 0;
+
+    setGame({ ...g, turn: g.players[oppIdx] });
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      turn: g.players[oppIdx]
+    });
+
+    actionLock.current = false;
+  }
 
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
         <h2>🎮 WHOT GAME</h2>
 
+        {error && <div style={styles.error}>{error}</div>}
+
+        <div style={styles.row}>
+          <span>{myName}</span>
+          <span>VS</span>
+          <span>{oppName}</span>
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          {Array.from({ length: oppCards }).map((_, i) => (
+            <img key={i} src={drawBack()} style={{ width: 40 }} />
+          ))}
+          <div>{oppName}: {oppCards}</div>
+        </div>
+
+        <div style={styles.row}>
+          <span>Round {game.round} / 3</span>
+          <span>{game.scores[0]} - {game.scores[1]}</span>
+        </div>
+
+        <div style={styles.row}>
+          <span>₦{match?.stake || 0}</span>
+          <span>🏦 ₦{match?.pot || 0}</span>
+        </div>
+
+        <p>
+          {game.status === "finished"
+            ? "🏁 GAME FINISHED"
+            : game.turn === userId
+            ? "🟢 YOUR TURN"
+            : "⏳ OPPONENT"}
+        </p>
+
+        <div style={styles.center}>
+          {top && <img src={drawCard(top)} style={styles.card} />}
+          <button style={styles.marketBtn} onClick={drawMarket}>
+            🃏 {game.deck.length}
+          </button>
+        </div>
+
+        <div style={styles.hand}>
+          {hand.map((c, i) => (
+            <img
+              key={i}
+              src={drawCard(decodeCard(c))}
+              style={styles.card}
+              onClick={() => playCard(i)}
+            />
+          ))}
+        </div>
+
         {/* CHAT BUTTON */}
         <button
-          onClick={() => {
-            setChatOpen(!chatOpen);
-            setUnread(false);
-          }}
+          style={styles.chatBtn}
+          onClick={() => openChat(gameId)}
         >
-          💬 Chat {unread && "🔴"}
+          💬 {unread > 0 && <span style={styles.badge}>{unread}</span>}
         </button>
-
-        {/* CHAT POPUP */}
-        {chatOpen && (
-          <div style={styles.chat}>
-            <div style={styles.chatBox}>
-              {messages.map((m, i) => (
-                <div key={i}>
-                  {m.sender === userId ? "🟢" : "🔵"} {m.text}
-                </div>
-              ))}
-            </div>
-
-            <input
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-            />
-            <button onClick={sendMsg}>Send</button>
-          </div>
-        )}
 
         <button onClick={goHome}>Exit</button>
       </div>
@@ -313,16 +547,59 @@ const styles = {
     background: "#000000cc",
     padding: 12,
     color: "#fff",
-    borderRadius: 10
+    borderRadius: 10,
+    position: "relative"
   },
-  chat: {
-    background: "#111",
-    padding: 10,
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: 6
+  },
+  hand: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
     marginTop: 10
   },
-  chatBox: {
-    maxHeight: 120,
-    overflow: "auto",
+  card: {
+    width: 65,
+    cursor: "pointer"
+  },
+  center: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 10
+  },
+  marketBtn: {
+    background: "gold",
+    padding: 10,
+    borderRadius: 8,
+    border: "none"
+  },
+  chatBtn: {
+    position: "absolute",
+    bottom: 10,
+    left: 10,
+    background: "#111",
+    color: "#fff",
+    border: "none",
+    padding: "10px 14px",
+    borderRadius: "50px",
+    cursor: "pointer"
+  },
+  badge: {
+    background: "red",
+    marginLeft: 6,
+    padding: "2px 6px",
+    borderRadius: 10,
     fontSize: 12
+  },
+  error: {
+    background: "red",
+    padding: 6,
+    textAlign: "center",
+    marginBottom: 6
   }
 };
