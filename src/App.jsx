@@ -22,7 +22,7 @@ import WhotGame from "./WhotGame";
 import AdminDashboard from "./pages/aaa";
 import CasinoWheel from "./pages/CasinoWheel";
 
-// ✅ ADD THIS
+// ✅ ADD THIS (CHAT PAGE)
 import Message from "./pages/Message";
 
 // 🔒 ADMIN ID
@@ -68,7 +68,7 @@ function useUser() {
 function ProtectedRoute({ children }) {
   const { loading, authed } = useAuth();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+  if (loading) return null; // cleaner (no flashing text)
 
   return authed ? children : <Navigate to="/auth" replace />;
 }
@@ -79,7 +79,7 @@ function ProtectedRoute({ children }) {
 function AdminRoute({ children }) {
   const { user, loading } = useUser();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+  if (loading) return null;
 
   if (!user) return <Navigate to="/auth" replace />;
 
@@ -96,7 +96,7 @@ function AdminRoute({ children }) {
 function PublicRoute({ children }) {
   const { loading, authed } = useAuth();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+  if (loading) return null;
 
   return authed ? <Navigate to="/dashboard" replace /> : children;
 }
@@ -118,16 +118,16 @@ function GameWrapper() {
 }
 
 // =========================
-// 💬 CHAT WRAPPER (NEW)
+// MESSAGE WRAPPER
 // =========================
-function ChatWrapper() {
+function MessageWrapper() {
   const { gameId } = useParams();
   const navigate = useNavigate();
 
   return (
     <Message
       gameId={gameId}
-      goBack={() => navigate(-1)}
+      goBack={() => navigate(-1)} // go back to game
     />
   );
 }
@@ -226,12 +226,12 @@ function AppRoutes() {
         }
       />
 
-      {/* 💬 CHAT (NEW ROUTE) */}
+      {/* ✅ CHAT ROUTE (FIXED) */}
       <Route
-        path="/game/:gameId/chat"
+        path="/message/:gameId"
         element={
           <ProtectedRoute>
-            <ChatWrapper />
+            <MessageWrapper />
           </ProtectedRoute>
         }
       />
