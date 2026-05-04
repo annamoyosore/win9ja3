@@ -20,9 +20,10 @@ import Lobby from "./pages/Lobby";
 import Transactions from "./pages/Transactions";
 import WhotGame from "./WhotGame";
 import AdminDashboard from "./pages/aaa";
-
-// ✅ CASINO IMPORT
 import CasinoWheel from "./pages/CasinoWheel";
+
+// ✅ ADD THIS
+import Messages from "./pages/Messages";
 
 // 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
@@ -101,9 +102,9 @@ function PublicRoute({ children }) {
 }
 
 // =========================
-// WHOT GAME WRAPPER
+// WHOT GAME WRAPPER (UPDATED)
 // =========================
-function GameWrapper() {
+function GameWrapper({ openChat }) {
   const { gameId, stake } = useParams();
   const navigate = useNavigate();
 
@@ -112,118 +113,136 @@ function GameWrapper() {
       gameId={gameId}
       stake={Number(stake)}
       goHome={() => navigate("/dashboard")}
+      openChat={openChat} // ✅ PASS CHAT HANDLER
     />
   );
 }
 
 // =========================
-// ROUTES
+// ROUTES (UPDATED)
 // =========================
 function AppRoutes() {
   const navigate = useNavigate();
 
+  // ✅ CHAT STATE HERE (GLOBAL OVERLAY)
+  const [chatGameId, setChatGameId] = useState(null);
+
+  function openChat(gameId) {
+    setChatGameId(gameId);
+  }
+
   return (
-    <Routes>
+    <>
+      <Routes>
 
-      {/* AUTH */}
-      <Route
-        path="/auth"
-        element={
-          <PublicRoute>
-            <Auth onLogin={() => navigate("/dashboard")} />
-          </PublicRoute>
-        }
-      />
+        {/* AUTH */}
+        <Route
+          path="/auth"
+          element={
+            <PublicRoute>
+              <Auth onLogin={() => navigate("/dashboard")} />
+            </PublicRoute>
+          }
+        />
 
-      {/* DASHBOARD */}
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <Dashboard
-              goLobby={() => navigate("/lobby")}
-              goWallet={() => navigate("/wallet")}
-              goTransactions={() => navigate("/transactions")}
-              goAdmin={() => navigate("/admin")}
-              goCasino={() => navigate("/casino")} // ✅ NEW
-              logout={async () => {
-                await account.deleteSession("current");
-                navigate("/auth");
-              }}
-            />
-          </ProtectedRoute>
-        }
-      />
+        {/* DASHBOARD */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard
+                goLobby={() => navigate("/lobby")}
+                goWallet={() => navigate("/wallet")}
+                goTransactions={() => navigate("/transactions")}
+                goAdmin={() => navigate("/admin")}
+                goCasino={() => navigate("/casino")}
+                logout={async () => {
+                  await account.deleteSession("current");
+                  navigate("/auth");
+                }}
+              />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ✅ CASINO ROUTE */}
-      <Route
-        path="/casino"
-        element={
-          <ProtectedRoute>
-            <CasinoWheel />
-          </ProtectedRoute>
-        }
-      />
+        {/* CASINO */}
+        <Route
+          path="/casino"
+          element={
+            <ProtectedRoute>
+              <CasinoWheel />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* WALLET */}
-      <Route
-        path="/wallet"
-        element={
-          <ProtectedRoute>
-            <Wallet />
-          </ProtectedRoute>
-        }
-      />
+        {/* WALLET */}
+        <Route
+          path="/wallet"
+          element={
+            <ProtectedRoute>
+              <Wallet />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* TRANSACTIONS */}
-      <Route
-        path="/transactions"
-        element={
-          <ProtectedRoute>
-            <Transactions back={() => navigate("/dashboard")} />
-          </ProtectedRoute>
-        }
-      />
+        {/* TRANSACTIONS */}
+        <Route
+          path="/transactions"
+          element={
+            <ProtectedRoute>
+              <Transactions back={() => navigate("/dashboard")} />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* LOBBY */}
-      <Route
-        path="/lobby"
-        element={
-          <ProtectedRoute>
-            <Lobby
-              goGame={(id, stake) =>
-                navigate(`/game/${id}/${stake}`)
-              }
-              back={() => navigate("/dashboard")}
-            />
-          </ProtectedRoute>
-        }
-      />
+        {/* LOBBY */}
+        <Route
+          path="/lobby"
+          element={
+            <ProtectedRoute>
+              <Lobby
+                goGame={(id, stake) =>
+                  navigate(`/game/${id}/${stake}`)
+                }
+                back={() => navigate("/dashboard")}
+              />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* GAME */}
-      <Route
-        path="/game/:gameId/:stake"
-        element={
-          <ProtectedRoute>
-            <GameWrapper />
-          </ProtectedRoute>
-        }
-      />
+        {/* GAME (UPDATED) */}
+        <Route
+          path="/game/:gameId/:stake"
+          element={
+            <ProtectedRoute>
+              <GameWrapper openChat={openChat} />
+            </ProtectedRoute>
+          }
+        />
 
-      {/* ADMIN */}
-      <Route
-        path="/admin"
-        element={
-          <AdminRoute>
-            <AdminDashboard back={() => navigate("/dashboard")} />
-          </AdminRoute>
-        }
-      />
+        {/* ADMIN */}
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <AdminDashboard back={() => navigate("/dashboard")} />
+            </AdminRoute>
+          }
+        />
 
-      {/* DEFAULT */}
-      <Route path="*" element={<Navigate to="/auth" replace />} />
+        {/* DEFAULT */}
+        <Route path="*" element={<Navigate to="/auth" replace />} />
 
-    </Routes>
+      </Routes>
+
+      {/* ✅ GLOBAL CHAT OVERLAY */}
+      {chatGameId && (
+        <Messages
+          gameId={chatGameId}
+          onClose={() => setChatGameId(null)}
+        />
+      )}
+    </>
   );
 }
 
