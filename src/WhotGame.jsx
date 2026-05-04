@@ -264,100 +264,112 @@ const parsed = parseGame(res.payload);
 setGame(parsed);
 
 if (parsed.status === "finished") {  
-    if (parsed.winnerId === userId) {  
-      setShowWin(true);  
-      setTimeout(goHome, 3000);  
-    } else {  
-      setTimeout(goHome, 2500);  
-    }  
 
-    if (payoutRef.current) return;  
+  if (parsed.winnerId === userId) {  
+    setShowWin(true);  
+    setTimeout(goHome, 3000);  
+  } else {  
+    setTimeout(goHome, 2500);  
+  }  
 
+  // 🚫 ONLY WINNER CAN PAYOUT  
+  if (parsed.winnerId !== userId) return;  
+
+  if (payoutRef.current) return;  
+  payoutRef.current = true;  
+
+  try {  
+    // 🔒 GET FRESH GAME  
     const fresh = await databases.getDocument(  
       DATABASE_ID,  
       GAME_COLLECTION,  
       parsed.$id  
     );  
 
-    if (fresh.payoutDone) return;  
+    // 🛑 prevent double payout  
+    if (fresh.payoutDone === true) return;  
 
-    payoutRef.current = true;  
+    const pot = Number(fresh.pot || 0);  
 
-    try {  
-      const m = parsed.matchId  
-        ? await databases.getDocument(  
-            DATABASE_ID,  
-            MATCH_COLLECTION,  
-            parsed.matchId  
-          )  
-        : null;  
+    // 🛑 nothing to pay  
+    if (pot <= 0) return;  
 
-      const total = Number(m?.pot || 0);  
+    // ✅ get stake safely  
+    const stake = Number(match?.stake || 0);  
 
-      const w = await databases.listDocuments(  
+    // 🔒 mark paid FIRST + clear pot  
+    await databases.updateDocument(  
+      DATABASE_ID,  
+      GAME_COLLECTION,  
+      parsed.$id,  
+      {  
+        payoutDone: true,  
+        pot: 0  
+      }  
+    );  
+
+    // 💰 CREDIT WINNER FROM GAME POT  
+    const winnerWallet = await databases.listDocuments(  
+      DATABASE_ID,  
+      WALLET_COLLECTION,  
+      [Query.equal("userId", parsed.winnerId)]  
+    );  
+
+    if (winnerWallet.documents.length) {  
+      const w = winnerWallet.documents[0];  
+
+      await databases.updateDocument(  
         DATABASE_ID,  
         WALLET_COLLECTION,  
-        [Query.equal("userId", parsed.winnerId)]  
+        w.$id,  
+        {  
+          balance: Number(w.balance || 0) + pot  
+        }  
+      );  
+    }  
+
+    // 🔓 UNLOCK BOTH PLAYERS (NO EXTRA CREDIT)  
+    for (let pid of parsed.players) {  
+      const wallets = await databases.listDocuments(  
+        DATABASE_ID,  
+        WALLET_COLLECTION,  
+        [Query.equal("userId", pid)]  
       );  
 
-      if (w.documents.length) {  
+      if (wallets.documents.length) {  
+        const w = wallets.documents[0];  
+
         await databases.updateDocument(  
           DATABASE_ID,  
           WALLET_COLLECTION,  
-          w.documents[0].$id,  
+          w.$id,  
           {  
-            balance:  
-              Number(w.documents[0].balance || 0) + total  
+            locked: Math.max(0, Number(w.locked || 0) - stake)  
           }  
         );  
       }  
+    }  
 
-      for (let pid of parsed.players) {  
-        const wallets = await databases.listDocuments(  
-          DATABASE_ID,  
-          WALLET_COLLECTION,  
-          [Query.equal("userId", pid)]  
-        );  
-
-        if (wallets.documents.length) {  
-          await databases.updateDocument(  
-            DATABASE_ID,  
-            WALLET_COLLECTION,  
-            wallets.documents[0].$id,  
-            { locked: 0 }  
-          );  
-        }  
-      }  
-
-      // ✅ mark payout done  
+    // ✅ MATCH FINISHED  
+    if (parsed.matchId) {  
       await databases.updateDocument(  
         DATABASE_ID,  
-        GAME_COLLECTION,  
-        parsed.$id,  
-        { payoutDone: true }  
+        MATCH_COLLECTION,  
+        parsed.matchId,  
+        { status: "finished" }  
       );  
-
-      // ✅ mark match finished  
-      if (parsed.matchId) {  
-        await databases.updateDocument(  
-          DATABASE_ID,  
-          MATCH_COLLECTION,  
-          parsed.matchId,  
-          { status: "finished" }  
-        );  
-      }  
-
-    } catch (e) {  
-      console.log("payout error", e);  
     }  
+
+  } catch (e) {  
+    console.error("❌ payout error:", e);  
   }  
 }
 
+}
 );
 
-// ✅ CORRECT PLACE (outside subscribe)
+// ✅ CORRECT CLEANUP (VERY IMPORTANT)
 return () => unsub();
-
 }, [gameId, userId]);
 if (!game || !userId) return <div>Loading...</div>;
 
