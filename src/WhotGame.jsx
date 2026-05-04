@@ -13,7 +13,7 @@ const WALLET_COLLECTION = "wallets";
 const CHAT_COLLECTION = "chats";
 
 // =========================
-// 🔊 SOUND + ERROR
+// 🔊 SOUND
 // =========================
 function beep(freq = 200, duration = 200) {
   try {
@@ -129,17 +129,12 @@ function drawCard(card) {
   cache.set(key, img);
   return img;
 }
-
-// =========================
-// COMPONENT
-// =========================
 export default function WhotGame({ gameId, goHome }) {
 
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
 
-  // ✅ CHAT STATES
   const [messages, setMessages] = useState([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [text, setText] = useState("");
@@ -147,13 +142,63 @@ export default function WhotGame({ gameId, goHome }) {
   const [muted, setMuted] = useState(false);
 
   const payoutRef = useRef(false);
-  const actionLock = useRef(false);
 
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
-// =========================
-  // 💬 CHAT SUBSCRIBE
+
+  // ⚡ FAST LOAD GAME
+  useEffect(() => {
+    if (!gameId || !userId) return;
+
+    const load = async () => {
+      const g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
+      setGame(g);
+    };
+
+    load();
+
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+      (res) => {
+        setGame(res.payload);
+        if (res.payload.status === "finished") {
+          handlePayout(res.payload);
+        }
+      }
+    );
+
+    return () => unsub();
+  }, [gameId, userId]);
+
+  // =========================
+  // 💬 LOAD CHAT (NO LIMIT ISSUE)
+  // =========================
+  useEffect(() => {
+    if (!gameId) return;
+
+    const loadMessages = async () => {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        CHAT_COLLECTION,
+        [
+          Query.equal("gameId", gameId),
+          Query.orderAsc("$createdAt"),
+          Query.limit(4)
+        ]
+      );
+      setMessages(res.documents);
+    };
+
+    loadMessages();
+  }, [gameId]);
+
+  // =========================
+  // 💬 REALTIME CHAT
   // =========================
   useEffect(() => {
     if (!gameId) return;
@@ -176,16 +221,12 @@ export default function WhotGame({ gameId, goHome }) {
   async function sendMessage() {
     if (!text.trim() || muted) return;
 
-    // ✅ DELETE OLD IF > 4
     if (messages.length >= 4) {
-      for (let m of messages) {
-        await databases.deleteDocument(
-          DATABASE_ID,
-          CHAT_COLLECTION,
-          m.$id
-        );
-      }
-      setMessages([]);
+      await databases.deleteDocument(
+        DATABASE_ID,
+        CHAT_COLLECTION,
+        messages[0].$id
+      );
     }
 
     await databases.createDocument(
@@ -203,214 +244,97 @@ export default function WhotGame({ gameId, goHome }) {
   }
 
   // =========================
-// 💰 PAYOUT (POT ONLY)
-// =========================
-async function handlePayout(parsed) {
-  if (parsed.winnerId !== userId) return;
-  if (payoutRef.current) return;
+  // 💰 PAYOUT
+  // =========================
+  async function handlePayout(parsed) {
+    if (parsed.winnerId !== userId) return;
+    if (payoutRef.current) return;
 
-  payoutRef.current = true;
+    payoutRef.current = true;
 
-  const fresh = await databases.getDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    parsed.$id
-  );
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      parsed.$id
+    );
 
-  if (fresh.payoutDone) return;
+    if (fresh.payoutDone) return;
 
-  const total = Number(fresh.pot || 0);
+    const total = Number(fresh.pot || 0);
 
-  await databases.updateDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    parsed.$id,
-    { payoutDone: true, pot: 0 }
-  );
-
-  const wallet = await databases.listDocuments(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    [Query.equal("userId", parsed.winnerId)]
-  );
-
-  if (wallet.documents.length) {
-    const w = wallet.documents[0];
     await databases.updateDocument(
       DATABASE_ID,
-      WALLET_COLLECTION,
-      w.$id,
-      { balance: Number(w.balance || 0) + total }
+      GAME_COLLECTION,
+      parsed.$id,
+      { payoutDone: true, pot: 0 }
     );
+
+    const wallet = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", parsed.winnerId)]
+    );
+
+    if (wallet.documents.length) {
+      const w = wallet.documents[0];
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        w.$id,
+        { balance: Number(w.balance || 0) + total }
+      );
+    }
   }
-}
 
 if (!game || !userId) return <div>Loading...</div>;
 
-const myIdx = game.players.indexOf(userId);
-const oppIdx = myIdx === 0 ? 1 : 0;
+  return (
+    <div style={styles.bg}>
+      <div style={styles.box}>
+        <h2>🎮 WHOT GAME</h2>
 
-const hand = game.hands[myIdx];
-const oppCards = game.hands[oppIdx].length;
-const top = game.discard ? decodeCard(game.discard) : null;
-
-const myName = myIdx === 0 ? game.hostName : game.opponentName;
-const oppName = myIdx === 0 ? game.opponentName : game.hostName;
-
-return (
-  <div style={styles.bg}>
-    <div style={styles.box}>
-      <h2>🎮 WHOT GAME</h2>
-
-      {error && <div style={styles.error}>{error}</div>}
-
-      <div style={styles.row}>
-        <span>{myName}</span>
-        <span>VS</span>
-        <span>{oppName}</span>
+        <button onClick={goHome}>Exit</button>
       </div>
 
-      <div style={{ textAlign: "center" }}>
-        {Array.from({ length: oppCards }).map((_, i) => (
-          <img key={i} src={drawBack()} style={{ width: 40 }} />
-        ))}
-        <div>{oppName}: {oppCards}</div>
-      </div>
-
-      <div style={styles.row}>
-        <span>Round {game.round} / 3</span>
-        <span>{game.scores[0]} - {game.scores[1]}</span>
-      </div>
-
-      <div style={styles.row}>
-        <span>₦{match?.stake || 0}</span>
-        <span>🏦 ₦{match?.pot || 0}</span>
-      </div>
-
-      <p>
-        {game.status === "finished"
-          ? "🏁 GAME FINISHED"
-          : game.turn === userId
-          ? "🟢 YOUR TURN"
-          : "⏳ OPPONENT"}
-      </p>
-
-      <div style={styles.center}>
-        {top && <img src={drawCard(top)} style={styles.card} />}
-        <button style={styles.marketBtn} onClick={drawMarket}>
-          🃏 {game.deck.length}
-        </button>
-      </div>
-
-      <div style={styles.hand}>
-        {hand.map((c, i) => (
-          <img
-            key={i}
-            src={drawCard(decodeCard(c))}
-            style={styles.card}
-            onClick={() => playCard(i)}
-          />
-        ))}
-      </div>
-
-      {showWin && (
-        <div style={styles.winBox}>
-          🎉🎉 You Won ₦{winAmount}
-        </div>
-      )}
-
-      {showLose && (
-        <div style={styles.loseBox}>
-          ❌ You Lost
-        </div>
-      )}
-
-      <div style={styles.history}>
-        {game.history.slice().reverse().map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
-      </div>
-
-      <button onClick={goHome}>Exit</button>
-    </div>
-
-    {/* ================= CHAT BUTTON ================= */}
-    <div
-      onClick={() => {
-        setChatOpen(true);
-        setUnread(0);
-      }}
-      style={{
-        position: "fixed",
-        bottom: 20,
-        right: 20,
-        background: "#000",
-        color: "#fff",
-        padding: 12,
-        borderRadius: "50%",
-        cursor: "pointer",
-        zIndex: 2000
-      }}
-    >
-      💬
-      {unread > 0 && (
-        <span
-          style={{
-            position: "absolute",
-            top: -5,
-            right: -5,
-            background: "red",
-            borderRadius: "50%",
-            padding: "2px 6px",
-            fontSize: 10
-          }}
-        >
-          {unread}
-        </span>
-      )}
-    </div>
-
-    {/* ================= CHAT BOX ================= */}
-    {chatOpen && (
+      {/* 💬 CHAT BUTTON */}
       <div
-        style={{
-          position: "fixed",
-          bottom: 80,
-          right: 20,
-          width: 250,
-          background: "#fff",
-          padding: 10,
-          zIndex: 2000
+        onClick={() => {
+          setChatOpen(true);
+          setUnread(0);
         }}
+        style={styles.chatBtn}
       >
-        <button onClick={() => setChatOpen(false)}>X</button>
-
-        <div style={{ maxHeight: 150, overflow: "auto" }}>
-          {messages.map((m) => (
-            <div key={m.$id}>
-              {m.sender === userId ? "You" : "Opponent"}: {m.text}
-            </div>
-          ))}
-        </div>
-
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-
-        <button onClick={sendMessage}>Send</button>
-
-        <button onClick={() => setMuted(!muted)}>
-          {muted ? "Unmute" : "Mute"}
-        </button>
+        💬
+        {unread > 0 && <span style={styles.badge}>{unread}</span>}
       </div>
-    )}
-  </div>
-);
+
+      {/* 💬 CHAT BOX */}
+      {chatOpen && (
+        <div style={styles.chatBox}>
+          <button onClick={() => setChatOpen(false)}>X</button>
+
+          <div style={styles.chatList}>
+            {messages.map(m => (
+              <div key={m.$id}>
+                {m.sender === userId ? "You" : "Opponent"}: {m.text}
+              </div>
+            ))}
+          </div>
+
+          <input value={text} onChange={e => setText(e.target.value)} />
+          <button onClick={sendMessage}>Send</button>
+
+          <button onClick={() => setMuted(!muted)}>
+            {muted ? "Unmute" : "Mute"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // =========================
-// STYLES (UNCHANGED)
+// 🎨 STYLES
 // =========================
 const styles = {
   bg: {
@@ -428,69 +352,34 @@ const styles = {
     color: "#fff",
     borderRadius: 10
   },
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginBottom: 6
-  },
-  hand: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6,
-    justifyContent: "center",
-    marginTop: 10
-  },
-  card: {
-    width: 65,
-    cursor: "pointer"
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 10,
-    marginTop: 10
-  },
-  marketBtn: {
-    background: "gold",
-    padding: 10,
-    borderRadius: 8,
-    border: "none"
-  },
-  history: {
-    marginTop: 10,
-    maxHeight: 120,
-    overflow: "auto",
-    fontSize: 12,
-    color: "#ff4d4d"
-  },
-  winBox: {
+  chatBtn: {
     position: "fixed",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "gold",
-    color: "#000",
-    padding: 20,
-    borderRadius: 10,
-    fontWeight: "bold",
-    zIndex: 1000
-  },
-  loseBox: {
-    position: "fixed",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "#ff4d4d",
+    bottom: 20,
+    right: 20,
+    background: "#000",
     color: "#fff",
-    padding: 20,
-    borderRadius: 10,
-    fontWeight: "bold",
-    zIndex: 999
+    padding: 12,
+    borderRadius: "50%"
   },
-  error: {
+  badge: {
+    position: "absolute",
+    top: -5,
+    right: -5,
     background: "red",
-    padding: 6,
-    textAlign: "center",
-    marginBottom: 6
+    borderRadius: "50%",
+    padding: "2px 6px",
+    fontSize: 10
+  },
+  chatBox: {
+    position: "fixed",
+    bottom: 80,
+    right: 20,
+    width: 250,
+    background: "#fff",
+    padding: 10
+  },
+  chatList: {
+    maxHeight: 150,
+    overflow: "auto"
   }
 };
