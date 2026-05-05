@@ -81,72 +81,76 @@ function decodeCard(str) {
 }
 
 // =========================
-// 🎴 DRAW CARD (FIXED)
+// 🎴 DRAW CARD
 // =========================
 const cache = new Map();
 
 function drawCard(card) {
-  if (!card || !card.shape || !card.number) return null;
+  if (!card) return null;
 
   const key = `${card.shape}_${card.number}`;
+
+  // reuse cached base64
   if (cache.has(key)) return cache.get(key);
 
-  try {
-    const c = document.createElement("canvas");
+  // reuse canvas (fixes blank/missing cards)
+  let c = canvasPool[key];
+  if (!c) {
+    c = document.createElement("canvas");
     c.width = 70;
     c.height = 100;
-    const ctx = c.getContext("2d");
-
-    if (!ctx) return null;
-
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, 70, 100);
-
-    ctx.strokeStyle = "#e11d48";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(2, 2, 66, 96);
-
-    ctx.fillStyle = "#e11d48";
-    ctx.font = "bold 14px Arial";
-    ctx.fillText(card.number, 6, 18);
-
-    const cx = 35, cy = 55;
-
-    if (card.shape === "circle") {
-      ctx.beginPath();
-      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
-
-    if (card.shape === "triangle") {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - 12);
-      ctx.lineTo(cx - 12, cy + 12);
-      ctx.lineTo(cx + 12, cy + 12);
-      ctx.fill();
-    }
-
-    if (card.shape === "star") {
-      ctx.font = "20px Arial";
-      ctx.fillText("★", cx - 8, cy + 8);
-    }
-
-    if (card.shape === "cross") {
-      ctx.fillRect(cx - 3, cy - 12, 6, 24);
-      ctx.fillRect(cx - 12, cy - 3, 24, 6);
-    }
-
-    const img = c.toDataURL("image/png");
-    cache.set(key, img);
-    return img;
-
-  } catch {
-    return null;
+    canvasPool[key] = c;
   }
-}
 
+  const ctx = c.getContext("2d");
+
+  // CLEAR (important fix)
+  ctx.clearRect(0, 0, c.width, c.height);
+
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, 70, 100);
+
+  ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, 66, 96);
+
+  ctx.fillStyle = "#e11d48";
+  ctx.font = "bold 14px Arial";
+  ctx.fillText(card.number, 6, 18);
+
+  const cx = 35, cy = 55;
+
+  if (card.shape === "circle") {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+
+  if (card.shape === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 12);
+    ctx.lineTo(cx - 12, cy + 12);
+    ctx.lineTo(cx + 12, cy + 12);
+    ctx.fill();
+  }
+
+  if (card.shape === "star") {
+    ctx.font = "20px Arial";
+    ctx.fillText("★", cx - 8, cy + 8);
+  }
+
+  if (card.shape === "cross") {
+    ctx.fillRect(cx - 3, cy - 12, 6, 24);
+    ctx.fillRect(cx - 12, cy - 3, 24, 6);
+  }
+
+  const img = c.toDataURL("image/png");
+  cache.set(key, img);
+
+  return img;
+}
 function drawBack() {
   const c = document.createElement("canvas");
   c.width = 65;
@@ -226,6 +230,7 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
+  const [showWin, setShowWin] = useState(false);
   const [error, setError] = useState("");
   const [unread, setUnread] = useState(0);
 
@@ -242,6 +247,9 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
+  // =========================
+  // LOAD + SUBSCRIBE GAME
+  // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
 
@@ -250,12 +258,99 @@ export default function WhotGame({ gameId, goHome, openChat }) {
       setGame(parseGame(g));
 
       if (g.matchId) {
-        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
+        const m = await databases.getDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          g.matchId
+        );
         setMatch(m);
       }
     };
 
     load();
+
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+      async (res) => {
+        const parsed = parseGame(res.payload);
+        setGame(parsed);
+
+        if (parsed.status === "finished") {
+          if (parsed.winnerId === userId) {
+            setShowWin(true);
+            setTimeout(goHome, 3000);
+          } else {
+            setTimeout(goHome, 2500);
+          }
+
+          if (parsed.winnerId !== userId) return;
+          if (payoutRef.current) return;
+          payoutRef.current = true;
+
+          try {
+            const fresh = await databases.getDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              parsed.$id
+            );
+
+            if (fresh.payoutDone === true) return;
+
+            const pot = Number(fresh.pot || 0);
+            if (pot <= 0) return;
+
+            await databases.updateDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              parsed.$id,
+              { payoutDone: true, pot: 0 }
+            );
+
+            const winnerWallet = await databases.listDocuments(
+              DATABASE_ID,
+              WALLET_COLLECTION,
+              [Query.equal("userId", parsed.winnerId)]
+            );
+
+            if (winnerWallet.documents.length) {
+              const w = winnerWallet.documents[0];
+              await databases.updateDocument(
+                DATABASE_ID,
+                WALLET_COLLECTION,
+                w.$id,
+                { balance: Number(w.balance || 0) + pot }
+              );
+            }
+
+          } catch (e) {
+            console.error("❌ payout error:", e);
+          }
+        }
+      }
+    );
+
+    return () => unsub();
+  }, [gameId, userId]);
+
+  // =========================
+  // UNREAD COUNT (SAFE)
+  // =========================
+  useEffect(() => {
+    if (!gameId || !userId) return;
+
+    const loadUnread = async () => {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        "messages",
+        [
+          Query.equal("gameId", gameId),
+          Query.notEqual("sender", userId)
+        ]
+      );
+      setUnread(res.total || 0);
+    };
+
+    loadUnread();
   }, [gameId, userId]);
 
   if (!game || !userId) return <div>Loading...</div>;
@@ -267,6 +362,115 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   const oppCards = game.hands[oppIdx]?.length || 0;
   const top = game.discard ? decodeCard(game.discard) : null;
 
+  const myName = myIdx === 0 ? game.hostName : game.opponentName;
+  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
+
+  async function endRound(g, winnerIdx) {
+    g = JSON.parse(JSON.stringify(g));
+    g.scores[winnerIdx]++;
+
+    if (g.round >= 3) {
+      let finalWinner = g.scores[0] > g.scores[1] ? 0 : 1;
+
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+        ...encodeGame(g),
+        status: "finished",
+        winnerId: g.players[finalWinner]
+      });
+      return;
+    }
+
+    const deck = createDeck();
+    g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
+    g.discard = deck.pop();
+    g.deck = deck;
+    g.pendingPick = 0;
+    g.round++;
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
+  }
+
+  async function playCard(i) {
+    if (actionLock.current) return;
+    if (game.turn !== userId) return invalidMove("Not your turn");
+
+    actionLock.current = true;
+
+    const g = JSON.parse(JSON.stringify(game));
+    const card = g.hands[myIdx][i];
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
+
+    if (!topDecoded) {
+      actionLock.current = false;
+      return;
+    }
+
+    if (g.pendingPick > 0 && ![2,14].includes(current.number)) {
+      actionLock.current = false;
+      return invalidMove("Respond with 2 or 14");
+    }
+
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) {
+      actionLock.current = false;
+      return invalidMove("Wrong card");
+    }
+
+    g.hands[myIdx].splice(i, 1);
+
+    let nextTurn = g.players[oppIdx];
+
+    if (current.number === 2) g.pendingPick += 2;
+    if (current.number === 14) g.pendingPick += 1;
+    if (current.number === 1 || current.number === 8) nextTurn = userId;
+
+    if (!g.hands[myIdx].length) {
+      await endRound(g, myIdx);
+      actionLock.current = false;
+      return;
+    }
+
+    setGame({ ...g, discard: card, turn: nextTurn });
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      discard: card,
+      turn: nextTurn
+    });
+
+    actionLock.current = false;
+  }
+
+  async function drawMarket() {
+    if (actionLock.current) return;
+    if (game.turn !== userId) return invalidMove("Wait your turn");
+
+    actionLock.current = true;
+
+    const g = JSON.parse(JSON.stringify(game));
+    let count = g.pendingPick > 0 ? g.pendingPick : 1;
+
+    for (let i = 0; i < count; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
+    }
+
+    g.pendingPick = 0;
+
+    setGame({ ...g, turn: g.players[oppIdx] });
+
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
+      ...encodeGame(g),
+      turn: g.players[oppIdx]
+    });
+
+    actionLock.current = false;
+  }
+
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
@@ -274,30 +478,64 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 
         {error && <div style={styles.error}>{error}</div>}
 
+        <div style={styles.row}>
+          <span>{myName}</span>
+          <span>VS</span>
+          <span>{oppName}</span>
+        </div>
+
+        <div style={{ textAlign: "center" }}>
+          {Array.from({ length: oppCards }).map((_, i) => (
+            <img key={i} src={drawBack()} style={{ width: 40 }} />
+          ))}
+          <div>{oppName}: {oppCards}</div>
+        </div>
+
+        <div style={styles.row}>
+          <span>Round {game.round} / 3</span>
+          <span>{game.scores[0]} - {game.scores[1]}</span>
+        </div>
+
+        <div style={styles.row}>
+          <span>₦{match?.stake || 0}</span>
+          <span>🏦 ₦{match?.pot || 0}</span>
+        </div>
+
+        <p>
+          {game.status === "finished"
+            ? "🏁 GAME FINISHED"
+            : game.turn === userId
+            ? "🟢 YOUR TURN"
+            : "⏳ OPPONENT"}
+        </p>
+
         <div style={styles.center}>
-          {top && (
-            <img
-              src={drawCard(top) || drawBack()}
-              style={styles.card}
-            />
-          )}
+          {top && <img src={drawCard(top)} style={styles.card} />}
+          <button style={styles.marketBtn} onClick={drawMarket}>
+            🃏 {game.deck.length}
+          </button>
         </div>
 
         <div style={styles.hand}>
-          {hand.map((c, i) => {
-            const decoded = decodeCard(c);
-            const img = decoded ? drawCard(decoded) : null;
-
-            return (
-              <img
-                key={i}
-                src={img || drawBack()}
-                style={styles.card}
-                onClick={() => playCard(i)}
-              />
-            );
-          })}
+          {hand.map((c, i) => (
+            <img
+              key={i}
+              src={drawCard(decodeCard(c))}
+              style={styles.card}
+              onClick={() => playCard(i)}
+            />
+          ))}
         </div>
+
+        {/* CHAT BUTTON */}
+        <button
+          style={styles.chatBtn}
+          onClick={() => openChat(gameId)}
+        >
+          💬 {unread > 0 && <span style={styles.badge}>{unread}</span>}
+        </button>
+
+        <button onClick={goHome}>Exit</button>
       </div>
     </div>
   );
@@ -320,24 +558,59 @@ const styles = {
     background: "#000000cc",
     padding: 12,
     color: "#fff",
-    borderRadius: 10
+    borderRadius: 10,
+    position: "relative"
+  },
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: 6
   },
   hand: {
     display: "flex",
     flexWrap: "wrap",
     gap: 6,
-    justifyContent: "center"
+    justifyContent: "center",
+    marginTop: 10
   },
   card: {
-    width: 65
+    width: 65,
+    cursor: "pointer"
   },
   center: {
     display: "flex",
-    justifyContent: "center"
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 10
+  },
+  marketBtn: {
+    background: "gold",
+    padding: 10,
+    borderRadius: 8,
+    border: "none"
+  },
+  chatBtn: {
+    position: "absolute",
+    bottom: 10,
+    left: 10,
+    background: "#111",
+    color: "#fff",
+    border: "none",
+    padding: "10px 14px",
+    borderRadius: "50px",
+    cursor: "pointer"
+  },
+  badge: {
+    background: "red",
+    marginLeft: 6,
+    padding: "2px 6px",
+    borderRadius: 10,
+    fontSize: 12
   },
   error: {
     background: "red",
     padding: 6,
-    textAlign: "center"
+    textAlign: "center",
+    marginBottom: 6
   }
 };
