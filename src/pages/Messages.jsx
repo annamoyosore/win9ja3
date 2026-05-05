@@ -13,6 +13,7 @@ export default function Messages({ matchId, players = [], onClose }) {
   const [userId, setUserId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
+  const [error, setError] = useState("");
 
   const endRef = useRef(null);
 
@@ -27,8 +28,13 @@ export default function Messages({ matchId, players = [], onClose }) {
   // LABEL HELPER
   // =========================
   const getLabel = (sender) => {
+    if (!players?.length) return "Player";
+
     const idx = players.indexOf(sender);
-    return idx === 0 ? "Player 1" : idx === 1 ? "Player 2" : "Player";
+    if (idx === 0) return "Player 1";
+    if (idx === 1) return "Player 2";
+
+    return "Player";
   };
 
   // =========================
@@ -65,7 +71,6 @@ export default function Messages({ matchId, players = [], onClose }) {
         if (m.matchId !== matchId) return;
 
         setMessages(prev => {
-          // جلوگیری duplicate
           const exists = prev.find(x => x.$id === m.$id);
           if (exists) return prev;
 
@@ -89,7 +94,15 @@ export default function Messages({ matchId, players = [], onClose }) {
   // SEND MESSAGE
   // =========================
   async function send() {
-    if (!text.trim()) return;
+    const trimmed = text.trim();
+
+    if (!trimmed) return;
+
+    if (trimmed.length > 80) {
+      setError("Message too long (max 80 chars)");
+      setTimeout(() => setError(""), 1500);
+      return;
+    }
 
     if (!matchId || !userId) {
       console.warn("Missing matchId or userId");
@@ -104,7 +117,7 @@ export default function Messages({ matchId, players = [], onClose }) {
         {
           matchId,
           sender: userId,
-          text
+          text: trimmed
         }
       );
 
@@ -124,6 +137,9 @@ export default function Messages({ matchId, players = [], onClose }) {
   return (
     <div style={styles.overlay}>
       <div style={styles.box}>
+
+        {/* 🔴 ERROR POPUP */}
+        {error && <div style={styles.error}>{error}</div>}
 
         {/* HEADER */}
         <div style={styles.header}>
@@ -168,6 +184,12 @@ export default function Messages({ matchId, players = [], onClose }) {
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
             placeholder="Type message..."
             style={styles.input}
           />
@@ -217,5 +239,12 @@ const styles = {
   input: {
     flex: 1,
     padding: 6
+  },
+  error: {
+    background: "red",
+    padding: 6,
+    textAlign: "center",
+    marginBottom: 6,
+    borderRadius: 6
   }
 };
