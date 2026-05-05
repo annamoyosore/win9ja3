@@ -339,23 +339,38 @@ export default function WhotGame({ gameId, goHome }) {
     return () => unsub();
   }, [gameId, userId]);
  //=========================
-// 💰 PAYOUT EFFECT (FINAL)
+// =========================
+// 💰 PAYOUT EFFECT (FINAL FIXED)
 // =========================
 useEffect(() => {
-  if (!game || !match) return;
+  if (!game || !game.matchId) return;
 
   if (game.status !== "finished") return;
   if (!game.winnerId) return;
+  if (game.payoutDone) return;
 
   // 🔒 only winner triggers payout
   if (userId !== game.winnerId) return;
 
-  // prevent double execution
   if (payoutRef.current) return;
-  payoutRef.current = true;
 
   const runPayout = async () => {
     try {
+      // 🔹 GET FRESH MATCH (IMPORTANT)
+      const freshMatch = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        game.matchId
+      );
+
+      const winAmount = Number(freshMatch?.pot || 0);
+
+      if (!winAmount || winAmount <= 0) {
+        console.warn("⚠️ Invalid pot:", freshMatch?.pot);
+        return;
+      }
+
+      // 🔹 GET WALLET
       const res = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -364,41 +379,42 @@ useEffect(() => {
 
       if (!res.documents.length) {
         console.error("❌ Wallet not found");
-        payoutRef.current = false;
         return;
       }
 
       const wallet = res.documents[0];
-      const currentBalance = Number(wallet.balance || 0);
-      const winAmount = Number(match?.pot || 0);
 
-      if (!winAmount || winAmount <= 0) {
-        console.warn("⚠️ Invalid pot:", match?.pot);
-        payoutRef.current = false;
-        return;
-      }
+      // 🔒 LOCK FIRST (VERY IMPORTANT)
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        game.$id,
+        { payoutDone: true }
+      );
 
+      payoutRef.current = true;
+
+      // 💰 PAY
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
         wallet.$id,
         {
-          balance: currentBalance + winAmount
+          balance: Number(wallet.balance || 0) + winAmount
         }
       );
 
       console.log("✅ Payout success:", winAmount);
 
     } catch (e) {
-      console.error("❌ Payout failed:", e);
       payoutRef.current = false;
+      console.error("❌ Payout failed:", e);
     }
   };
 
   runPayout();
 
-}, [game?.status, match, userId]);
-
+}, [game, userId]);
 if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
