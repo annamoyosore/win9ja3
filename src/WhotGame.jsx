@@ -219,7 +219,6 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [showWin, setShowWin] = useState(false);
   const [error, setError] = useState("");
   const [unread, setUnread] = useState(0);
 
@@ -236,9 +235,6 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
-  // =========================
-  // LOAD + SUBSCRIBE GAME
-  // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
 
@@ -247,11 +243,7 @@ export default function WhotGame({ gameId, goHome, openChat }) {
       setGame(parseGame(g));
 
       if (g.matchId) {
-        const m = await databases.getDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          g.matchId
-        );
+        const m = await databases.getDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId);
         setMatch(m);
       }
     };
@@ -263,67 +255,12 @@ export default function WhotGame({ gameId, goHome, openChat }) {
       async (res) => {
         const parsed = parseGame(res.payload);
         setGame(parsed);
-
-        if (parsed.status === "finished") {
-          if (parsed.winnerId === userId) {
-            setShowWin(true);
-            setTimeout(goHome, 3000);
-          } else {
-            setTimeout(goHome, 2500);
-          }
-
-          if (parsed.winnerId !== userId) return;
-          if (payoutRef.current) return;
-          payoutRef.current = true;
-
-          try {
-            const fresh = await databases.getDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              parsed.$id
-            );
-
-            if (fresh.payoutDone === true) return;
-
-            const pot = Number(fresh.pot || 0);
-            if (pot <= 0) return;
-
-            await databases.updateDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              parsed.$id,
-              { payoutDone: true, pot: 0 }
-            );
-
-            const winnerWallet = await databases.listDocuments(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              [Query.equal("userId", parsed.winnerId)]
-            );
-
-            if (winnerWallet.documents.length) {
-              const w = winnerWallet.documents[0];
-              await databases.updateDocument(
-                DATABASE_ID,
-                WALLET_COLLECTION,
-                w.$id,
-                { balance: Number(w.balance || 0) + pot }
-              );
-            }
-
-          } catch (e) {
-            console.error("❌ payout error:", e);
-          }
-        }
       }
     );
 
     return () => unsub();
   }, [gameId, userId]);
 
-  // =========================
-  // UNREAD COUNT (SAFE)
-  // =========================
   useEffect(() => {
     if (!gameId || !userId) return;
 
@@ -390,32 +327,18 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    if (!topDecoded) {
-      actionLock.current = false;
-      return;
-    }
-
-    if (g.pendingPick > 0 && ![2,14].includes(current.number)) {
-      actionLock.current = false;
-      return invalidMove("Respond with 2 or 14");
-    }
+    if (!topDecoded) return;
 
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
-    ) {
-      actionLock.current = false;
-      return invalidMove("Wrong card");
-    }
+    ) return invalidMove("Wrong card");
 
     g.hands[myIdx].splice(i, 1);
+    g.history = [...(g.history || []), `${myName} played ${card}`];
 
     let nextTurn = g.players[oppIdx];
-
-    if (current.number === 2) g.pendingPick += 2;
-    if (current.number === 14) g.pendingPick += 1;
-    if (current.number === 1 || current.number === 8) nextTurn = userId;
 
     if (!g.hands[myIdx].length) {
       await endRound(g, myIdx);
@@ -441,14 +364,15 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     actionLock.current = true;
 
     const g = JSON.parse(JSON.stringify(game));
-    let count = g.pendingPick > 0 ? g.pendingPick : 1;
 
-    for (let i = 0; i < count; i++) {
-      if (!g.deck.length) break;
-      g.hands[myIdx].push(g.deck.pop());
+    if (!g.deck.length) {
+      const winner = hand.length <= oppCards ? myIdx : oppIdx;
+      await endRound(g, winner);
+      return;
     }
 
-    g.pendingPick = 0;
+    g.hands[myIdx].push(g.deck.pop());
+    g.history = [...(g.history || []), `${myName} picked 1`];
 
     setGame({ ...g, turn: g.players[oppIdx] });
 
@@ -463,6 +387,11 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
+
+        <button style={styles.chatBtn} onClick={() => openChat(gameId)}>
+          💬 {unread > 0 && <span style={styles.badge}>{unread}</span>}
+        </button>
+
         <h2>🎮 WHOT GAME</h2>
 
         {error && <div style={styles.error}>{error}</div>}
@@ -485,24 +414,18 @@ export default function WhotGame({ gameId, goHome, openChat }) {
           <span>{game.scores[0]} - {game.scores[1]}</span>
         </div>
 
-        <div style={styles.row}>
-          <span>₦{match?.stake || 0}</span>
-          <span>🏦 ₦{match?.pot || 0}</span>
-        </div>
-
-        <p>
-          {game.status === "finished"
-            ? "🏁 GAME FINISHED"
-            : game.turn === userId
-            ? "🟢 YOUR TURN"
-            : "⏳ OPPONENT"}
-        </p>
-
         <div style={styles.center}>
           {top && <img src={drawCard(top)} style={styles.card} />}
           <button style={styles.marketBtn} onClick={drawMarket}>
             🃏 {game.deck.length}
           </button>
+        </div>
+
+        {/* HISTORY */}
+        <div style={styles.history}>
+          {(game.history || []).slice(-5).map((h, i) => (
+            <div key={i}>• {h}</div>
+          ))}
         </div>
 
         <div style={styles.hand}>
@@ -516,14 +439,6 @@ export default function WhotGame({ gameId, goHome, openChat }) {
           ))}
         </div>
 
-        {/* CHAT BUTTON */}
-        <button
-          style={styles.chatBtn}
-          onClick={() => openChat(gameId)}
-        >
-          💬 {unread > 0 && <span style={styles.badge}>{unread}</span>}
-        </button>
-
         <button onClick={goHome}>Exit</button>
       </div>
     </div>
@@ -534,72 +449,36 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 // STYLES
 // =========================
 const styles = {
-  bg: {
-    minHeight: "100vh",
-    background: "green",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center"
-  },
-  box: {
-    width: "95%",
-    maxWidth: 450,
-    background: "#000000cc",
-    padding: 12,
-    color: "#fff",
-    borderRadius: 10,
-    position: "relative"
-  },
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginBottom: 6
-  },
-  hand: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6,
-    justifyContent: "center",
-    marginTop: 10
-  },
-  card: {
-    width: 65,
-    cursor: "pointer"
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 10,
-    marginTop: 10
-  },
-  marketBtn: {
-    background: "gold",
-    padding: 10,
-    borderRadius: 8,
-    border: "none"
-  },
+  bg: { minHeight: "100vh", background: "green", display: "flex", justifyContent: "center", alignItems: "center" },
+  box: { width: "95%", maxWidth: 450, background: "#000000cc", padding: 12, color: "#fff", borderRadius: 10, position: "relative" },
+  row: { display: "flex", justifyContent: "space-between", marginBottom: 6 },
+  hand: { display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginTop: 10 },
+  card: { width: 65, cursor: "pointer" },
+  center: { display: "flex", justifyContent: "center", gap: 10, marginTop: 10 },
+  marketBtn: { background: "gold", padding: 10, borderRadius: 8, border: "none" },
+
   chatBtn: {
     position: "absolute",
-    bottom: 10,
+    top: 10,
     left: 10,
     background: "#111",
     color: "#fff",
     border: "none",
     padding: "10px 14px",
     borderRadius: "50px",
-    cursor: "pointer"
+    zIndex: 999
   },
-  badge: {
-    background: "red",
-    marginLeft: 6,
-    padding: "2px 6px",
-    borderRadius: 10,
-    fontSize: 12
-  },
-  error: {
-    background: "red",
+
+  history: {
+    maxHeight: 80,
+    overflowY: "auto",
+    fontSize: 12,
+    marginTop: 8,
+    background: "#111",
     padding: 6,
-    textAlign: "center",
-    marginBottom: 6
-  }
+    borderRadius: 6
+  },
+
+  badge: { background: "red", marginLeft: 6, padding: "2px 6px", borderRadius: 10, fontSize: 12 },
+  error: { background: "red", padding: 6, textAlign: "center", marginBottom: 6 }
 };
