@@ -33,7 +33,7 @@ function beep(freq = 200, duration = 200) {
   } catch {}
 }
 
-// 🎴 DRAW CARD UI
+// 🎴 CARD DRAW
 function drawCard(cardStr){
   if(!cardStr) return "";
 
@@ -93,7 +93,7 @@ function drawBack(){
 
   return c.toDataURL();
 }
-function createDeck() {
+function createDeck(){
   const valid = {
     c:[1,2,3,4,5,7,8,10,11,12,13,14],
     t:[1,2,3,4,5,7,8,10,11,12,13,14],
@@ -102,7 +102,7 @@ function createDeck() {
     r:[1,2,3,4,5,7,8]
   };
 
-  let deck = [];
+  let deck=[];
   Object.keys(valid).forEach(shape=>{
     valid[shape].forEach(n=>deck.push(shape+n));
   });
@@ -117,7 +117,7 @@ function parseGame(g){
 
   if(players.length<2){
     return {...g,players,hands:[[],[]],deck:[],discard:null,turn:null,
-      history:[],scores:[0,0],round:1,status:"waiting",
+      scores:[0,0],round:1,status:"waiting",
       pendingPick:0,pot:Number(g.pot||0),payoutDone:false};
   }
 
@@ -130,13 +130,12 @@ function parseGame(g){
     return {...g,players,
       hands:[d.splice(0,6),d.splice(0,6)],
       deck:d,discard:d.pop(),turn:players[0],
-      history:[],scores:[0,0],round:1,status:"playing",
+      scores:[0,0],round:1,status:"playing",
       pendingPick:0,pot:Number(g.pot||0),payoutDone:false};
   }
 
   return {...g,players,hands,deck,discard:g.discard,
     turn:g.turn||players[0],
-    history:safe(g.history,"||"),
     scores:safe(g.scores,",").map(Number),
     round:Number(g.round||1),
     status:g.status||"playing",
@@ -151,7 +150,6 @@ function encodeGame(g){
     deck:g.deck.join(","),
     discard:g.discard,
     turn:g.turn,
-    history:(g.history||[]).slice(-20).join("||"),
     scores:g.scores.join(","),
     round:String(g.round),
     status:g.status,
@@ -161,21 +159,20 @@ function encodeGame(g){
     winnerId:g.winnerId||null
   };
 }
-export default function WhotGame({ gameId, goHome, openChat }) {
+export default function WhotGame({ gameId, goHome }) {
 
 const [game,setGame]=useState(null);
 const [userId,setUserId]=useState(null);
 const [error,setError]=useState("");
-const [countdown,setCountdown]=useState(5);
 
 const lock=useRef(false);
 
-// 👤 USER
+// USER
 useEffect(()=>{
-  account.get().then(u=>setUserId(u.$id)).catch(()=>{});
+  account.get().then(u=>setUserId(u.$id));
 },[]);
 
-// 🎮 GAME
+// GAME SUBSCRIBE
 useEffect(()=>{
   if(!gameId||!userId)return;
 
@@ -190,12 +187,52 @@ useEffect(()=>{
   return ()=>unsub();
 },[gameId,userId]);
 
-if(!game||!userId) return <div style={{color:"#fff"}}>Loading...</div>;
+if(!game||!userId) return <div>Loading...</div>;
 
 const myIdx=game.players.indexOf(userId);
 const oppIdx=myIdx===0?1:0;
-const hand=game.hands[myIdx]||[];
-const oppCards=game.hands[oppIdx]?.length||0;
+
+// 🏁 END ROUND
+async function endRound(g,winner){
+  g=JSON.parse(JSON.stringify(g));
+  g.scores[winner]++;
+
+  if(g.scores[winner]>=2 && !g.payoutDone){
+    g.status="finished";
+    g.winnerId=g.players[winner];
+    g.payoutDone=true;
+
+    const res=await databases.listDocuments(
+      DATABASE_ID,WALLET_COLLECTION,
+      [Query.equal("userId",g.winnerId)]
+    );
+
+    if(res.documents.length){
+      const w=res.documents[0];
+      await databases.updateDocument(
+        DATABASE_ID,WALLET_COLLECTION,w.$id,
+        {balance:Number(w.balance)+Number(g.pot)}
+      );
+    }
+
+    await databases.updateDocument(
+      DATABASE_ID,GAME_COLLECTION,gameId,encodeGame(g)
+    );
+    return;
+  }
+
+  const d=createDeck();
+  g.hands=[d.splice(0,6),d.splice(0,6)];
+  g.deck=d;
+  g.discard=d.pop();
+  g.pendingPick=0;
+  g.turn=g.players[winner===0?1:0];
+  g.round++;
+
+  await databases.updateDocument(
+    DATABASE_ID,GAME_COLLECTION,gameId,encodeGame(g)
+  );
+}
 
 // 🎴 PLAY
 async function playCard(i){
@@ -209,8 +246,16 @@ async function playCard(i){
   const num=card.slice(1);
   const topNum=top.slice(1);
 
+  if(g.pendingPick>0 && num!=="2" && num!=="14"){
+    setError("Play 2 or WHOT");
+    beep(120);
+    setTimeout(()=>setError(""),1000);
+    lock.current=false;
+    return;
+  }
+
   if(num!=="14" && card[0]!==top[0] && num!==topNum){
-    setError("❌ Invalid move");
+    setError("Invalid move");
     beep(100);
     setTimeout(()=>setError(""),1000);
     lock.current=false;
@@ -220,9 +265,14 @@ async function playCard(i){
   g.hands[myIdx].splice(i,1);
   g.discard=card;
 
+  if(num==="2") g.pendingPick+=2;
+  if(num==="14") g.pendingPick+=1;
+
   if(!g.hands[myIdx].length){
-    beep(600,400);
-    alert("🏆 YOU WON ROUND!");
+    beep(600,300);
+    await endRound(g,myIdx);
+    lock.current=false;
+    return;
   }
 
   const next=g.players[oppIdx];
@@ -237,40 +287,28 @@ async function playCard(i){
   lock.current=false;
 }
 
-// 🎨 UI
+// UI
 return (
-<div style={{background:"#0f172a",minHeight:"100vh",color:"#fff",padding:10}}>
+<div style={{background:"#020617",minHeight:"100vh",color:"#fff",padding:12}}>
 
-<h2 style={{textAlign:"center"}}>🎮 WHOT GAME</h2>
+<h2 style={{textAlign:"center"}}>🎮 WHOT</h2>
 
 {error && <div style={{color:"red",textAlign:"center"}}>{error}</div>}
 
-{/* OPPONENT */}
 <div style={{textAlign:"center"}}>
-{Array.from({length:oppCards}).map((_,i)=>
-  <img key={i} src={drawBack()} style={{width:40}}/>
-)}
-<p>Opponent ({oppCards})</p>
+<img src={drawCard(game.discard)} style={{width:80}}/>
 </div>
 
-{/* CENTER */}
-<div style={{textAlign:"center",margin:20}}>
-<img src={drawCard(game.discard)} style={{width:70}}/>
-</div>
-
-{/* HAND */}
-<div style={{display:"flex",flexWrap:"wrap",justifyContent:"center"}}>
-{hand.map((c,i)=>(
-  <img
-    key={i}
-    src={drawCard(c)}
-    style={{width:60,margin:5,cursor:"pointer"}}
-    onClick={()=>playCard(i)}
-  />
+<div style={{display:"flex",justifyContent:"center",flexWrap:"wrap",marginTop:20}}>
+{game.hands[myIdx].map((c,i)=>(
+<img key={i} src={drawCard(c)} style={{width:60,margin:5,cursor:"pointer"}}
+onClick={()=>playCard(i)}/>
 ))}
 </div>
 
+<div style={{textAlign:"center",marginTop:20}}>
 <button onClick={goHome}>Exit</button>
+</div>
 
 </div>
 );
