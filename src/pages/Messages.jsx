@@ -8,6 +8,7 @@ import {
 } from "../lib/appwrite";
 
 const CHAT_COLLECTION = "messages";
+const GAME_COLLECTION = "games";
 
 export default function Messages({ gameId, onClose }) {
   const [userId, setUserId] = useState(null);
@@ -33,11 +34,12 @@ export default function Messages({ gameId, onClose }) {
         CHAT_COLLECTION,
         [
           Query.equal("gameId", gameId),
-          Query.orderAsc("$createdAt")
+          Query.orderDesc("$createdAt"),
+          Query.limit(3) // ✅ ONLY LAST 3
         ]
       );
 
-      setMessages(res.documents);
+      setMessages(res.documents.reverse());
     };
 
     load();
@@ -45,8 +47,56 @@ export default function Messages({ gameId, onClose }) {
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${CHAT_COLLECTION}.documents`,
       (res) => {
-        if (res.payload.gameId !== gameId) return;
-        setMessages(prev => [...prev, res.payload]);
+        const m = res.payload;
+        if (m.gameId !== gameId) return;
+
+        setMessages(prev => {
+          const updated = [...prev, m];
+
+          // ✅ KEEP ONLY LAST 3
+          return updated.slice(-3);
+        });
+      }
+    );
+
+    return () => unsub();
+  }, [gameId]);
+
+  // =========================
+  // AUTO CLEAR WHEN GAME ENDS
+  // =========================
+  useEffect(() => {
+    if (!gameId) return;
+
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+      async (res) => {
+        const g = res.payload;
+
+        if (g.status === "finished") {
+          try {
+            const msgs = await databases.listDocuments(
+              DATABASE_ID,
+              CHAT_COLLECTION,
+              [Query.equal("gameId", gameId)]
+            );
+
+            // 🧹 DELETE ALL CHAT
+            await Promise.all(
+              msgs.documents.map(m =>
+                databases.deleteDocument(
+                  DATABASE_ID,
+                  CHAT_COLLECTION,
+                  m.$id
+                )
+              )
+            );
+
+            setMessages([]);
+          } catch (e) {
+            console.error("Chat cleanup failed", e);
+          }
+        }
       }
     );
 
@@ -87,7 +137,7 @@ export default function Messages({ gameId, onClose }) {
         <div style={styles.chat}>
           {messages.map((m, i) => (
             <div
-              key={i}
+              key={m.$id || i} // ✅ FIX duplicate issue
               style={{
                 textAlign: m.sender === userId ? "right" : "left",
                 marginBottom: 6
@@ -124,7 +174,7 @@ export default function Messages({ gameId, onClose }) {
 }
 
 // =========================
-// STYLES
+// STYLES (UNCHANGED)
 // =========================
 const styles = {
   overlay: {
