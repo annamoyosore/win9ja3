@@ -74,60 +74,105 @@ function decodeCard(str) {
   };
 }
 
-function cardLabel(cardStr) {
-  const c = decodeCard(cardStr);
-  if (!c) return "";
+// 🎴 DRAW CARD (CANVAS)
+const cache = new Map();
 
-  const shapeMap = {
-    circle: "●",
-    triangle: "▲",
-    square: "■",
-    star: "★",
-    cross: "✚"
-  };
+function drawCard(card) {
+  if (!card) return null;
 
-  return `${shapeMap[c.shape]} ${c.number}`;
+  const key = `${card.shape}_${card.number}`;
+  if (cache.has(key)) return cache.get(key);
+
+  const c = document.createElement("canvas");
+  c.width = 70;
+  c.height = 100;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, 70, 100);
+
+  ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, 66, 96);
+
+  ctx.fillStyle = "#e11d48";
+  ctx.font = "bold 14px Arial";
+  ctx.fillText(card.number, 6, 18);
+
+  const cx = 35, cy = 55;
+
+  if (card.shape === "circle") {
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+
+  if (card.shape === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 12);
+    ctx.lineTo(cx - 12, cy + 12);
+    ctx.lineTo(cx + 12, cy + 12);
+    ctx.fill();
+  }
+
+  if (card.shape === "star") {
+    ctx.font = "20px Arial";
+    ctx.fillText("★", cx - 8, cy + 8);
+  }
+
+  if (card.shape === "cross") {
+    ctx.fillRect(cx - 3, cy - 12, 6, 24);
+    ctx.fillRect(cx - 12, cy - 3, 24, 6);
+  }
+
+  const img = c.toDataURL();
+  cache.set(key, img);
+  return img;
 }
 
-// 🧠 HISTORY (MAX 10)
-function addHistory(g, text) {
-  const h = [...(g.history || [])];
-  h.push(text);
-  return h.length > 10 ? h.slice(-10) : h;
+function drawBack() {
+  const c = document.createElement("canvas");
+  c.width = 65;
+  c.height = 100;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, 65, 100);
+
+  ctx.strokeStyle = "#fff";
+  ctx.strokeRect(2, 2, 61, 96);
+
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 20px Arial";
+  ctx.fillText("🂠", 18, 60);
+
+  return c.toDataURL();
 }
-// PARSER
 function parseGame(g) {
-  const safeSplit = (v, sep) =>
-    typeof v === "string" ? v.split(sep).filter(Boolean) : [];
+  const safe = (v, s) =>
+    typeof v === "string" ? v.split(s).filter(Boolean) : [];
 
-  const players = Array.isArray(g.players)
-    ? g.players
-    : safeSplit(g.players, ",");
-
-  const handsRaw = safeSplit(g.hands, "|");
-
-  const hands =
-    handsRaw.length === 2
-      ? handsRaw.map(p => safeSplit(p, ","))
-      : [[], []];
+  const handsRaw = safe(g.hands, "|");
 
   return {
     ...g,
-    players,
-    hands,
-    deck: safeSplit(g.deck, ","),
+    players: safe(g.players, ","),
+    hands: handsRaw.length === 2 ? handsRaw.map(p => safe(p, ",")) : [[], []],
+    deck: safe(g.deck, ","),
     discard: g.discard || null,
-    turn: g.turn || null,
+    turn: g.turn,
     pendingPick: Number(g.pendingPick || 0),
-    history: safeSplit(g.history, "||"),
-    scores: safeSplit(g.scores, ",").map(Number) || [0, 0],
+    history: safe(g.history, "||"),
+    scores: safe(g.scores, ",").map(Number) || [0, 0],
     round: Number(g.round || 1),
     status: g.status || "playing",
     payoutDone: Boolean(g.payoutDone),
+    matchId: g.matchId || null,
     hostName: g.hostName || "Player 1",
     opponentName: g.opponentName || "Player 2",
-    winnerId: g.winnerId || null,
-    matchId: g.matchId || null
+    winnerId: g.winnerId || null
   };
 }
 
@@ -135,86 +180,122 @@ function encodeGame(g) {
   return {
     hands: g.hands.map(p => p.join(",")).join("|"),
     deck: g.deck.join(","),
-    discard: g.discard || "",
+    discard: g.discard,
     turn: g.turn,
     pendingPick: String(g.pendingPick),
-    history: (g.history || []).slice(-10).join("||"),
+    history: g.history.slice(-10).join("||"),
     scores: g.scores.join(","),
     round: String(g.round),
     status: g.status
   };
 }
 
-// 🔥 END ROUND (FIRST TO 2 WINS)
-async function endRound(g, winnerIdx, gameId) {
-  g = JSON.parse(JSON.stringify(g));
-  g.scores[winnerIdx]++;
+// 🔥 INIT GAME
+async function ensureGameReady(g, userId) {
+  if (!g.players?.length) return;
 
-  if (g.scores[winnerIdx] === 2) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        status: "finished",
-        winnerId: g.players[winnerIdx]
-      }
-    );
-    return;
-  }
+  const valid =
+    g.deck?.length &&
+    g.hands?.[0]?.length &&
+    g.hands?.[1]?.length &&
+    g.discard;
 
-  const deck = createDeck();
+  if (valid) return;
+  if (g.players[0] !== userId) return;
 
-  g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
-  g.discard = deck.pop();
-  g.deck = deck;
-  g.pendingPick = 0;
-  g.round++;
+  let deck = createDeck();
+
+  const hands = [
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ];
+
+  const discard = deck.pop();
 
   await databases.updateDocument(
     DATABASE_ID,
     GAME_COLLECTION,
-    gameId,
-    encodeGame(g)
+    g.$id,
+    {
+      hands: hands.map(p => p.join(",")).join("|"),
+      deck: deck.join(","),
+      discard,
+      turn: g.players[0],
+      pendingPick: "0",
+      history: "Game started"
+    }
+  );
+}
+
+// 💰 PAYOUT FROM MATCH
+async function handlePayout(game, userId) {
+  if (!game.matchId) return;
+  if (game.players[0] !== userId) return;
+  if (game.payoutDone) return;
+
+  const match = await databases.getDocument(
+    DATABASE_ID,
+    MATCH_COLLECTION,
+    game.matchId
+  );
+
+  const pot = Number(match.pot || 0);
+  if (pot <= 0) return;
+
+  const wallets = await databases.listDocuments(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    [Query.equal("userId", game.winnerId)]
+  );
+
+  if (wallets.documents.length) {
+    const w = wallets.documents[0];
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      w.$id,
+      { balance: Number(w.balance || 0) + pot }
+    );
+  }
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    MATCH_COLLECTION,
+    game.matchId,
+    { pot: 0, status: "finished" }
+  );
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    game.$id,
+    { payoutDone: true }
   );
 }
 export default function WhotGame({ gameId, goHome }) {
-
   const [game, setGame] = useState(null);
-  const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [showWin, setShowWin] = useState(null);
   const [error, setError] = useState("");
-
-  const payoutRef = useRef(false);
-  const actionLock = useRef(false);
-
-  function invalidMove(msg) {
-    beep(120, 300);
-    setError(msg);
-    setTimeout(() => setError(""), 1000);
-  }
+  const lock = useRef(false);
 
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
+
+  function invalid(msg) {
+    beep();
+    setError(msg);
+    setTimeout(() => setError(""), 1200);
+  }
 
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
       const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      setGame(parseGame(g));
-
-      if (g.matchId) {
-        const m = await databases.getDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          g.matchId
-        );
-        setMatch(m);
-      }
+      const parsed = parseGame(g);
+      setGame(parsed);
+      ensureGameReady(parsed, userId);
     };
 
     load();
@@ -225,69 +306,11 @@ export default function WhotGame({ gameId, goHome }) {
         const parsed = parseGame(res.payload);
         setGame(parsed);
 
-        // 🔥 WIN / LOSE POPUP
+        ensureGameReady(parsed, userId);
+
         if (parsed.status === "finished") {
-          if (parsed.winnerId === userId) {
-            setShowWin("win");
-          } else {
-            setShowWin("lose");
-          }
-
+          handlePayout(parsed, userId);
           setTimeout(goHome, 3000);
-
-          // 💰 PAYOUT FROM MATCH POT
-          if (parsed.winnerId !== userId) return;
-          if (payoutRef.current) return;
-          payoutRef.current = true;
-
-          try {
-            const matchDoc = await databases.getDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              parsed.matchId
-            );
-
-            if (parsed.payoutDone) return;
-
-            const pot = Number(matchDoc.pot || 0);
-            if (pot <= 0) return;
-
-            // mark paid
-            await databases.updateDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              parsed.$id,
-              { payoutDone: true }
-            );
-
-            // clear pot
-            await databases.updateDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              parsed.matchId,
-              { pot: 0, status: "finished" }
-            );
-
-            // pay winner
-            const winnerWallet = await databases.listDocuments(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              [Query.equal("userId", parsed.winnerId)]
-            );
-
-            if (winnerWallet.documents.length) {
-              const w = winnerWallet.documents[0];
-              await databases.updateDocument(
-                DATABASE_ID,
-                WALLET_COLLECTION,
-                w.$id,
-                { balance: Number(w.balance || 0) + pot }
-              );
-            }
-
-          } catch (e) {
-            console.error("PAYOUT ERROR", e);
-          }
         }
       }
     );
@@ -305,135 +328,130 @@ export default function WhotGame({ gameId, goHome }) {
   const top = decodeCard(game.discard);
 
   async function playCard(i) {
-    if (actionLock.current) return;
-    if (game.turn !== userId) return invalidMove("Not your turn");
+    if (lock.current) return;
+    if (game.turn !== userId) return invalid("Not your turn");
 
-    actionLock.current = true;
+    lock.current = true;
 
     const g = JSON.parse(JSON.stringify(game));
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    if (!topDecoded) return;
-
-    if (g.pendingPick > 0 && ![2,14].includes(current.number)) {
-      actionLock.current = false;
-      return invalidMove("Respond with 2 or 14");
-    }
-
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
     ) {
-      actionLock.current = false;
-      return invalidMove("Wrong card");
+      lock.current = false;
+      return invalid("Invalid move");
     }
-
-    const name = myIdx === 0 ? g.hostName : g.opponentName;
-
-    g.history = addHistory(g, `${name} played ${cardLabel(card)}`);
-
-    if (current.number === 2)
-      g.history = addHistory(g, `${name} gave +2`);
-
-    if (current.number === 14)
-      g.history = addHistory(g, `${name} gave +1`);
-
-    if (current.number === 1 || current.number === 8)
-      g.history = addHistory(g, `${name} plays again`);
 
     g.hands[myIdx].splice(i, 1);
+    g.discard = card;
+    g.turn = g.players[oppIdx];
 
-    let nextTurn = g.players[oppIdx];
-
-    if (current.number === 2) g.pendingPick += 2;
-    if (current.number === 14) g.pendingPick += 1;
-    if (current.number === 1 || current.number === 8) nextTurn = userId;
+    g.history.push(`Played ${card}`);
+    g.history = g.history.slice(-10);
 
     if (!g.hands[myIdx].length) {
-      await endRound(g, myIdx, gameId);
-      actionLock.current = false;
-      return;
+      g.scores[myIdx]++;
+      if (g.scores[myIdx] === 2) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          {
+            ...encodeGame(g),
+            status: "finished",
+            winnerId: userId
+          }
+        );
+        lock.current = false;
+        return;
+      }
     }
 
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
       gameId,
-      {
-        ...encodeGame(g),
-        discard: card,
-        turn: nextTurn
-      }
+      encodeGame(g)
     );
 
-    actionLock.current = false;
-  }
-
-  async function drawMarket() {
-    if (actionLock.current) return;
-    if (game.turn !== userId) return invalidMove("Wait your turn");
-
-    actionLock.current = true;
-
-    const g = JSON.parse(JSON.stringify(game));
-    let count = g.pendingPick > 0 ? g.pendingPick : 1;
-
-    for (let i = 0; i < count; i++) {
-      if (!g.deck.length) break;
-      g.hands[myIdx].push(g.deck.pop());
-    }
-
-    const name = myIdx === 0 ? g.hostName : g.opponentName;
-    g.history = addHistory(g, `${name} drew ${count} card(s)`);
-
-    g.pendingPick = 0;
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        turn: g.players[oppIdx]
-      }
-    );
-
-    actionLock.current = false;
+    lock.current = false;
   }
 
   return (
-    <div style={{ textAlign: "center", color: "#fff" }}>
-      <h2>WHOT</h2>
+    <div style={styles.bg}>
+      <div style={styles.box}>
 
-      <p>Opponent cards: {oppCards}</p>
-      <p>🏦 Pot: ₦{match?.pot || 0}</p>
+        {error && <div style={styles.error}>{error}</div>}
 
-      {top && <img src={drawCard(top)} width={70} />}
+        {/* OPPONENT */}
+        <div style={{ textAlign: "center" }}>
+          {Array.from({ length: oppCards }).map((_, i) => (
+            <img key={i} src={drawBack()} style={{ width: 40 }} />
+          ))}
+        </div>
 
-      <div>
-        {hand.map((c, i) => (
-          <img
-            key={i}
-            src={drawCard(decodeCard(c))}
-            width={60}
-            onClick={() => playCard(i)}
-          />
-        ))}
-      </div>
+        {/* CENTER */}
+        <div style={styles.center}>
+          {top && <img src={drawCard(top)} style={styles.card} />}
+          <div>🃏 {game.deck.length}</div>
+        </div>
 
-      <button onClick={drawMarket}>Draw</button>
+        {/* PLAYER */}
+        <div style={styles.hand}>
+          {hand.map((c, i) => (
+            <img
+              key={i}
+              src={drawCard(decodeCard(c))}
+              style={styles.card}
+              onClick={() => playCard(i)}
+            />
+          ))}
+        </div>
 
-      {showWin === "win" && <h2>🎉 YOU WON ₦{match?.pot || 0}</h2>}
-      {showWin === "lose" && <h2>❌ YOU LOST</h2>}
-
-      <div>
-        {game.history.map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
       </div>
     </div>
   );
 }
+
+const styles = {
+  bg: {
+    minHeight: "100vh",
+    background: "green",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  box: {
+    width: "95%",
+    maxWidth: 450,
+    background: "#000000cc",
+    padding: 12,
+    color: "#fff",
+    borderRadius: 10
+  },
+  hand: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
+    marginTop: 10
+  },
+  card: { width: 65 },
+  center: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 10
+  },
+  error: {
+    background: "red",
+    padding: 6,
+    textAlign: "center",
+    marginBottom: 6
+  }
+};
