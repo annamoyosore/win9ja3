@@ -444,14 +444,60 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   );
 }
 
-// 🎨 STYLE (UNCHANGED)
+// 🎨 STYLE (UPDATED WITH MESSAGE UI)
 const styles = {
   bg:{minHeight:"100vh",background:"green",display:"flex",justifyContent:"center",alignItems:"center"},
+
   box:{width:"95%",maxWidth:450,background:"#000000cc",padding:12,color:"#fff",borderRadius:10,position:"relative"},
+
   row:{display:"flex",justifyContent:"space-between",marginBottom:6},
+
   hand:{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",marginTop:10},
+
   card:{width:65,cursor:"pointer"},
+
   center:{display:"flex",justifyContent:"center",gap:10,marginTop:10},
+
   marketBtn:{background:"gold",padding:10,borderRadius:8,border:"none"},
+
   history:{maxHeight:80,overflowY:"auto",fontSize:12,marginTop:8,background:"#111",padding:6,borderRadius:6},
+
+  // ✅ MESSAGE BAR (top section)
+  messageBar:{
+    display:"flex",
+    justifyContent:"space-between",
+    alignItems:"center",
+    background:"#111",
+    padding:"8px 12px",
+    borderRadius:8,
+    marginBottom:10,
+    fontSize:14,
+    cursor:"pointer",
+    border:"1px solid #222"
+  },
+
+  // ✅ FLOATING CHAT BUTTON (optional, if you still use it)
+  chatBtn:{
+    position:"absolute",
+    top:10,
+    left:10,
+    background:"#111",
+    color:"#fff",
+    border:"none",
+    padding:"10px 14px",
+    borderRadius:"50px",
+    zIndex:999,
+    cursor:"pointer"
+  },
+
+  // ✅ UNREAD BADGE
+  badge:{
+    background:"red",
+    color:"#fff",
+    marginLeft:6,
+    padding:"2px 6px",
+    borderRadius:10,
+    fontSize:12,
+    fontWeight:"bold"
+  }
 };
