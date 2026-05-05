@@ -171,293 +171,290 @@ export default function WhotGame({gameId, goHome}) {
 
     return ()=>unsub();
   },[gameId,userId]);
-const myIdx = game?.players.indexOf(userId);
-const oppIdx = myIdx===0?1:0;
 
-// 💰 SAFE PAYOUT (ATOMIC STYLE)
-async function safeFinishGame(g, winner){
+  // ✅ SAFE RENDER GUARD
+  if(!game || !userId) return <div>Loading...</div>;
 
-  if(g.payoutDone) return;
+  const myIdx = game.players.indexOf(userId);
+  if(myIdx === -1) return <div>Joining game...</div>;
 
-  // STEP 1: mark payoutDone FIRST (lock)
-  await databases.updateDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    gameId,
-    { payoutDone:true }
-  );
+  const oppIdx = myIdx === 0 ? 1 : 0;
 
-  // STEP 2: payout
-  const res = await databases.listDocuments(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    [Query.equal("userId", g.players[winner])]
-  );
-
-  if(res.documents.length){
-    const wallet = res.documents[0];
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      { balance:Number(wallet.balance||0)+g.pot }
-    );
-  }
-
-  // STEP 3: finalize game
-  g.status="finished";
-  g.winnerId=g.players[winner];
-  g.history.push(`Game finished - P${winner+1} won`);
-
-  await databases.updateDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    gameId,
-    encodeGame(g)
-  );
-
-  // STEP 4: finish match
-  const matchRes = await databases.listDocuments(
-    DATABASE_ID,
-    MATCH_COLLECTION,
-    [Query.equal("gameId",gameId)]
-  );
-
-  if(matchRes.documents.length){
-    await databases.updateDocument(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      matchRes.documents[0].$id,
-      { status:"finished", winnerId:g.players[winner] }
-    );
-  }
-}
-
-async function endRound(g, winner){
-  g.scores[winner]++;
-  g.history.push(`P${winner+1} won round ${g.round}`);
-
-  if(g.scores[winner]===2){
-    await safeFinishGame(g,winner);
-    return;
-  }
-
-  const d=createDeck();
-  g.hands=[d.splice(0,6),d.splice(0,6)];
-  g.discard=d.pop();
-  g.deck=d;
-  g.round++;
-  g.turn=g.players[0];
-
-  await databases.updateDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    gameId,
-    encodeGame(g)
-  );
-}
-
-function showError(msg){
-  setError(msg);
-  beep(120,80);
-  setTimeout(()=>setError(""),700);
-}
-
-async function playCard(i){
-  if(lock.current) return;
-
-  if(game.turn!==userId){
-    showError("Wait your turn");
-    return;
-  }
-
-  if(game.status==="finished") return;
-
-  lock.current=true;
-
-  try{
-    const g = JSON.parse(JSON.stringify(game));
-    const card = g.hands[myIdx][i];
-    const top = g.discard;
-
-    if(g.pendingPick>0){
-      showError("Pick first");
-      return;
-    }
-
-    if(card[0]!==top[0] && card.slice(1)!==top.slice(1) && card.slice(1)!=="14"){
-      showError("Invalid move");
-      return;
-    }
-
-    g.hands[myIdx].splice(i,1);
-
-    let next = g.players[oppIdx];
-    const num = card.slice(1);
-
-    let msg=`P${myIdx+1} played ${card}`;
-
-    if(num==="1"){ next=g.players[myIdx]; msg+=" (again)"; }
-    if(num==="2"){ g.pendingPick+=2; msg+=" (+2)"; }
-    if(num==="8"){ next=g.players[myIdx]; msg+=" (skip)"; }
-    if(num==="14"){ g.pendingPick+=1; msg+=" (market)"; }
-
-    g.history.push(msg);
-
-    if(!g.hands[myIdx].length){
-      await endRound(g,myIdx);
-      return;
-    }
+  // 💰 SAFE PAYOUT
+  async function safeFinishGame(g, winner){
+    if(g.payoutDone) return;
 
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
       gameId,
-      encodeGame({...g, discard:card, turn:next})
+      { payoutDone:true }
     );
 
-  } finally {
-    lock.current=false;
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", g.players[winner])]
+    );
+
+    if(res.documents.length){
+      const wallet = res.documents[0];
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        { balance:Number(wallet.balance||0)+g.pot }
+      );
+    }
+
+    g.status="finished";
+    g.winnerId=g.players[winner];
+    g.history.push(`Game finished - P${winner+1} won`);
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      encodeGame(g)
+    );
+
+    const matchRes = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [Query.equal("gameId",gameId)]
+    );
+
+    if(matchRes.documents.length){
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        matchRes.documents[0].$id,
+        { status:"finished", winnerId:g.players[winner] }
+      );
+    }
   }
-}
 
-async function draw(){
-  if(lock.current) return;
+  async function endRound(g, winner){
+    g.scores[winner]++;
+    g.history.push(`P${winner+1} won round ${g.round}`);
 
-  if(game.turn!==userId){
-    showError("Wait your turn");
-    return;
+    if(g.scores[winner]===2){
+      await safeFinishGame(g,winner);
+      return;
+    }
+
+    const d=createDeck();
+    g.hands=[d.splice(0,6),d.splice(0,6)];
+    g.discard=d.pop();
+    g.deck=d;
+    g.round++;
+    g.turn=g.players[0];
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      encodeGame(g)
+    );
   }
 
-  lock.current=true;
+  function showError(msg){
+    setError(msg);
+    beep(120,80);
+    setTimeout(()=>setError(""),700);
+  }
 
-  try{
-    const g = JSON.parse(JSON.stringify(game));
+  async function playCard(i){
+    if(lock.current) return;
 
-    if(!g.deck.length){
-      const p1=g.hands[0].length;
-      const p2=g.hands[1].length;
+    if(game.turn!==userId){
+      showError("Wait your turn");
+      return;
+    }
 
-      if(p1===p2){
-        g.history.push("Round draw - market finished");
-        const d=createDeck();
-        g.hands=[d.splice(0,6),d.splice(0,6)];
-        g.discard=d.pop();
-        g.deck=d;
-        g.round++;
-        g.turn=g.players[0];
-        await databases.updateDocument(DATABASE_ID,GAME_COLLECTION,gameId,encodeGame(g));
+    if(game.status==="finished") return;
+
+    lock.current=true;
+
+    try{
+      const g = JSON.parse(JSON.stringify(game));
+      const card = g.hands[myIdx][i];
+      const top = g.discard;
+
+      if(g.pendingPick>0){
+        showError("Pick first");
         return;
       }
 
-      const win=p1<p2?0:1;
-      g.history.push(`P${win+1} wins (market finished)`);
-      await endRound(g,win);
+      if(card[0]!==top[0] && card.slice(1)!==top.slice(1) && card.slice(1)!=="14"){
+        showError("Invalid move");
+        return;
+      }
+
+      g.hands[myIdx].splice(i,1);
+
+      let next = g.players[oppIdx];
+      const num = card.slice(1);
+
+      let msg=`P${myIdx+1} played ${card}`;
+
+      if(num==="1"){ next=g.players[myIdx]; msg+=" (again)"; }
+      if(num==="2"){ g.pendingPick+=2; msg+=" (+2)"; }
+      if(num==="8"){ next=g.players[myIdx]; msg+=" (skip)"; }
+      if(num==="14"){ g.pendingPick+=1; msg+=" (market)"; }
+
+      g.history.push(msg);
+
+      if(!g.hands[myIdx].length){
+        await endRound(g,myIdx);
+        return;
+      }
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        encodeGame({...g, discard:card, turn:next})
+      );
+
+    } finally {
+      lock.current=false;
+    }
+  }
+
+  async function draw(){
+    if(lock.current) return;
+
+    if(game.turn!==userId){
+      showError("Wait your turn");
       return;
     }
 
-    const picks = g.pendingPick>0?g.pendingPick:1;
+    lock.current=true;
 
-    for(let i=0;i<picks;i++){
-      if(g.deck.length) g.hands[myIdx].push(g.deck.pop());
-    }
+    try{
+      const g = JSON.parse(JSON.stringify(game));
 
-    g.history.push(`P${myIdx+1} picked ${picks}`);
-    g.pendingPick=0;
+      if(!g.deck.length){
+        const p1=g.hands[0].length;
+        const p2=g.hands[1].length;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame({...g, turn:g.players[oppIdx]})
-    );
-
-  } finally {
-    lock.current=false;
-  }
-}
-if(!game || !userId) return <div>Loading...</div>;
-
-const myIdx2 = game.players.indexOf(userId);
-const oppIdx2 = myIdx2===0?1:0;
-
-const hand = game.hands[myIdx2] || [];
-const oppCards = game.hands[oppIdx2]?.length || 0;
-const isWinner = game.winnerId===userId;
-
-useEffect(()=>{
-  if(game.status==="finished"){
-    const t=setInterval(()=>{
-      setCountdown(c=>{
-        if(c<=1){
-          goHome();
-          return 0;
+        if(p1===p2){
+          g.history.push("Round draw - market finished");
+          const d=createDeck();
+          g.hands=[d.splice(0,6),d.splice(0,6)];
+          g.discard=d.pop();
+          g.deck=d;
+          g.round++;
+          g.turn=g.players[0];
+          await databases.updateDocument(DATABASE_ID,GAME_COLLECTION,gameId,encodeGame(g));
+          return;
         }
-        return c-1;
-      });
-    },1000);
-    return ()=>clearInterval(t);
+
+        const win=p1<p2?0:1;
+        g.history.push(`P${win+1} wins (market finished)`);
+        await endRound(g,win);
+        return;
+      }
+
+      const picks = g.pendingPick>0?g.pendingPick:1;
+
+      for(let i=0;i<picks;i++){
+        if(g.deck.length) g.hands[myIdx].push(g.deck.pop());
+      }
+
+      g.history.push(`P${myIdx+1} picked ${picks}`);
+      g.pendingPick=0;
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        encodeGame({...g, turn:g.players[oppIdx]})
+      );
+
+    } finally {
+      lock.current=false;
+    }
   }
-},[game.status]);
 
-return (
-<div style={{padding:10, background:"#063", minHeight:"100vh", color:"#fff"}}>
+  const hand = game.hands[myIdx] || [];
+  const oppCards = game.hands[oppIdx]?.length || 0;
+  const isWinner = game.winnerId===userId;
 
-<h2>🎮 WHOT GAME</h2>
+  useEffect(()=>{
+    if(game.status==="finished"){
+      const t=setInterval(()=>{
+        setCountdown(c=>{
+          if(c<=1){
+            goHome();
+            return 0;
+          }
+          return c-1;
+        });
+      },1000);
+      return ()=>clearInterval(t);
+    }
+  },[game.status]);
 
-<div>
-Round {game.round}/3 | {game.scores[0]} - {game.scores[1]}
-</div>
+  return (
+  <div style={{padding:10, background:"#063", minHeight:"100vh", color:"#fff"}}>
 
-<div>💰 ₦{game.pot}</div>
+    <h2>🎮 WHOT GAME</h2>
 
-<div style={{textAlign:"center"}}>
-{game.turn===userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}
-</div>
+    <div>
+      Round {game.round}/3 | {game.scores[0]} - {game.scores[1]}
+    </div>
 
-{error && <div style={{color:"red"}}>{error}</div>}
+    <div>💰 ₦{game.pot}</div>
 
-<div style={{textAlign:"center"}}>
-  {Array.from({length:oppCards}).map((_,i)=>(
-    <img key={i} src={backCard} style={{width:40}}/>
-  ))}
-</div>
+    <div style={{textAlign:"center"}}>
+      {game.turn===userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}
+    </div>
 
-<div style={{textAlign:"center"}}>
-  {game.discard && <img src={drawCard(game.discard)} style={{width:70}}/>}
-  <button onClick={draw} disabled={game.turn!==userId}>
-    🃏 {game.deck.length}
-  </button>
-</div>
+    {error && <div style={{color:"red"}}>{error}</div>}
 
-<div>
-{(game.history||[]).slice(-7).map((h,i,arr)=>(
-  <div key={i}>{i===arr.length-1?"👉 ":"• "}{h}</div>
-))}
-</div>
+    <div style={{textAlign:"center"}}>
+      {Array.from({length:oppCards}).map((_,i)=>(
+        <img key={i} src={backCard} style={{width:40}}/>
+      ))}
+    </div>
 
-<div style={{display:"flex", flexWrap:"wrap"}}>
-  {hand.map((c,i)=>(
-    <img
-      key={i}
-      src={drawCard(c)}
-      style={{width:65, opacity: game.turn!==userId ? 0.6 : 1}}
-      onClick={()=>playCard(i)}
-    />
-  ))}
-</div>
+    <div style={{textAlign:"center"}}>
+      {game.discard && <img src={drawCard(game.discard)} style={{width:70}}/>}
+      <button onClick={draw} disabled={game.turn!==userId}>
+        🃏 {game.deck.length}
+      </button>
+    </div>
 
-{game.status==="finished" && (
-  <div style={{textAlign:"center"}}>
-    <h3>{isWinner?"🏆 YOU WON":"❌ YOU LOST"}</h3>
-    <p>{isWinner?`+₦${game.pot}`:`-₦${game.pot}`}</p>
-    <p>Redirecting in {countdown}s...</p>
+    <div>
+      {(game.history||[]).slice(-7).map((h,i,arr)=>(
+        <div key={i}>{i===arr.length-1?"👉 ":"• "}{h}</div>
+      ))}
+    </div>
+
+    <div style={{display:"flex", flexWrap:"wrap"}}>
+      {hand.map((c,i)=>(
+        <img
+          key={i}
+          src={drawCard(c)}
+          style={{width:65, opacity: game.turn!==userId ? 0.6 : 1}}
+          onClick={()=>playCard(i)}
+        />
+      ))}
+    </div>
+
+    {game.status==="finished" && (
+      <div style={{textAlign:"center"}}>
+        <h3>{isWinner?"🏆 YOU WON":"❌ YOU LOST"}</h3>
+        <p>{isWinner?`+₦${game.pot}`:`-₦${game.pot}`}</p>
+        <p>Redirecting in {countdown}s...</p>
+      </div>
+    )}
+
+    <button onClick={goHome}>Exit</button>
+
   </div>
-)}
-
-<button onClick={goHome}>Exit</button>
-
-</div>
-);
+  );
 }
