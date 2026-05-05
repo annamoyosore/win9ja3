@@ -1,5 +1,3 @@
-Version 2
-
 import { useEffect, useRef, useState } from "react";
 import {
   databases,
