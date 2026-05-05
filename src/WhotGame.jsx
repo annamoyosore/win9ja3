@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { databases, DATABASE_ID, account, Query } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
-const MATCH_COLLECTION = "matches";
 const WALLET_COLLECTION = "wallets";
 
 // 🔊 SOUND
@@ -47,175 +46,145 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
-// 🎴 CARD CACHE
-const cache = new Map();
-function drawCard(card) {
-  if (!card) return null;
-  if (cache.has(card)) return cache.get(card);
-
-  const c = document.createElement("canvas");
-  c.width = 70; c.height = 100;
-  const ctx = c.getContext("2d");
-
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0,0,70,100);
-  ctx.strokeRect(2,2,66,96);
-  ctx.fillText(card.slice(1),6,16);
-
-  const url = c.toDataURL();
-  cache.set(card,url);
-  return url;
-}
-
-const backCard = (() => {
-  const c = document.createElement("canvas");
-  c.width = 65; c.height = 100;
-  const ctx = c.getContext("2d");
-
-  ctx.fillStyle = "#111";
-  ctx.fillRect(0,0,65,100);
-  ctx.fillStyle = "#fff";
-  ctx.fillText("🂠",20,60);
-
-  return c.toDataURL();
-})();
+// 🎴 SAFE PARSE
 function parseGame(g){
+  if(!g) return null;
+
   const safe=(v,s)=>typeof v==="string"?v.split(s).filter(Boolean):[];
 
   let players = Array.isArray(g.players)?g.players:safe(g.players,",");
 
-  let handsRaw = safe(g.hands,"|");
-  let hands = handsRaw.length===2?handsRaw.map(p=>safe(p,",")):[[],[]];
-
-  let deck = safe(g.deck,",");
-
-  if(!deck.length || !hands[0].length){
-    const d = createDeck();
-    return {
-      ...g,
-      players,
-      hands:[d.splice(0,6),d.splice(0,6)],
-      deck:d,
-      discard:d.pop(),
-      turn:players[0],
-      scores:[0,0],
-      round:1,
-      history:[],
-      status:"playing",
-      pendingPick:0,
-      pot:Number(g.pot||0),
-      payoutDone:false
-    };
+  if(players.length < 2){
+    return { ...g, players, status:"waiting" };
   }
 
   return {
     ...g,
     players,
-    hands,
-    deck,
-    discard:g.discard,
-    turn:g.turn,
-    history:safe(g.history,"||"),
-    scores:safe(g.scores,",").map(Number),
-    round:Number(g.round||1),
-    status:g.status||"playing",
-    pendingPick:Number(g.pendingPick||0),
-    pot:Number(g.pot||0),
-    payoutDone:Boolean(g.payoutDone)
+    hands: safe(g.hands,"|").map(p=>safe(p,",")) || [[],[]],
+    deck: safe(g.deck,","),
+    discard: g.discard,
+    scores: safe(g.scores,",").map(Number) || [0,0],
+    round: Number(g.round||1),
+    status: g.status||"playing",
+    pot: Number(g.pot||0),
+    payoutDone: Boolean(g.payoutDone)
   };
 }
-
-function encodeGame(g){
-  return {
-    hands:g.hands.map(p=>p.join(",")).join("|"),
-    deck:g.deck.join(","),
-    discard:g.discard,
-    turn:g.turn,
-    history:g.history.slice(-20).join("||"),
-    scores:g.scores.join(","),
-    round:String(g.round),
-    status:g.status,
-    pendingPick:String(g.pendingPick),
-    pot:g.pot,
-    payoutDone:g.payoutDone,
-    winnerId:g.winnerId||null
-  };
-}
-
 export default function WhotGame({gameId, goHome}) {
+
   const [game,setGame]=useState(null);
   const [userId,setUserId]=useState(null);
+  const [error,setError]=useState("");
   const [countdown,setCountdown]=useState(5);
 
   const lock=useRef(false);
 
+  // 👤 LOAD USER
   useEffect(()=>{
-    account.get().then(u=>setUserId(u.$id));
+    account.get()
+      .then(u=>setUserId(u.$id))
+      .catch(()=>setError("Failed to get user"));
   },[]);
 
+  // 🎮 LOAD GAME
   useEffect(()=>{
     if(!gameId || !userId) return;
 
     const load=async()=>{
-      const g = await databases.getDocument(DATABASE_ID,GAME_COLLECTION,gameId);
-      setGame(parseGame(g));
+      try{
+        const g = await databases.getDocument(DATABASE_ID,GAME_COLLECTION,gameId);
+        setGame(parseGame(g));
+      }catch(e){
+        console.log(e);
+        setError("Game failed to load");
+      }
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      res=>setGame(parseGame(res.payload))
+      res=>{
+        try{
+          setGame(parseGame(res.payload));
+        }catch{
+          setError("Realtime update failed");
+        }
+      }
     );
 
     return ()=>unsub();
   },[gameId,userId]);
 
-  // ✅ SINGLE DECLARATION (FIXED)
+  // ✅ SAFE INDEX (ONLY ONCE)
   const myIdx = game?.players?.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
 
+  // 💰 PAYOUT
   async function payoutWinner(uid, amount){
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId",uid)]
-    );
-
-    if(res.documents.length){
-      const wallet = res.documents[0];
-      await databases.updateDocument(
+    try{
+      const res = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
-        wallet.$id,
-        { balance: Number(wallet.balance||0)+amount }
+        [Query.equal("userId",uid)]
       );
+
+      if(res.documents.length){
+        const wallet = res.documents[0];
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          wallet.$id,
+          { balance: Number(wallet.balance||0)+amount }
+        );
+      }
+    }catch(e){
+      console.log("Payout failed", e);
     }
   }
 
+  // 🏁 FINISH GAME
   async function finishGame(g, winner){
     if(g.payoutDone) return;
 
-    g.status="finished";
-    g.winnerId=g.players[winner];
+    try{
+      await payoutWinner(g.players[winner], g.pot);
 
-    await payoutWinner(g.players[winner], g.pot);
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame({...g, payoutDone:true})
-    );
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        {
+          ...g,
+          status:"finished",
+          winnerId:g.players[winner],
+          payoutDone:true
+        }
+      );
+    }catch(e){
+      console.log("Finish error", e);
+    }
   }
-if(!game || !userId) return <div>Loading...</div>;
+// ⛔ SAFE RETURNS (AFTER HOOKS)
+  if(error){
+    return <div style={{color:"red"}}>{error}</div>;
+  }
 
-  if(myIdx === -1) return <div>Joining game...</div>;
+  if(!game || !userId){
+    return <div>Loading game...</div>;
+  }
 
-  const hand = game.hands[myIdx] || [];
-  const oppCards = game.hands[oppIdx]?.length || 0;
-  const isWinner = game.winnerId===userId;
+  if(myIdx === -1){
+    return <div>Joining game...</div>;
+  }
 
+  const hand = game.hands?.[myIdx] || [];
+  const oppCards = game.hands?.[oppIdx]?.length || 0;
+  const isWinner = game.winnerId === userId;
+
+  // ⏳ REDIRECT TIMER
   useEffect(()=>{
     if(game.status==="finished"){
       const t=setInterval(()=>{
@@ -236,23 +205,15 @@ if(!game || !userId) return <div>Loading...</div>;
 
       <h2>🎮 WHOT GAME</h2>
 
-      <div>Round {game.round}/3 | {game.scores[0]} - {game.scores[1]}</div>
+      <div>Round {game.round}/3 | {game.scores?.[0]} - {game.scores?.[1]}</div>
       <div>💰 ₦{game.pot}</div>
 
       <div style={{textAlign:"center"}}>
-        {Array.from({length:oppCards}).map((_,i)=>(
-          <img key={i} src={backCard} style={{width:40}}/>
-        ))}
+        Opponent Cards: {oppCards}
       </div>
 
-      <div style={{textAlign:"center"}}>
-        {game.discard && <img src={drawCard(game.discard)} style={{width:70}}/>}
-      </div>
-
-      <div style={{display:"flex", flexWrap:"wrap"}}>
-        {hand.map((c,i)=>(
-          <img key={i} src={drawCard(c)} style={{width:65}}/>
-        ))}
+      <div style={{marginTop:10}}>
+        Your Cards: {hand.length}
       </div>
 
       {game.status==="finished" && (
@@ -264,6 +225,7 @@ if(!game || !userId) return <div>Loading...</div>;
       )}
 
       <button onClick={goHome}>Exit</button>
+
     </div>
   );
 }
