@@ -225,6 +225,7 @@ export default function WhotGame({ gameId, goHome }) {
 
   // 🆕 CHAT STATE
   const [showChat, setShowChat] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
 
   const payoutRef = useRef(false);
   const actionLock = useRef(false);
@@ -338,9 +339,8 @@ export default function WhotGame({ gameId, goHome }) {
 
     return () => unsub();
   }, [gameId, userId]);
- //=========================
 // =========================
-// 💰 PAYOUT EFFECT (FINAL FIXED)
+// 💰 PAYOUT EFFECT
 // =========================
 useEffect(() => {
   if (!game || !game.matchId) return;
@@ -349,14 +349,14 @@ useEffect(() => {
   if (!game.winnerId) return;
   if (game.payoutDone) return;
 
-  // 🔒 only winner triggers payout
+  // only winner runs payout
   if (userId !== game.winnerId) return;
 
   if (payoutRef.current) return;
 
   const runPayout = async () => {
     try {
-      // 🔹 GET FRESH MATCH (IMPORTANT)
+      // 🔹 GET FRESH MATCH
       const freshMatch = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -384,7 +384,7 @@ useEffect(() => {
 
       const wallet = res.documents[0];
 
-      // 🔒 LOCK FIRST (VERY IMPORTANT)
+      // 🔒 LOCK FIRST
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -415,6 +415,33 @@ useEffect(() => {
   runPayout();
 
 }, [game, userId]);
+
+// =========================
+// 💬 MESSAGE INDICATOR
+// =========================
+useEffect(() => {
+  if (!game?.matchId || !userId) return;
+
+  const unsub = databases.client.subscribe(
+    `databases.${DATABASE_ID}.collections.messages.documents`,
+    (res) => {
+      const msg = res.payload;
+
+      // only this match
+      if (msg.matchId !== game.matchId) return;
+
+      // ignore own messages
+      if (msg.senderId === userId) return;
+
+      // 🔴 mark unread
+      setHasUnread(true);
+    }
+  );
+
+  return () => unsub();
+}, [game?.matchId, userId]);
+
+// ⛔ MUST STAY AFTER ALL useEffect
 if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
@@ -587,11 +614,14 @@ return (
           </p>
 
           <button
-            style={styles.chatBtn}
-            onClick={() => setShowChat(true)}
-          >
-            💬 Message
-          </button>
+  style={styles.chatBtn}
+  onClick={() => {
+    setShowChat(true);
+    setHasUnread(false); // ✅ clear red dot
+  }}
+>
+  💬 Message {hasUnread && <span style={styles.badge}></span>}
+</button>
         </div>
 
         <div style={styles.center}>
