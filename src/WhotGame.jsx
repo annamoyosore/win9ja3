@@ -3,13 +3,10 @@ import {
   databases,
   DATABASE_ID,
   account,
-  Query,
-  ID
+  Query
 } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
-const MATCH_COLLECTION = "matches";
-const WALLET_COLLECTION = "wallets";
 
 // 🔊 SOUND
 function beep(freq = 200, duration = 200) {
@@ -57,54 +54,58 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
-// 🎴 DRAW CARD (FIXED CRASH)
+// 🎴 DRAW CARD (SAFE)
 function drawCard(cardStr) {
   if (!cardStr) return null;
 
-  const shape = cardStr[0];
-  const number = Number(cardStr.slice(1));
+  try {
+    const shape = cardStr[0];
+    const number = Number(cardStr.slice(1));
 
-  const c = document.createElement("canvas");
-  c.width = 70;
-  c.height = 100;
-  const ctx = c.getContext("2d");
+    const c = document.createElement("canvas");
+    c.width = 70;
+    c.height = 100;
+    const ctx = c.getContext("2d");
 
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, 70, 100);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, 70, 100);
 
-  ctx.strokeStyle = "#e11d48";
-  ctx.strokeRect(2, 2, 66, 96);
+    ctx.strokeStyle = "#e11d48";
+    ctx.strokeRect(2, 2, 66, 96);
 
-  ctx.fillStyle = "#e11d48";
-  ctx.font = "bold 14px Arial";
-  ctx.fillText(number, 6, 18);
+    ctx.fillStyle = "#e11d48";
+    ctx.font = "bold 14px Arial";
+    ctx.fillText(number, 6, 18);
 
-  const cx = 35, cy = 55;
+    const cx = 35, cy = 55;
 
-  if (shape === "c") {
-    ctx.beginPath(); // ✅ FIX
-    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-    ctx.fill();
+    if (shape === "c") {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (shape === "s") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+
+    if (shape === "t") {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - 12);
+      ctx.lineTo(cx - 12, cy + 12);
+      ctx.lineTo(cx + 12, cy + 12);
+      ctx.fill();
+    }
+
+    if (shape === "r") ctx.fillText("★", cx - 8, cy + 8);
+
+    if (shape === "x") {
+      ctx.fillRect(cx - 3, cy - 12, 6, 24);
+      ctx.fillRect(cx - 12, cy - 3, 24, 6);
+    }
+
+    return c.toDataURL();
+  } catch {
+    return "";
   }
-
-  if (shape === "s") ctx.fillRect(cx - 12, cy - 12, 24, 24);
-
-  if (shape === "t") {
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - 12);
-    ctx.lineTo(cx - 12, cy + 12);
-    ctx.lineTo(cx + 12, cy + 12);
-    ctx.fill();
-  }
-
-  if (shape === "r") ctx.fillText("★", cx - 8, cy + 8);
-
-  if (shape === "x") {
-    ctx.fillRect(cx - 3, cy - 12, 6, 24);
-    ctx.fillRect(cx - 12, cy - 3, 24, 6);
-  }
-
-  return c.toDataURL();
 }
 
 function drawBack() {
@@ -195,7 +196,8 @@ function parseGame(g) {
     status: g.status || "playing",
     pendingPick: Number(g.pendingPick || 0),
     pot: Number(g.pot || 0),
-    payoutDone: Boolean(g.payoutDone)
+    payoutDone: Boolean(g.payoutDone),
+    winnerId: g.winnerId || null
   };
 }
 
@@ -221,9 +223,9 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   const [userId, setUserId] = useState(null);
   const [countdown, setCountdown] = useState(5);
   const [unread, setUnread] = useState(0);
+  const [error, setError] = useState("");
 
   const lock = useRef(false);
-  const clearedRef = useRef(false);
 
   const name = (i) => (i === 0 ? "Player 1" : "Player 2");
 
@@ -239,7 +241,7 @@ export default function WhotGame({ gameId, goHome, openChat }) {
         const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
         setGame(parseGame(g));
       } catch (e) {
-        console.log("Game load error", e);
+        setError("Failed to load game");
       }
     };
 
@@ -257,46 +259,8 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     return () => unsub();
   }, [gameId, userId]);
 
-  // ✅ SAFE UNREAD
-  useEffect(() => {
-    if (!gameId || !userId) return;
-
-    databases.listDocuments(
-      DATABASE_ID,
-      "messages",
-      [
-        Query.equal("gameId", gameId),
-        Query.notEqual("sender", userId)
-      ]
-    )
-    .then(res => setUnread(res.total || 0))
-    .catch(() => setUnread(0));
-  }, [gameId, userId]);
-
-  // 🧹 SAFE CLEAR
-  async function clearMessages() {
-    if (clearedRef.current) return;
-    clearedRef.current = true;
-
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        "messages",
-        [Query.equal("gameId", gameId)]
-      );
-
-      await Promise.all(
-        res.documents.map(doc =>
-          databases.deleteDocument(DATABASE_ID, "messages", doc.$id)
-        )
-      );
-    } catch {}
-  }
-
   useEffect(() => {
     if (game?.status === "finished") {
-      clearMessages();
-
       const t = setInterval(() => {
         setCountdown(c => {
           if (c <= 1) {
@@ -311,69 +275,35 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     }
   }, [game?.status]);
 
+  if (error) return <div style={{ color: "red" }}>{error}</div>;
   if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
   if (myIdx === -1) return <div>Joining game...</div>;
 
   const oppIdx = myIdx === 0 ? 1 : 0;
+
   const hand = game.hands[myIdx] || [];
   const oppCards = game.hands[oppIdx]?.length || 0;
-async function endRound(g, winner) {
+
+  async function endRound(g, winner) {
     g = JSON.parse(JSON.stringify(g));
     g.scores[winner]++;
 
     if (g.scores[winner] === 2 && !g.payoutDone) {
-      const winnerId = g.players[winner];
-
-      // 💰 SAFE WALLET
-      try {
-        const res = await databases.listDocuments(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          [Query.equal("userId", winnerId)]
-        );
-
-        if (res.documents.length) {
-          const wallet = res.documents[0];
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            wallet.$id,
-            {
-              balance: Number(wallet.balance || 0) + Number(g.pot)
-            }
-          );
-        }
-      } catch {}
-
-      // 📜 MATCH SAVE SAFE
-      try {
-        await databases.createDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          ID.unique(),
-          {
-            gameId,
-            players: g.players.join(","),
-            winnerId,
-            pot: g.pot,
-            createdAt: new Date().toISOString()
-          }
-        );
-      } catch {}
-
       g.status = "finished";
-      g.winnerId = winnerId;
+      g.winnerId = g.players[winner];
       g.payoutDone = true;
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        encodeGame(g)
-      );
+      try {
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          encodeGame(g)
+        );
+      } catch {}
+
       return;
     }
 
@@ -383,12 +313,14 @@ async function endRound(g, winner) {
     g.deck = d;
     g.round++;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame(g)
-    );
+    try {
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        encodeGame(g)
+      );
+    } catch {}
   }
 
   async function playCard(i) {
@@ -408,9 +340,7 @@ async function endRound(g, winner) {
         card[0] !== top[0] &&
         card.slice(1) !== top.slice(1) &&
         card.slice(1) !== "14"
-      ) {
-        return;
-      }
+      ) return;
 
       g.hands[myIdx].splice(i,1);
       g.history.push(`${name(myIdx)} played ${card}`);
@@ -429,9 +359,7 @@ async function endRound(g, winner) {
         { ...encodeGame(g), discard: card, turn: next }
       );
 
-    } catch (e) {
-      console.log("play error", e);
-    }
+    } catch {}
 
     lock.current = false;
   }
@@ -463,16 +391,13 @@ async function endRound(g, winner) {
         { ...encodeGame(g), turn: next }
       );
 
-    } catch (e) {
-      console.log("draw error", e);
-    }
+    } catch {}
 
     lock.current = false;
   }
 
   const isWinner = game.winnerId === userId;
-
-  return (
+return (
     <div style={styles.bg}>
       <div style={styles.box}>
 
@@ -543,3 +468,37 @@ async function endRound(g, winner) {
     </div>
   );
 }
+
+// 🎨 STYLE (UNCHANGED + MESSAGE UI)
+const styles = {
+  bg:{minHeight:"100vh",background:"green",display:"flex",justifyContent:"center",alignItems:"center"},
+  box:{width:"95%",maxWidth:450,background:"#000000cc",padding:12,color:"#fff",borderRadius:10,position:"relative"},
+  row:{display:"flex",justifyContent:"space-between",marginBottom:6},
+  hand:{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",marginTop:10},
+  card:{width:65,cursor:"pointer"},
+  center:{display:"flex",justifyContent:"center",gap:10,marginTop:10},
+  marketBtn:{background:"gold",padding:10,borderRadius:8,border:"none"},
+  history:{maxHeight:80,overflowY:"auto",fontSize:12,marginTop:8,background:"#111",padding:6,borderRadius:6},
+
+  messageBar:{
+    display:"flex",
+    justifyContent:"space-between",
+    alignItems:"center",
+    background:"#111",
+    padding:"8px 12px",
+    borderRadius:8,
+    marginBottom:10,
+    fontSize:14,
+    cursor:"pointer",
+    border:"1px solid #222"
+  },
+
+  badge:{
+    background:"red",
+    color:"#fff",
+    padding:"2px 6px",
+    borderRadius:10,
+    fontSize:12,
+    fontWeight:"bold"
+  }
+};
