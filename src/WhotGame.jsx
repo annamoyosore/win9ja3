@@ -25,6 +25,7 @@ function beep(freq = 200, duration = 200) {
     gain.connect(ctx.destination);
 
     osc.start();
+
     gain.gain.setValueAtTime(0.3, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(
       0.001,
@@ -56,7 +57,7 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
-// 🎴 DRAW CARD
+// 🎴 DRAW CARD (FIXED CRASH)
 function drawCard(cardStr) {
   if (!cardStr) return null;
 
@@ -80,8 +81,14 @@ function drawCard(cardStr) {
 
   const cx = 35, cy = 55;
 
-  if (shape === "c") ctx.arc(cx, cy, 12, 0, Math.PI * 2), ctx.fill();
+  if (shape === "c") {
+    ctx.beginPath(); // ✅ FIX
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   if (shape === "s") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+
   if (shape === "t") {
     ctx.beginPath();
     ctx.moveTo(cx, cy - 12);
@@ -89,7 +96,9 @@ function drawCard(cardStr) {
     ctx.lineTo(cx + 12, cy + 12);
     ctx.fill();
   }
+
   if (shape === "r") ctx.fillText("★", cx - 8, cy + 8);
+
   if (shape === "x") {
     ctx.fillRect(cx - 3, cy - 12, 6, 24);
     ctx.fillRect(cx - 12, cy - 3, 24, 6);
@@ -99,22 +108,28 @@ function drawCard(cardStr) {
 }
 
 function drawBack() {
-  const c = document.createElement("canvas");
-  c.width = 65;
-  c.height = 100;
-  const ctx = c.getContext("2d");
+  try {
+    const c = document.createElement("canvas");
+    c.width = 65;
+    c.height = 100;
+    const ctx = c.getContext("2d");
 
-  ctx.fillStyle = "#111";
-  ctx.fillRect(0, 0, 65, 100);
+    ctx.fillStyle = "#111";
+    ctx.fillRect(0, 0, 65, 100);
 
-  ctx.strokeStyle = "#fff";
-  ctx.strokeRect(2, 2, 61, 96);
+    ctx.strokeStyle = "#fff";
+    ctx.strokeRect(2, 2, 61, 96);
 
-  ctx.fillStyle = "#fff";
-  ctx.fillText("🂠", 18, 60);
+    ctx.fillStyle = "#fff";
+    ctx.fillText("🂠", 18, 60);
 
-  return c.toDataURL();
+    return c.toDataURL();
+  } catch {
+    return "";
+  }
 }
+
+// 🛠 SAFE PARSE
 function parseGame(g) {
   const safe = (v, s) =>
     typeof v === "string" ? v.split(s).filter(Boolean) : [];
@@ -196,7 +211,8 @@ function encodeGame(g) {
     status: g.status,
     pendingPick: String(g.pendingPick || 0),
     pot: g.pot,
-    payoutDone: g.payoutDone
+    payoutDone: g.payoutDone,
+    winnerId: g.winnerId || null
   };
 }
 export default function WhotGame({ gameId, goHome, openChat }) {
@@ -212,46 +228,71 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   const name = (i) => (i === 0 ? "Player 1" : "Player 2");
 
   useEffect(() => {
-    account.get().then(u => setUserId(u.$id));
+    account.get().then(u => setUserId(u.$id)).catch(()=>{});
   }, []);
 
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      setGame(parseGame(g));
+      try {
+        const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
+        setGame(parseGame(g));
+      } catch (e) {
+        console.log("Game load error", e);
+      }
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      res => setGame(parseGame(res.payload))
+      res => {
+        try {
+          setGame(parseGame(res.payload));
+        } catch {}
+      }
     );
 
     return () => unsub();
   }, [gameId, userId]);
 
-  // 🧹 CLEAR MESSAGES
+  // ✅ SAFE UNREAD
+  useEffect(() => {
+    if (!gameId || !userId) return;
+
+    databases.listDocuments(
+      DATABASE_ID,
+      "messages",
+      [
+        Query.equal("gameId", gameId),
+        Query.notEqual("sender", userId)
+      ]
+    )
+    .then(res => setUnread(res.total || 0))
+    .catch(() => setUnread(0));
+  }, [gameId, userId]);
+
+  // 🧹 SAFE CLEAR
   async function clearMessages() {
     if (clearedRef.current) return;
     clearedRef.current = true;
 
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      "messages",
-      [Query.equal("gameId", gameId)]
-    );
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        "messages",
+        [Query.equal("gameId", gameId)]
+      );
 
-    await Promise.all(
-      res.documents.map(doc =>
-        databases.deleteDocument(DATABASE_ID, "messages", doc.$id)
-      )
-    );
+      await Promise.all(
+        res.documents.map(doc =>
+          databases.deleteDocument(DATABASE_ID, "messages", doc.$id)
+        )
+      );
+    } catch {}
   }
 
-  // 🏁 FINISH FLOW
   useEffect(() => {
     if (game?.status === "finished") {
       clearMessages();
@@ -273,50 +314,55 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
-  const oppIdx = myIdx === 0 ? 1 : 0;
+  if (myIdx === -1) return <div>Joining game...</div>;
 
+  const oppIdx = myIdx === 0 ? 1 : 0;
   const hand = game.hands[myIdx] || [];
   const oppCards = game.hands[oppIdx]?.length || 0;
-
-  // 🏁 END ROUND + 💰 PAYOUT + 📜 MATCH SAVE
-  async function endRound(g, winner) {
+async function endRound(g, winner) {
     g = JSON.parse(JSON.stringify(g));
     g.scores[winner]++;
 
     if (g.scores[winner] === 2 && !g.payoutDone) {
       const winnerId = g.players[winner];
 
-      // 💰 CREDIT WALLET
+      // 💰 SAFE WALLET
       try {
-        const wallet = await databases.getDocument(
+        const res = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
-          winnerId
+          [Query.equal("userId", winnerId)]
         );
 
-        await databases.updateDocument(
+        if (res.documents.length) {
+          const wallet = res.documents[0];
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            wallet.$id,
+            {
+              balance: Number(wallet.balance || 0) + Number(g.pot)
+            }
+          );
+        }
+      } catch {}
+
+      // 📜 MATCH SAVE SAFE
+      try {
+        await databases.createDocument(
           DATABASE_ID,
-          WALLET_COLLECTION,
-          winnerId,
+          MATCH_COLLECTION,
+          ID.unique(),
           {
-            balance: Number(wallet.balance || 0) + Number(g.pot)
+            gameId,
+            players: g.players.join(","),
+            winnerId,
+            pot: g.pot,
+            createdAt: new Date().toISOString()
           }
         );
       } catch {}
-
-      // 📜 SAVE MATCH
-      await databases.createDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        ID.unique(),
-        {
-          gameId,
-          players: g.players.join(","),
-          winnerId,
-          pot: g.pot,
-          createdAt: new Date().toISOString()
-        }
-      );
 
       g.status = "finished";
       g.winnerId = winnerId;
@@ -346,75 +392,80 @@ export default function WhotGame({ gameId, goHome, openChat }) {
   }
 
   async function playCard(i) {
-    if (lock.current) return;
+    if (lock.current || game.status === "finished") return;
     if (game.turn !== userId) return;
 
     lock.current = true;
 
-    const g = JSON.parse(JSON.stringify(game));
-    const card = g.hands[myIdx][i];
-    const top = g.discard;
+    try {
+      const g = JSON.parse(JSON.stringify(game));
+      const card = g.hands[myIdx][i];
+      const top = g.discard;
 
-    if (
-      card[0] !== top[0] &&
-      card.slice(1) !== top.slice(1) &&
-      card.slice(1) !== "14"
-    ) {
-      lock.current = false;
-      return;
+      if (!top) return;
+
+      if (
+        card[0] !== top[0] &&
+        card.slice(1) !== top.slice(1) &&
+        card.slice(1) !== "14"
+      ) {
+        return;
+      }
+
+      g.hands[myIdx].splice(i,1);
+      g.history.push(`${name(myIdx)} played ${card}`);
+
+      if (!g.hands[myIdx].length) {
+        await endRound(g, myIdx);
+        return;
+      }
+
+      const next = g.players[oppIdx];
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        { ...encodeGame(g), discard: card, turn: next }
+      );
+
+    } catch (e) {
+      console.log("play error", e);
     }
-
-    g.hands[myIdx].splice(i,1);
-    g.history.push(`${name(myIdx)} played ${card}`);
-
-    if (!g.hands[myIdx].length) {
-      await endRound(g, myIdx);
-      lock.current = false;
-      return;
-    }
-
-    const next = g.players[oppIdx];
-
-    setGame({...g, discard:card, turn:next});
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      { ...encodeGame(g), discard: card, turn: next }
-    );
 
     lock.current = false;
   }
 
   async function draw() {
-    if (lock.current) return;
+    if (lock.current || game.status === "finished") return;
     if (game.turn !== userId) return;
 
     lock.current = true;
 
-    const g = JSON.parse(JSON.stringify(game));
+    try {
+      const g = JSON.parse(JSON.stringify(game));
 
-    if (!g.deck.length) {
-      const win = g.hands[0].length <= g.hands[1].length ? 0 : 1;
-      await endRound(g, win);
-      lock.current = false;
-      return;
+      if (!g.deck.length) {
+        const win = g.hands[0].length <= g.hands[1].length ? 0 : 1;
+        await endRound(g, win);
+        return;
+      }
+
+      g.hands[myIdx].push(g.deck.pop());
+      g.history.push(`${name(myIdx)} picked`);
+
+      const next = g.players[oppIdx];
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        { ...encodeGame(g), turn: next }
+      );
+
+    } catch (e) {
+      console.log("draw error", e);
     }
-
-    g.hands[myIdx].push(g.deck.pop());
-    g.history.push(`${name(myIdx)} picked`);
-
-    const next = g.players[oppIdx];
-
-    setGame({...g,turn:next});
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      { ...encodeGame(g), turn: next }
-    );
 
     lock.current = false;
   }
