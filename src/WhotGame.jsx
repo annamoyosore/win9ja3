@@ -78,7 +78,6 @@ function decodeCard(str) {
     number: Number(str.slice(1))
   };
 }
-
 const cache = new Map();
 
 function drawCard(card) {
@@ -149,6 +148,7 @@ function drawBack() {
 
   return c.toDataURL();
 }
+
 function parseGame(g) {
   const split = (v, s) => typeof v === "string" ? v.split(s).filter(Boolean) : [];
 
@@ -171,7 +171,6 @@ function parseGame(g) {
     opponentName: g.opponentName || "Player 2"
   };
 }
-
 function encodeGame(g) {
   return {
     hands: g.hands.map(p => p.join(",")).join("|"),
@@ -186,7 +185,6 @@ function encodeGame(g) {
   };
 }
 
-// 🔥 CRITICAL FIX
 function ensureGameReady(g) {
   if (g.status === "finished") return g;
 
@@ -210,6 +208,7 @@ function ensureGameReady(g) {
 function pushHistory(g, text) {
   return [...(g.history || []), text].slice(-10);
 }
+
 export default function WhotGame({ gameId, goHome }) {
 
   const [game, setGame] = useState(null);
@@ -218,6 +217,7 @@ export default function WhotGame({ gameId, goHome }) {
   const [error, setError] = useState("");
   const [showWin, setShowWin] = useState(false);
 
+  const payoutRef = useRef(false);
   const actionLock = useRef(false);
 
   function invalidMove(msg) {
@@ -225,8 +225,7 @@ export default function WhotGame({ gameId, goHome }) {
     setError(msg);
     setTimeout(() => setError(""), 1200);
   }
-
-  useEffect(() => {
+useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
 
@@ -278,7 +277,8 @@ export default function WhotGame({ gameId, goHome }) {
   const hand = game.hands[myIdx] || [];
   const oppCards = game.hands[oppIdx]?.length || 0;
   const top = decodeCard(game.discard);
-async function playCard(i) {
+
+  async function playCard(i) {
     if (actionLock.current || game.status === "finished") return;
     if (game.turn !== userId) return invalidMove("Not your turn");
 
@@ -358,10 +358,8 @@ async function playCard(i) {
   }
 
   async function drawMarket() {
-    if (actionLock.current || game.status === "finished") return;
+    if (game.status === "finished") return;
     if (game.turn !== userId) return invalidMove("Wait your turn");
-
-    actionLock.current = true;
 
     const g = JSON.parse(JSON.stringify(game));
     let count = g.pendingPick > 0 ? g.pendingPick : 1;
@@ -379,13 +377,12 @@ async function playCard(i) {
       ...encodeGame(g),
       turn: g.players[oppIdx]
     });
-
-    actionLock.current = false;
   }
 
   return (
     <div style={styles.bg}>
       <div style={styles.box}>
+
         {error && <div style={styles.error}>{error}</div>}
 
         <div style={styles.row}>
