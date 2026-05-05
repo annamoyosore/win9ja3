@@ -7,6 +7,7 @@ import {
 } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
+const WALLET_COLLECTION = "wallets";
 
 // =========================
 // 🔊 SOUND
@@ -59,45 +60,59 @@ function createDeck() {
 }
 
 // =========================
-// PARSE
+// 🧠 INIT GAME
+// =========================
+function initGame(players, pot = 0) {
+  const deck = createDeck();
+
+  const hands = [
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ];
+
+  const discard = deck.pop();
+
+  return {
+    players,
+    hands,
+    deck,
+    discard,
+    turn: players[0],
+    pendingPick: 0,
+    history: [],
+    scores: [0, 0],
+    round: 1,
+    status: "playing",
+    pot: Number(pot || 0),
+    payoutDone: false
+  };
+}
+
+// =========================
+// SAFE PARSE
 // =========================
 function parseGame(g) {
   const safeSplit = (v, sep) =>
     typeof v === "string" ? v.split(sep).filter(Boolean) : [];
 
-  let players = Array.isArray(g.players)
+  const players = Array.isArray(g.players)
     ? g.players
     : safeSplit(g.players, ",");
 
-  if (players.length < 2) players = ["p1", "p2"]; // 🔥 safety
-
-  let handsRaw = safeSplit(g.hands, "|");
-  let hands =
-    handsRaw.length === 2
-      ? handsRaw.map(p => safeSplit(p, ","))
-      : [[], []];
-
+  let hands = safeSplit(g.hands, "|").map(p => safeSplit(p, ","));
   let deck = safeSplit(g.deck, ",");
 
-  // 🔥 HARD FIX + RETURN FLAG
-  if (!deck.length || !hands[0].length || !hands[1].length || !g.discard) {
-    const newDeck = createDeck();
-    hands = [newDeck.splice(0, 6), newDeck.splice(0, 6)];
-
-    return {
-      ...g,
-      players,
-      hands,
-      deck: newDeck,
-      discard: newDeck.pop(),
-      turn: players[0],
-      pendingPick: 0,
-      history: [],
-      scores: [0, 0],
-      round: 1,
-      status: "playing",
-      _needsSave: true
-    };
+  // 🔥 AUTO FIX BROKEN GAME
+  if (
+    players.length < 2 ||
+    !deck.length ||
+    hands.length < 2 ||
+    !hands[0]?.length ||
+    !hands[1]?.length ||
+    !g.discard
+  ) {
+    const fixed = initGame(players, g.pot);
+    return { ...g, ...fixed };
   }
 
   return {
@@ -111,24 +126,24 @@ function parseGame(g) {
     history: safeSplit(g.history, "||"),
     scores: safeSplit(g.scores, ",").map(Number) || [0, 0],
     round: Number(g.round || 1),
-    status: g.status || "playing"
+    status: g.status || "playing",
+    pot: Number(g.pot || 0),
+    payoutDone: Boolean(g.payoutDone)
   };
 }
 
-// =========================
-// ENCODE
-// =========================
 function encodeGame(g) {
   return {
     hands: g.hands.map(p => p.join(",")).join("|"),
     deck: g.deck.join(","),
     discard: g.discard,
     turn: g.turn,
-    pendingPick: String(g.pendingPick || 0),
+    pendingPick: String(g.pendingPick),
     history: (g.history || []).slice(-20).join("||"),
     scores: g.scores.join(","),
     round: String(g.round),
-    status: g.status
+    status: g.status,
+    pot: g.pot
   };
 }
 
@@ -140,10 +155,8 @@ export default function WhotGame({ gameId, goHome }) {
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
   const [error, setError] = useState("");
-
   const actionLock = useRef(false);
-
-  function invalidMove(msg) {
+function invalidMove(msg) {
     beep(120, 300);
     setError(msg);
     setTimeout(() => setError(""), 1000);
@@ -158,28 +171,14 @@ export default function WhotGame({ gameId, goHome }) {
 
     const load = async () => {
       const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-      const parsed = parseGame(g);
-
-      setGame(parsed);
-
-      // 🔥 SAVE AUTO-FIXED GAME
-      if (parsed._needsSave) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          encodeGame(parsed)
-        );
-      }
+      setGame(parseGame(g));
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        setGame(parseGame(res.payload));
-      }
+      (res) => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
@@ -193,30 +192,30 @@ export default function WhotGame({ gameId, goHome }) {
   const hand = game.hands[myIdx] || [];
   const oppCards = game.hands[oppIdx]?.length || 0;
 
-  // =========================
-  // ROUND END
-  // =========================
   async function endRound(g, winnerIdx) {
     g = JSON.parse(JSON.stringify(g));
-
     g.scores[winnerIdx]++;
 
+    // GAME FINISH
     if (g.round >= 3) {
+      const finalWinner =
+        g.scores[0] > g.scores[1] ? 0 : 1;
+
       await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
         ...encodeGame(g),
         status: "finished",
-        winnerId: g.players[winnerIdx]
+        winnerId: g.players[finalWinner]
       });
       return;
     }
 
+    // NEXT ROUND
     const deck = createDeck();
     g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
     g.discard = deck.pop();
     g.deck = deck;
+    g.pendingPick = 0;
     g.round++;
-
-    setGame(g); // 🔥 instant UI update
 
     await databases.updateDocument(
       DATABASE_ID,
@@ -226,9 +225,6 @@ export default function WhotGame({ gameId, goHome }) {
     );
   }
 
-  // =========================
-  // PLAY CARD
-  // =========================
   async function playCard(i) {
     if (actionLock.current) return;
     if (game.turn !== userId) return invalidMove("Not your turn");
@@ -239,27 +235,25 @@ export default function WhotGame({ gameId, goHome }) {
     const card = g.hands[myIdx][i];
     const top = g.discard;
 
-    const valid =
-      card[0] === top[0] ||
-      card.slice(1) === top.slice(1) ||
-      card.slice(1) === "14";
-
-    if (!valid) {
+    if (
+      card[0] !== top[0] &&
+      card.slice(1) !== top.slice(1) &&
+      card.slice(1) !== "14"
+    ) {
       actionLock.current = false;
       return invalidMove("Invalid move");
     }
 
     g.hands[myIdx].splice(i, 1);
+    g.history = [...(g.history || []), `You played ${card}`];
 
-    g.history = [...(g.history || []), `${userId} played ${card}`];
+    let nextTurn = g.players[oppIdx];
 
     if (!g.hands[myIdx].length) {
       await endRound(g, myIdx);
       actionLock.current = false;
       return;
     }
-
-    const nextTurn = g.players[oppIdx];
 
     setGame({ ...g, discard: card, turn: nextTurn });
 
@@ -272,9 +266,6 @@ export default function WhotGame({ gameId, goHome }) {
     actionLock.current = false;
   }
 
-  // =========================
-  // DRAW
-  // =========================
   async function drawMarket() {
     if (actionLock.current) return;
     if (game.turn !== userId) return invalidMove("Wait your turn");
@@ -283,6 +274,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     const g = JSON.parse(JSON.stringify(game));
 
+    // MARKET EMPTY → DECIDE WINNER
     if (!g.deck.length) {
       const winner =
         g.hands[0].length <= g.hands[1].length ? 0 : 1;
@@ -293,8 +285,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
 
     g.hands[myIdx].push(g.deck.pop());
-
-    g.history = [...(g.history || []), `${userId} picked card`];
+    g.history = [...(g.history || []), `You picked a card`];
 
     const nextTurn = g.players[oppIdx];
 
@@ -308,41 +299,125 @@ export default function WhotGame({ gameId, goHome }) {
     actionLock.current = false;
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
-    <div style={{ padding: 10 }}>
-      <h2>WHOT GAME</h2>
+    <div style={styles.bg}>
+      <div style={styles.box}>
 
-      {error && <div style={{ color: "red" }}>{error}</div>}
+        <h2>🎮 WHOT GAME</h2>
 
-      <div>Opponent Cards: {oppCards}</div>
+        {error && <div style={styles.error}>{error}</div>}
 
-      <div>
-        Round {game.round}/3 | {game.scores[0]} - {game.scores[1]}
-      </div>
+        <div style={styles.row}>
+          <span>You</span>
+          <span>VS</span>
+          <span>Opponent</span>
+        </div>
 
-      <div>
-        Top: {game.discard}
-        <button onClick={drawMarket}>Draw ({game.deck.length})</button>
-      </div>
+        <div style={{ textAlign: "center" }}>
+          Opponent Cards: {oppCards}
+        </div>
 
-      <div>
-        {(game.history || []).slice(-5).map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
-      </div>
+        <div style={styles.row}>
+          <span>Round {game.round}/3</span>
+          <span>{game.scores[0]} - {game.scores[1]}</span>
+        </div>
 
-      <div>
-        {hand.map((c, i) => (
-          <button key={i} onClick={() => playCard(i)}>
-            {c}
+        <div style={styles.center}>
+          <div style={styles.card}>{game.discard}</div>
+          <button style={styles.marketBtn} onClick={drawMarket}>
+            🃏 {game.deck.length}
           </button>
-        ))}
-      </div>
+        </div>
 
-      <button onClick={goHome}>Exit</button>
+        <div style={styles.history}>
+          {(game.history || []).slice(-5).map((h, i) => (
+            <div key={i}>{h}</div>
+          ))}
+        </div>
+
+        <div style={styles.hand}>
+          {hand.map((c, i) => (
+            <div
+              key={i}
+              style={styles.card}
+              onClick={() => playCard(i)}
+            >
+              {c}
+            </div>
+          ))}
+        </div>
+
+        <button onClick={goHome}>Exit</button>
+      </div>
     </div>
   );
 }
+
+// =========================
+// STYLES
+// =========================
+const styles = {
+  bg: {
+    minHeight: "100vh",
+    background: "green",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center"
+  },
+  box: {
+    width: "95%",
+    maxWidth: 450,
+    background: "#000000cc",
+    padding: 12,
+    color: "#fff",
+    borderRadius: 10
+  },
+  row: {
+    display: "flex",
+    justifyContent: "space-between",
+    marginBottom: 6
+  },
+  hand: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
+    marginTop: 10
+  },
+  card: {
+    width: 60,
+    height: 80,
+    background: "#fff",
+    color: "#000",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    cursor: "pointer"
+  },
+  center: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+    marginTop: 10
+  },
+  marketBtn: {
+    background: "gold",
+    padding: 10,
+    borderRadius: 8,
+    border: "none"
+  },
+  history: {
+    maxHeight: 80,
+    overflowY: "auto",
+    fontSize: 12,
+    marginTop: 8,
+    background: "#111",
+    padding: 6
+  },
+  error: {
+    background: "red",
+    padding: 6,
+    textAlign: "center",
+    marginBottom: 6
+  }
+};
