@@ -30,9 +30,6 @@ async function createGame(match, opponentId) {
   );
 }
 
-// =========================
-// COMPONENT
-// =========================
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
@@ -145,7 +142,6 @@ export default function Lobby({ goGame, back }) {
     const runningMatches = activeMatches.filter(
       (m) => m.status !== "finished"
     );
-
     return runningMatches.length < 7;
   }
 
@@ -176,16 +172,11 @@ export default function Lobby({ goGame, back }) {
         throw new Error("Insufficient balance");
       }
 
-      // =========================
-      // 💰 CALCULATE POT
-      // =========================
       const total = fresh.stake * 2;
       const adminCut = Math.floor(total * 0.1);
       const finalPot = total - adminCut;
 
-      // =========================
-      // 💼 PAY ADMIN
-      // =========================
+      // pay admin
       const adminRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -205,9 +196,6 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
-      // =========================
-      // 🧾 UPDATE MATCH
-      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -219,9 +207,6 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // =========================
-      // 🎮 CREATE GAME
-      // =========================
       const game = await createGame(fresh, user.$id);
 
       await databases.updateDocument(
@@ -322,7 +307,12 @@ export default function Lobby({ goGame, back }) {
               {turnLabel && <p>{turnLabel}</p>}
             </div>
 
-            {m.gameId ? (
+            {/* ✅ FIXED SECTION */}
+            {m.status === "finished" ? (
+              <button style={styles.finishedBtn} disabled>
+                ✅ Finished
+              </button>
+            ) : m.gameId ? (
               <button
                 style={styles.resumeBtn}
                 onClick={() => goGame(m.gameId, m.stake)}
@@ -379,5 +369,6 @@ const styles = {
     justifyContent: "space-between"
   },
   joinBtn: { background: "gold", padding: 8 },
-  resumeBtn: { background: "green", padding: 8, color: "#fff" }
+  resumeBtn: { background: "green", padding: 8, color: "#fff" },
+  finishedBtn: { background: "#16a34a", padding: 8, color: "#fff" }
 };
