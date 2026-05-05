@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   databases,
   DATABASE_ID,
@@ -8,12 +8,13 @@ import {
 } from "../lib/appwrite";
 
 const CHAT_COLLECTION = "messages";
-const GAME_COLLECTION = "games";
 
-export default function Messages({ matchId, onClose }) {
+export default function Messages({ matchId, players = [], onClose }) {
   const [userId, setUserId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
+
+  const endRef = useRef(null);
 
   // =========================
   // LOAD USER
@@ -23,7 +24,15 @@ export default function Messages({ matchId, onClose }) {
   }, []);
 
   // =========================
-  // LOAD + REALTIME
+  // LABEL HELPER
+  // =========================
+  const getLabel = (sender) => {
+    const idx = players.indexOf(sender);
+    return idx === 0 ? "Player 1" : idx === 1 ? "Player 2" : "Player";
+  };
+
+  // =========================
+  // LOAD LAST 3 + REALTIME
   // =========================
   useEffect(() => {
     if (!matchId) return;
@@ -56,8 +65,12 @@ export default function Messages({ matchId, onClose }) {
         if (m.matchId !== matchId) return;
 
         setMessages(prev => {
+          // جلوگیری duplicate
+          const exists = prev.find(x => x.$id === m.$id);
+          if (exists) return prev;
+
           const updated = [...prev, m];
-          return updated.slice(-3); // keep last 3
+          return updated.slice(-3);
         });
       }
     );
@@ -66,56 +79,22 @@ export default function Messages({ matchId, onClose }) {
   }, [matchId]);
 
   // =========================
-  // TRIM CHAT WHEN GAME ENDS
+  // AUTO SCROLL
   // =========================
   useEffect(() => {
-    if (!matchId) return;
-
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
-      async (res) => {
-        const g = res.payload;
-
-        if (g.matchId !== matchId) return;
-
-        if (g.status === "finished") {
-          try {
-            const msgs = await databases.listDocuments(
-              DATABASE_ID,
-              CHAT_COLLECTION,
-              [
-                Query.equal("matchId", matchId),
-                Query.orderDesc("$createdAt")
-              ]
-            );
-
-            const toDelete = msgs.documents.slice(3); // keep last 3
-
-            await Promise.all(
-              toDelete.map(m =>
-                databases.deleteDocument(
-                  DATABASE_ID,
-                  CHAT_COLLECTION,
-                  m.$id
-                )
-              )
-            );
-
-          } catch (e) {
-            console.error("Chat trim failed:", e);
-          }
-        }
-      }
-    );
-
-    return () => unsub();
-  }, [matchId]);
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // =========================
   // SEND MESSAGE
   // =========================
   async function send() {
-    if (!text.trim() || !userId) return;
+    if (!text.trim()) return;
+
+    if (!matchId || !userId) {
+      console.warn("Missing matchId or userId");
+      return;
+    }
 
     try {
       await databases.createDocument(
@@ -135,20 +114,21 @@ export default function Messages({ matchId, onClose }) {
     }
   }
 
+  // =========================
+  // CLOSE HANDLER
+  // =========================
+  function handleClose() {
+    if (onClose) onClose();
+  }
+
   return (
-    <div
-      style={styles.overlay}
-      onClick={() => onClose?.()} // 👈 click outside closes
-    >
-      <div
-        style={styles.box}
-        onClick={(e) => e.stopPropagation()} // 👈 prevent close inside
-      >
+    <div style={styles.overlay}>
+      <div style={styles.box}>
 
         {/* HEADER */}
         <div style={styles.header}>
           <span>💬 Match Chat</span>
-          <button onClick={() => onClose?.()}>✖</button>
+          <button onClick={handleClose}>✖</button>
         </div>
 
         {/* MESSAGES */}
@@ -161,6 +141,12 @@ export default function Messages({ matchId, onClose }) {
                 marginBottom: 6
               }}
             >
+              <div style={{ fontSize: 10, opacity: 0.6 }}>
+                {m.sender === userId
+                  ? "You"
+                  : getLabel(m.sender)}
+              </div>
+
               <span
                 style={{
                   background: m.sender === userId ? "#16a34a" : "#2563eb",
@@ -173,6 +159,8 @@ export default function Messages({ matchId, onClose }) {
               </span>
             </div>
           ))}
+
+          <div ref={endRef} />
         </div>
 
         {/* INPUT */}
