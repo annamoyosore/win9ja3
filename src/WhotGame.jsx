@@ -141,12 +141,13 @@ function encodeGame(g){
     winnerId:g.winnerId||null
   };
 }
-
 export default function WhotGame({gameId, goHome}) {
+
   const [game,setGame]=useState(null);
   const [userId,setUserId]=useState(null);
   const [countdown,setCountdown]=useState(5);
   const [error,setError]=useState("");
+  const [fatalError,setFatalError]=useState("");
 
   const lock=useRef(false);
 
@@ -157,9 +158,33 @@ export default function WhotGame({gameId, goHome}) {
   useEffect(()=>{
     if(!gameId || !userId) return;
 
-    const load=async()=>{
-      const g = await databases.getDocument(DATABASE_ID,GAME_COLLECTION,gameId);
-      setGame(parseGame(g));
+    const load = async () => {
+      try {
+        const g = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId
+        );
+
+        const parsed = parseGame(g);
+
+        if (!parsed.players.includes(userId)) {
+          setFatalError("🚫 You are not part of this game");
+          return;
+        }
+
+        if (!parsed.discard || !parsed.players.length) {
+          setFatalError("⚠️ Game corrupted");
+          return;
+        }
+
+        setGame(parsed);
+
+      } catch (err) {
+        if (err?.code === 404) setFatalError("❌ Game not found");
+        else if (err?.code === 401) setFatalError("🔒 Permission denied");
+        else setFatalError("⚠️ Failed to load game");
+      }
     };
 
     load();
@@ -172,15 +197,28 @@ export default function WhotGame({gameId, goHome}) {
     return ()=>unsub();
   },[gameId,userId]);
 
-  // ✅ SAFE RENDER GUARD
-  if(!game || !userId) return <div>Loading...</div>;
+  if (fatalError) {
+    return (
+      <div style={{padding:20,textAlign:"center",color:"red"}}>
+        <h3>{fatalError}</h3>
+        <button onClick={goHome}>Go Back</button>
+      </div>
+    );
+  }
+
+  if(!game || !userId) return <div>Loading game...</div>;
 
   const myIdx = game.players.indexOf(userId);
   if(myIdx === -1) return <div>Joining game...</div>;
 
-  const oppIdx = myIdx === 0 ? 1 : 0;
+  const oppIdx = myIdx===0?1:0;
 
-  // 💰 SAFE PAYOUT
+  function showError(msg){
+    setError(msg);
+    beep(120,80);
+    setTimeout(()=>setError(""),700);
+  }
+
   async function safeFinishGame(g, winner){
     if(g.payoutDone) return;
 
@@ -199,7 +237,6 @@ export default function WhotGame({gameId, goHome}) {
 
     if(res.documents.length){
       const wallet = res.documents[0];
-
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -234,8 +271,7 @@ export default function WhotGame({gameId, goHome}) {
       );
     }
   }
-
-  async function endRound(g, winner){
+async function endRound(g, winner){
     g.scores[winner]++;
     g.history.push(`P${winner+1} won round ${g.round}`);
 
@@ -259,12 +295,6 @@ export default function WhotGame({gameId, goHome}) {
     );
   }
 
-  function showError(msg){
-    setError(msg);
-    beep(120,80);
-    setTimeout(()=>setError(""),700);
-  }
-
   async function playCard(i){
     if(lock.current) return;
 
@@ -272,8 +302,6 @@ export default function WhotGame({gameId, goHome}) {
       showError("Wait your turn");
       return;
     }
-
-    if(game.status==="finished") return;
 
     lock.current=true;
 
@@ -299,10 +327,10 @@ export default function WhotGame({gameId, goHome}) {
 
       let msg=`P${myIdx+1} played ${card}`;
 
-      if(num==="1"){ next=g.players[myIdx]; msg+=" (again)"; }
-      if(num==="2"){ g.pendingPick+=2; msg+=" (+2)"; }
-      if(num==="8"){ next=g.players[myIdx]; msg+=" (skip)"; }
-      if(num==="14"){ g.pendingPick+=1; msg+=" (market)"; }
+      if(num==="1"){ next=g.players[myIdx]; }
+      if(num==="2"){ g.pendingPick+=2; }
+      if(num==="8"){ next=g.players[myIdx]; }
+      if(num==="14"){ g.pendingPick+=1; }
 
       g.history.push(msg);
 
@@ -341,7 +369,6 @@ export default function WhotGame({gameId, goHome}) {
         const p2=g.hands[1].length;
 
         if(p1===p2){
-          g.history.push("Round draw - market finished");
           const d=createDeck();
           g.hands=[d.splice(0,6),d.splice(0,6)];
           g.discard=d.pop();
@@ -353,7 +380,6 @@ export default function WhotGame({gameId, goHome}) {
         }
 
         const win=p1<p2?0:1;
-        g.history.push(`P${win+1} wins (market finished)`);
         await endRound(g,win);
         return;
       }
@@ -364,7 +390,6 @@ export default function WhotGame({gameId, goHome}) {
         if(g.deck.length) g.hands[myIdx].push(g.deck.pop());
       }
 
-      g.history.push(`P${myIdx+1} picked ${picks}`);
       g.pendingPick=0;
 
       await databases.updateDocument(
@@ -387,10 +412,7 @@ export default function WhotGame({gameId, goHome}) {
     if(game.status==="finished"){
       const t=setInterval(()=>{
         setCountdown(c=>{
-          if(c<=1){
-            goHome();
-            return 0;
-          }
+          if(c<=1){ goHome(); return 0; }
           return c-1;
         });
       },1000);
