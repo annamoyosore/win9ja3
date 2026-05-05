@@ -417,7 +417,7 @@ useEffect(() => {
 }, [game, userId]);
 
 // =========================
-// 💬 MESSAGE INDICATOR
+// 💬 MESSAGE INDICATOR (FIXED)
 // =========================
 useEffect(() => {
   if (!game?.matchId || !userId) return;
@@ -425,22 +425,31 @@ useEffect(() => {
   const unsub = databases.client.subscribe(
     `databases.${DATABASE_ID}.collections.messages.documents`,
     (res) => {
+
+      // 🛑 ADD IT HERE (FIRST LINE INSIDE HANDLER)
+      if (actionLock.current) return;
+
+      // ✅ only new messages
+      if (res.events?.[0] !== "databases.*.collections.*.documents.*.create") return;
+
       const msg = res.payload;
+
+      if (!msg?.matchId) return;
 
       // only this match
       if (msg.matchId !== game.matchId) return;
 
-      // ignore own messages
+      // ignore your own messages
       if (msg.senderId === userId) return;
 
-      // 🔴 mark unread
+      console.log("📩 New message detected");
+
       setHasUnread(true);
     }
   );
 
   return () => unsub();
 }, [game?.matchId, userId]);
-
 // ⛔ MUST STAY AFTER ALL useEffect
 if (!game || !userId) return <div>Loading...</div>;
 
