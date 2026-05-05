@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { databases, DATABASE_ID, account, Query } from "./lib/appwrite";
+import { databases, DATABASE_ID, account } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
-const WALLET_COLLECTION = "wallets";
 
 // 🔊 SOUND
 function beep(freq = 200, duration = 120) {
@@ -67,8 +66,7 @@ function parseGame(g){
     scores: safe(g.scores,",").map(Number) || [0,0],
     round: Number(g.round||1),
     status: g.status||"playing",
-    pot: Number(g.pot||0),
-    payoutDone: Boolean(g.payoutDone)
+    pot: Number(g.pot||0)
   };
 }
 export default function WhotGame({gameId, goHome}) {
@@ -120,54 +118,7 @@ export default function WhotGame({gameId, goHome}) {
   // ✅ SAFE INDEX (ONLY ONCE)
   const myIdx = game?.players?.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
-
-  // 💰 PAYOUT
-  async function payoutWinner(uid, amount){
-    try{
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId",uid)]
-      );
-
-      if(res.documents.length){
-        const wallet = res.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          wallet.$id,
-          { balance: Number(wallet.balance||0)+amount }
-        );
-      }
-    }catch(e){
-      console.log("Payout failed", e);
-    }
-  }
-
-  // 🏁 FINISH GAME
-  async function finishGame(g, winner){
-    if(g.payoutDone) return;
-
-    try{
-      await payoutWinner(g.players[winner], g.pot);
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...g,
-          status:"finished",
-          winnerId:g.players[winner],
-          payoutDone:true
-        }
-      );
-    }catch(e){
-      console.log("Finish error", e);
-    }
-  }
-// ⛔ SAFE RETURNS (AFTER HOOKS)
+// ⛔ SAFE RETURNS
   if(error){
     return <div style={{color:"red"}}>{error}</div>;
   }
