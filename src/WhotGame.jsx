@@ -33,7 +33,66 @@ function beep(freq = 200, duration = 200) {
   } catch {}
 }
 
-// 🎴 DECK
+// 🎴 DRAW CARD UI
+function drawCard(cardStr){
+  if(!cardStr) return "";
+
+  const shape = cardStr[0];
+  const number = Number(cardStr.slice(1));
+
+  const c = document.createElement("canvas");
+  c.width=70; c.height=100;
+  const ctx = c.getContext("2d");
+
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,70,100);
+
+  ctx.strokeStyle="#e11d48";
+  ctx.strokeRect(2,2,66,96);
+
+  ctx.fillStyle="#e11d48";
+  ctx.font="bold 14px Arial";
+  ctx.fillText(number,6,18);
+
+  const cx=35,cy=55;
+
+  if(shape==="c"){ctx.beginPath();ctx.arc(cx,cy,12,0,Math.PI*2);ctx.fill();}
+  if(shape==="s") ctx.fillRect(cx-12,cy-12,24,24);
+
+  if(shape==="t"){
+    ctx.beginPath();
+    ctx.moveTo(cx,cy-12);
+    ctx.lineTo(cx-12,cy+12);
+    ctx.lineTo(cx+12,cy+12);
+    ctx.fill();
+  }
+
+  if(shape==="r") ctx.fillText("★",cx-8,cy+8);
+
+  if(shape==="x"){
+    ctx.fillRect(cx-3,cy-12,6,24);
+    ctx.fillRect(cx-12,cy-3,24,6);
+  }
+
+  return c.toDataURL();
+}
+
+function drawBack(){
+  const c=document.createElement("canvas");
+  c.width=65;c.height=100;
+  const ctx=c.getContext("2d");
+
+  ctx.fillStyle="#111";
+  ctx.fillRect(0,0,65,100);
+
+  ctx.strokeStyle="#fff";
+  ctx.strokeRect(2,2,61,96);
+
+  ctx.fillStyle="#fff";
+  ctx.fillText("🂠",18,60);
+
+  return c.toDataURL();
+}
 function createDeck() {
   const valid = {
     c:[1,2,3,4,5,7,8,10,11,12,13,14],
@@ -51,7 +110,6 @@ function createDeck() {
   return deck.sort(()=>Math.random()-0.5);
 }
 
-// 🛠 PARSE
 function parseGame(g){
   const safe=(v,s)=> typeof v==="string"?v.split(s).filter(Boolean):[];
 
@@ -108,7 +166,7 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 const [game,setGame]=useState(null);
 const [userId,setUserId]=useState(null);
 const [error,setError]=useState("");
-const [unread,setUnread]=useState(0);
+const [countdown,setCountdown]=useState(5);
 
 const lock=useRef(false);
 
@@ -122,7 +180,7 @@ useEffect(()=>{
   if(!gameId||!userId)return;
 
   databases.getDocument(DATABASE_ID,GAME_COLLECTION,gameId)
-    .then(g=>setGame(parseGame(g)));
+  .then(g=>setGame(parseGame(g)));
 
   const unsub=databases.client.subscribe(
     `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
@@ -132,205 +190,85 @@ useEffect(()=>{
   return ()=>unsub();
 },[gameId,userId]);
 
-// 💬 MESSAGE BADGE
-useEffect(()=>{
-  if(!gameId||!userId)return;
-
-  const load=async()=>{
-    try{
-      const r=await databases.listDocuments(
-        DATABASE_ID,"messages",
-        [Query.equal("gameId",gameId),Query.notEqual("sender",userId)]
-      );
-      setUnread(r.total||0);
-    }catch{ setUnread(0); }
-  };
-
-  load();
-
-  const unsub=databases.client.subscribe(
-    `databases.${DATABASE_ID}.collections.messages.documents`,
-    load
-  );
-
-  return ()=>unsub();
-},[gameId,userId]);
-
-if(!game||!userId) return <div>Loading...</div>;
+if(!game||!userId) return <div style={{color:"#fff"}}>Loading...</div>;
 
 const myIdx=game.players.indexOf(userId);
-if(myIdx===-1) return <div>Joining...</div>;
-
 const oppIdx=myIdx===0?1:0;
+const hand=game.hands[myIdx]||[];
+const oppCards=game.hands[oppIdx]?.length||0;
 
-// 🏁 END ROUND
-async function endRound(g,winner){
-  g=JSON.parse(JSON.stringify(g));
-  g.scores[winner]=(g.scores[winner]||0)+1;
+// 🎴 PLAY
+async function playCard(i){
+  if(lock.current || game.turn!==userId) return;
+  lock.current=true;
 
-  if(g.scores[winner]>=2 && !g.payoutDone){
-    g.status="finished";
-    g.winnerId=g.players[winner];
-    g.payoutDone=true;
+  const g=JSON.parse(JSON.stringify(game));
+  const card=g.hands[myIdx][i];
+  const top=g.discard;
 
-    try{
-      const res=await databases.listDocuments(
-        DATABASE_ID,WALLET_COLLECTION,
-        [Query.equal("userId",g.winnerId)]
-      );
+  const num=card.slice(1);
+  const topNum=top.slice(1);
 
-      if(res.documents.length){
-        const w=res.documents[0];
-        await databases.updateDocument(
-          DATABASE_ID,WALLET_COLLECTION,w.$id,
-          {balance:Number(w.balance||0)+Number(g.pot||0)}
-        );
-      }
-    }catch{}
-
-    await databases.updateDocument(
-      DATABASE_ID,GAME_COLLECTION,gameId,encodeGame(g)
-    );
+  if(num!=="14" && card[0]!==top[0] && num!==topNum){
+    setError("❌ Invalid move");
+    beep(100);
+    setTimeout(()=>setError(""),1000);
+    lock.current=false;
     return;
   }
 
-  const d=createDeck();
-  g.hands=[d.splice(0,6),d.splice(0,6)];
-  g.deck=d;
-  g.discard=d.pop();
-  g.pendingPick=0;
-  g.turn=g.players[winner===0?1:0];
-  g.round++;
+  g.hands[myIdx].splice(i,1);
+  g.discard=card;
+
+  if(!g.hands[myIdx].length){
+    beep(600,400);
+    alert("🏆 YOU WON ROUND!");
+  }
+
+  const next=g.players[oppIdx];
+
+  setGame({...g,turn:next});
 
   await databases.updateDocument(
-    DATABASE_ID,GAME_COLLECTION,gameId,encodeGame(g)
+    DATABASE_ID,GAME_COLLECTION,gameId,
+    {...encodeGame(g),turn:next}
   );
-}
-// 🎴 PLAY
-async function playCard(i){
-  if(lock.current) return;
-  if(game.turn!==userId) return;
-
-  lock.current=true;
-
-  try{
-    const g=JSON.parse(JSON.stringify(game));
-    const card=g.hands[myIdx][i];
-    const top=g.discard;
-
-    const num=card.slice(1);
-    const topNum=top.slice(1);
-
-    if(g.pendingPick>0 && num!=="2" && num!=="14"){
-      setError("❌ Use 2 or WHOT");
-      setTimeout(()=>setError(""),1000);
-      lock.current=false; return;
-    }
-
-    if(num!=="14" && card[0]!==top[0] && num!==topNum){
-      setError("❌ Invalid move");
-      setTimeout(()=>setError(""),1000);
-      lock.current=false; return;
-    }
-
-    g.hands[myIdx].splice(i,1);
-    g.discard=card;
-
-    let next=g.players[oppIdx];
-
-    if(num==="1") next=g.players[myIdx];
-    if(num==="2") g.pendingPick+=2;
-    if(num==="8") next=g.players[myIdx];
-    if(num==="14") g.pendingPick+=1;
-
-    if(!g.hands[myIdx].length){
-      await endRound(g,myIdx);
-      lock.current=false; return;
-    }
-
-    setGame({...g,turn:next});
-
-    await databases.updateDocument(
-      DATABASE_ID,GAME_COLLECTION,gameId,
-      {...encodeGame(g),turn:next}
-    );
-
-  }catch{}
 
   lock.current=false;
 }
 
-// 🃏 DRAW
-async function draw(){
-  if(lock.current) return;
-  if(game.turn!==userId) return;
-
-  lock.current=true;
-
-  try{
-    const g=JSON.parse(JSON.stringify(game));
-
-    if(!g.deck.length){
-      const win=g.hands[0].length<g.hands[1].length?0:1;
-      await endRound(g,win);
-      lock.current=false; return;
-    }
-
-    const picks=g.pendingPick||1;
-
-    for(let i=0;i<picks;i++){
-      if(g.deck.length) g.hands[myIdx].push(g.deck.pop());
-    }
-
-    g.pendingPick=0;
-
-    const next=g.players[oppIdx];
-
-    setGame({...g,turn:next});
-
-    await databases.updateDocument(
-      DATABASE_ID,GAME_COLLECTION,gameId,
-      {...encodeGame(g),turn:next}
-    );
-
-  }catch{}
-
-  lock.current=false;
-}
-
-// UI
-const hand=game.hands[myIdx]||[];
-const isWinner=game.winnerId===userId;
-
+// 🎨 UI
 return (
-<div style={{padding:10}}>
-<h2>WHOT GAME</h2>
+<div style={{background:"#0f172a",minHeight:"100vh",color:"#fff",padding:10}}>
 
-<div onClick={()=>openChat(gameId)}>
-💬 Messages {unread>0 && `(${unread})`}
+<h2 style={{textAlign:"center"}}>🎮 WHOT GAME</h2>
+
+{error && <div style={{color:"red",textAlign:"center"}}>{error}</div>}
+
+{/* OPPONENT */}
+<div style={{textAlign:"center"}}>
+{Array.from({length:oppCards}).map((_,i)=>
+  <img key={i} src={drawBack()} style={{width:40}}/>
+)}
+<p>Opponent ({oppCards})</p>
 </div>
 
-{error && <div style={{color:"red"}}>{error}</div>}
+{/* CENTER */}
+<div style={{textAlign:"center",margin:20}}>
+<img src={drawCard(game.discard)} style={{width:70}}/>
+</div>
 
-<p>{game.turn===userId?"Your Turn":"Opponent"}</p>
-
-<p>Score: {game.scores[0]} - {game.scores[1]}</p>
-
-<p>Top: {game.discard}</p>
-
-<button onClick={draw}>Draw ({game.deck.length})</button>
-
-<div style={{display:"flex",gap:5}}>
+{/* HAND */}
+<div style={{display:"flex",flexWrap:"wrap",justifyContent:"center"}}>
 {hand.map((c,i)=>(
-  <button key={i} onClick={()=>playCard(i)}>
-    {c}
-  </button>
+  <img
+    key={i}
+    src={drawCard(c)}
+    style={{width:60,margin:5,cursor:"pointer"}}
+    onClick={()=>playCard(i)}
+  />
 ))}
 </div>
-
-{game.status==="finished" && (
-<h3>{isWinner?"You Won":"You Lost"}</h3>
-)}
 
 <button onClick={goHome}>Exit</button>
 
