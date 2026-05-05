@@ -367,53 +367,64 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     <div style={styles.bg}>
       <div style={styles.box}>
 
-        <h2>🎮 WHOT GAME</h2>
+     <>
+  <h2>🎮 WHOT GAME</h2>
 
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-          <div>{name(oppIdx)} ({oppCards})</div>
-        </div>
+  <div style={styles.messageBar} onClick={() => openChat(gameId)}>
+    <span>💬 Messages</span>
+    {unread > 0 && (
+      <span style={styles.badge}>
+        {unread}
+      </span>
+    )}
+  </div>
 
-        <p style={{ textAlign: "center" }}>
-          {game.turn === userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}
-        </p>
+  <div style={{ textAlign: "center" }}>
+    {Array.from({ length: oppCards }).map((_, i) => (
+      <img key={i} src={drawBack()} style={{ width: 40 }} />
+    ))}
+    <div>{name(oppIdx)} ({oppCards})</div>
+  </div>
 
-        <div style={styles.row}>
-          <span>Round {game.round}/3</span>
-          <span>{game.scores[0]} - {game.scores[1]}</span>
-        </div>
+  <p style={{ textAlign: "center" }}>
+    {game.turn === userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}
+  </p>
 
-        <div style={styles.row}>
-          <span>🏦 ₦{game.pot}</span>
-        </div>
+  <div style={styles.row}>
+    <span>Round {game.round}/3</span>
+    <span>{game.scores[0]} - {game.scores[1]}</span>
+  </div>
 
-        <div style={styles.center}>
-          {game.discard && (
-            <img src={drawCard(game.discard)} style={styles.card} />
-          )}
-          <button style={styles.marketBtn} onClick={draw}>
-            🃏 {game.deck.length}
-          </button>
-        </div>
+  <div style={styles.row}>
+    <span>🏦 ₦{game.pot}</span>
+  </div>
 
-        <div style={styles.history}>
-          {(game.history || []).slice(-5).map((h, i) => (
-            <div key={i}>• {h}</div>
-          ))}
-        </div>
+  <div style={styles.center}>
+    {game.discard && (
+      <img src={drawCard(game.discard)} style={styles.card} />
+    )}
+    <button style={styles.marketBtn} onClick={draw}>
+      🃏 {game.deck.length}
+    </button>
+  </div>
 
-        <div style={styles.hand}>
-          {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(c)}
-              style={styles.card}
-              onClick={() => playCard(i)}
-            />
-          ))}
-        </div>
+  <div style={styles.history}>
+    {(game.history || []).slice(-5).map((h, i) => (
+      <div key={i}>• {h}</div>
+    ))}
+  </div>
+
+  <div style={styles.hand}>
+    {hand.map((c, i) => (
+      <img
+        key={i}
+        src={drawCard(c)}
+        style={styles.card}
+        onClick={() => playCard(i)}
+      />
+    ))}
+  </div>
+</>
 
         {/* 🏁 FINISHED */}
         {game.status === "finished" && (
