@@ -781,5 +781,15 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     marginBottom: 8
+  },
+
+  // 🔴 ADD THIS
+  badge: {
+    display: "inline-block",
+    width: 8,
+    height: 8,
+    background: "red",
+    borderRadius: "50%",
+    marginLeft: 6
   }
 };
