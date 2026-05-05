@@ -3,10 +3,13 @@ import {
   databases,
   DATABASE_ID,
   account,
-  Query
+  Query,
+  ID
 } from "./lib/appwrite";
 
 const GAME_COLLECTION = "games";
+const MATCH_COLLECTION = "matches";
+const WALLET_COLLECTION = "wallets";
 
 // 🔊 SOUND
 function beep(freq = 200, duration = 200) {
@@ -17,16 +20,12 @@ function beep(freq = 200, duration = 200) {
 
     osc.frequency.value = freq;
     osc.type = "square";
-
     osc.connect(gain);
     gain.connect(ctx.destination);
-
     osc.start();
+
     gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(
-      0.001,
-      ctx.currentTime + duration / 1000
-    );
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
 
     setTimeout(() => {
       osc.stop();
@@ -53,7 +52,7 @@ function createDeck() {
   return deck.sort(() => Math.random() - 0.5);
 }
 
-// 🎴 DRAW CARD (SAFE)
+// 🎴 DRAW CARD
 function drawCard(cardStr) {
   if (!cardStr) return null;
 
@@ -77,13 +76,8 @@ function drawCard(cardStr) {
 
   const cx = 35, cy = 55;
 
-  if (shape === "c") {
-    ctx.beginPath();
-    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  if (shape === "c") { ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.fill(); }
   if (shape === "s") ctx.fillRect(cx - 12, cy - 12, 24, 24);
-
   if (shape === "t") {
     ctx.beginPath();
     ctx.moveTo(cx, cy - 12);
@@ -91,9 +85,7 @@ function drawCard(cardStr) {
     ctx.lineTo(cx + 12, cy + 12);
     ctx.fill();
   }
-
   if (shape === "r") ctx.fillText("★", cx - 8, cy + 8);
-
   if (shape === "x") {
     ctx.fillRect(cx - 3, cy - 12, 6, 24);
     ctx.fillRect(cx - 12, cy - 3, 24, 6);
@@ -103,58 +95,29 @@ function drawCard(cardStr) {
 }
 
 function drawBack() {
-  try {
-    const c = document.createElement("canvas");
-    c.width = 65;
-    c.height = 100;
-    const ctx = c.getContext("2d");
+  const c = document.createElement("canvas");
+  c.width = 65;
+  c.height = 100;
+  const ctx = c.getContext("2d");
 
-    ctx.fillStyle = "#111";
-    ctx.fillRect(0, 0, 65, 100);
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, 65, 100);
+  ctx.strokeStyle = "#fff";
+  ctx.strokeRect(2, 2, 61, 96);
+  ctx.fillStyle = "#fff";
+  ctx.fillText("🂠", 18, 60);
 
-    ctx.strokeStyle = "#fff";
-    ctx.strokeRect(2, 2, 61, 96);
-
-    ctx.fillStyle = "#fff";
-    ctx.fillText("🂠", 18, 60);
-
-    return c.toDataURL();
-  } catch {
-    return "";
-  }
+  return c.toDataURL();
 }
 
-// 🛠 SAFE PARSE
+// 🛠 PARSE
 function parseGame(g) {
-  const safe = (v, s) =>
-    typeof v === "string" ? v.split(s).filter(Boolean) : [];
+  const safe = (v, s) => typeof v === "string" ? v.split(s).filter(Boolean) : [];
 
-  let players = Array.isArray(g.players)
-    ? g.players
-    : safe(g.players, ",");
+  const players = Array.isArray(g.players) ? g.players : safe(g.players, ",");
 
-  if (players.length < 2) {
-    return {
-      ...g,
-      players,
-      hands: [[], []],
-      deck: [],
-      discard: null,
-      turn: null,
-      history: [],
-      scores: [0, 0],
-      round: 1,
-      status: "waiting",
-      pendingPick: 0,
-      pot: Number(g.pot || 0),
-      payoutDone: false
-    };
-  }
-
-  let handsRaw = safe(g.hands, "|");
-  let hands = handsRaw.length === 2
-    ? handsRaw.map(p => safe(p, ","))
-    : [[], []];
+  let hands = safe(g.hands, "|").map(p => p.split(",").filter(Boolean));
+  if (hands.length !== 2) hands = [[], []];
 
   let deck = safe(g.deck, ",");
 
@@ -183,14 +146,15 @@ function parseGame(g) {
     hands,
     deck,
     discard: g.discard,
-    turn: g.turn || players[0],
+    turn: g.turn,
     history: safe(g.history, "||"),
     scores: safe(g.scores, ",").map(Number),
     round: Number(g.round || 1),
-    status: g.status || "playing",
+    status: g.status,
     pendingPick: Number(g.pendingPick || 0),
     pot: Number(g.pot || 0),
-    payoutDone: Boolean(g.payoutDone)
+    payoutDone: Boolean(g.payoutDone),
+    winnerId: g.winnerId || null
   };
 }
 
@@ -200,155 +164,76 @@ function encodeGame(g) {
     deck: g.deck.join(","),
     discard: g.discard,
     turn: g.turn,
-    history: (g.history || []).slice(-20).join("||"),
+    history: g.history.slice(-20).join("||"),
     scores: g.scores.join(","),
     round: String(g.round),
     status: g.status,
-    pendingPick: String(g.pendingPick || 0),
+    pendingPick: String(g.pendingPick),
     pot: g.pot,
     payoutDone: g.payoutDone,
-    winnerId: g.winnerId || null
+    winnerId: g.winnerId
   };
 }
+
 export default function WhotGame({ gameId, goHome, openChat }) {
 
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [countdown, setCountdown] = useState(5);
-  const [unread, setUnread] = useState(0);
   const [error, setError] = useState("");
+  const [unread, setUnread] = useState(0);
+  const [countdown, setCountdown] = useState(5);
+  const [showWinPopup, setShowWinPopup] = useState(false);
 
   const lock = useRef(false);
   const clearedRef = useRef(false);
 
-  const name = (i) => (i === 0 ? "Player 1" : "Player 2");
-
-  // 👤 LOAD USER
-  useEffect(() => {
-    account.get()
-      .then(u => setUserId(u.$id))
-      .catch(() => {});
+  const name = (i) => i === 0 ? "Player 1" : "Player 2";
+useEffect(() => {
+    account.get().then(u => setUserId(u.$id)).catch(()=>{});
   }, []);
 
-  // 🎮 GAME SUBSCRIPTION
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const load = async () => {
-      try {
-        const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
-        setGame(parseGame(g));
-      } catch {}
+      const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
+      setGame(parseGame(g));
     };
 
     load();
 
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        try {
-          setGame(parseGame(res.payload));
-        } catch {}
-      }
+      res => setGame(parseGame(res.payload))
     );
 
     return () => unsub();
   }, [gameId, userId]);
 
-  // 💬 LIVE MESSAGE BADGE (REALTIME)
+  // 💬 unread
   useEffect(() => {
     if (!gameId || !userId) return;
 
     const fetchUnread = async () => {
-      try {
-        const res = await databases.listDocuments(
-          DATABASE_ID,
-          "messages",
-          [
-            Query.equal("gameId", gameId),
-            Query.notEqual("sender", userId)
-          ]
-        );
-        setUnread(res.total || 0);
-      } catch {
-        setUnread(0);
-      }
-    };
-
-    fetchUnread();
-
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.messages.documents`,
-      fetchUnread
-    );
-
-    return () => unsub();
-  }, [gameId, userId]);
-
-  // 🧹 CLEAR CHAT WHEN GAME ENDS
-  async function clearMessages() {
-    if (clearedRef.current) return;
-    clearedRef.current = true;
-
-    try {
       const res = await databases.listDocuments(
         DATABASE_ID,
         "messages",
-        [Query.equal("gameId", gameId)]
+        [Query.equal("gameId", gameId), Query.notEqual("sender", userId)]
       );
+      setUnread(res.total || 0);
+    };
 
-      await Promise.all(
-        res.documents.map(doc =>
-          databases.deleteDocument(DATABASE_ID, "messages", doc.$id)
-        )
-      );
-    } catch {}
-  }
+    fetchUnread();
+  }, [gameId, userId]);
 
-  // 🏁 FINISH FLOW
-  useEffect(() => {
-    if (game?.status === "finished") {
-      clearMessages();
-
-      const t = setInterval(() => {
-        setCountdown(c => {
-          if (c <= 1) {
-            goHome();
-            return 0;
-          }
-          return c - 1;
-        });
-      }, 1000);
-
-      return () => clearInterval(t);
-    }
-  }, [game?.status]);
-
-  if (!game || !userId) return <div>Loading...</div>;
-
-  const myIdx = game.players.indexOf(userId);
-  if (myIdx === -1) return <div>Joining game...</div>;
-
-  const oppIdx = myIdx === 0 ? 1 : 0;
-  const hand = game.hands[myIdx] || [];
-  const oppCards = game.hands[oppIdx]?.length || 0;
-
-  // 🏁 END ROUND
   async function endRound(g, winner) {
-    g = JSON.parse(JSON.stringify(g));
     g.scores[winner]++;
 
-    if (g.scores[winner] === 2 && !g.payoutDone) {
+    if (g.scores[winner] === 2) {
       g.status = "finished";
       g.winnerId = g.players[winner];
-      g.payoutDone = true;
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        encodeGame(g)
-      );
+      await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
       return;
     }
 
@@ -358,67 +243,53 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     g.deck = d;
     g.round++;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      encodeGame(g)
-    );
+    await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, encodeGame(g));
   }
 
-  // 🎴 PLAY CARD
   async function playCard(i) {
-    if (lock.current || game.status === "finished") return;
-    if (game.turn !== userId) return;
-
+    if (lock.current || game.turn !== userId) return;
     lock.current = true;
 
     try {
       const g = JSON.parse(JSON.stringify(game));
-      const card = g.hands[myIdx][i];
+      const card = g.hands[game.players.indexOf(userId)][i];
       const top = g.discard;
 
-      if (!top) return;
-
-      // 🚫 MUST PICK FIRST
-      if (g.pendingPick > 0) {
-        setError("❌ You must pick cards");
-        beep(120, 200);
-        setTimeout(() => setError(""), 1500);
+      if (g.pendingPick > 0 && card.slice(1) !== "2" && card.slice(1) !== "14") {
+        setError("❌ Must respond to pick");
+        lock.current = false;
         return;
       }
 
-      // ❌ INVALID MOVE
       if (
         card[0] !== top[0] &&
         card.slice(1) !== top.slice(1) &&
         card.slice(1) !== "14"
       ) {
         setError("❌ Invalid move");
-        beep(100, 300);
-        setTimeout(() => setError(""), 1500);
+        lock.current = false;
         return;
       }
 
+      const myIdx = g.players.indexOf(userId);
+      const oppIdx = myIdx === 0 ? 1 : 0;
+
       g.hands[myIdx].splice(i,1);
-      g.history.push(`${name(myIdx)} played ${card}`);
 
       let next = g.players[oppIdx];
       const num = card.slice(1);
 
-      // 🎯 RULE ENGINE
-      if (num === "1") next = g.players[myIdx]; // play again
+      if (num === "1") next = g.players[myIdx];
       if (num === "2") g.pendingPick += 2;
-      if (num === "8") next = g.players[myIdx]; // skip
+      if (num === "8") next = g.players[myIdx];
       if (num === "14") g.pendingPick += 1;
 
-      // 🏁 ROUND WIN
       if (!g.hands[myIdx].length) {
         await endRound(g, myIdx);
+        lock.current = false;
         return;
       }
 
-      // ⚡ FAST UI
       setGame({ ...g, discard: card, turn: next });
 
       await databases.updateDocument(
@@ -433,56 +304,29 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     lock.current = false;
   }
 
-  // 🃏 DRAW (MARKET FIXED)
   async function draw() {
-    if (lock.current || game.status === "finished") return;
-    if (game.turn !== userId) return;
-
+    if (lock.current || game.turn !== userId) return;
     lock.current = true;
 
     try {
       const g = JSON.parse(JSON.stringify(game));
+      const myIdx = g.players.indexOf(userId);
+      const oppIdx = myIdx === 0 ? 1 : 0;
 
-      // 🧠 MARKET EMPTY LOGIC
       if (!g.deck.length) {
-        const p1 = g.hands[0].length;
-        const p2 = g.hands[1].length;
-
-        if (p1 === p2) {
-          // 🤝 DRAW ROUND
-          g.history.push("Round draw (market finished)");
-
-          const d = createDeck();
-          g.hands = [d.splice(0,6), d.splice(0,6)];
-          g.discard = d.pop();
-          g.deck = d;
-          g.round++;
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            gameId,
-            encodeGame(g)
-          );
-          return;
-        }
-
-        const win = p1 < p2 ? 0 : 1;
+        const win = g.hands[0].length <= g.hands[1].length ? 0 : 1;
         await endRound(g, win);
+        lock.current = false;
         return;
       }
 
-      // 📦 NORMAL DRAW / STACK PICK
       const picks = g.pendingPick > 0 ? g.pendingPick : 1;
 
       for (let i = 0; i < picks; i++) {
-        if (g.deck.length) {
-          g.hands[myIdx].push(g.deck.pop());
-        }
+        if (g.deck.length) g.hands[myIdx].push(g.deck.pop());
       }
 
       g.pendingPick = 0;
-      g.history.push(`${name(myIdx)} picked ${picks}`);
 
       const next = g.players[oppIdx];
 
@@ -499,191 +343,69 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 
     lock.current = false;
   }
+if (!game || !userId) return <div>Loading...</div>;
+
+  const myIdx = game.players.indexOf(userId);
+  const oppIdx = myIdx === 0 ? 1 : 0;
 
   const isWinner = game.winnerId === userId;
-return (
+
+  return (
     <div style={styles.bg}>
       <div style={styles.box}>
 
         <h2>🎮 WHOT GAME</h2>
 
-        {/* 💬 MESSAGE BAR */}
         <div style={styles.messageBar} onClick={() => openChat(gameId)}>
-          <span>💬 Messages</span>
-          {unread > 0 && (
-            <span style={styles.badge}>{unread}</span>
-          )}
+          💬 Messages {unread > 0 && <span style={styles.badge}>{unread}</span>}
         </div>
 
-        {/* 🔴 ERROR FEEDBACK */}
-        {error && (
-          <div style={styles.error}>
-            {error}
-          </div>
-        )}
+        {error && <div style={styles.error}>{error}</div>}
 
-        {/* 🧑 OPPONENT */}
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-          <div>{name(oppIdx)} ({oppCards})</div>
-        </div>
+        <p>{game.turn === userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}</p>
 
-        {/* 🎯 TURN */}
-        <p style={{ textAlign: "center" }}>
-          {game.turn === userId ? "🟢 YOUR TURN" : "⏳ OPPONENT"}
-        </p>
-
-        {/* 📊 SCORE */}
         <div style={styles.row}>
-          <span>Round {game.round}/3</span>
+          <span>Round {game.round}</span>
           <span>{game.scores[0]} - {game.scores[1]}</span>
         </div>
 
-        {/* 💰 POT */}
-        <div style={styles.row}>
-          <span>🏦 ₦{game.pot}</span>
-        </div>
-
-        {/* 🎴 TABLE */}
         <div style={styles.center}>
-          {game.discard && (
-            <img src={drawCard(game.discard)} style={styles.card} />
-          )}
-          <button style={styles.marketBtn} onClick={draw}>
-            🃏 {game.deck.length}
-          </button>
+          {game.discard && <img src={drawCard(game.discard)} style={styles.card} />}
+          <button onClick={draw}>🃏 {game.deck.length}</button>
         </div>
 
-        {/* 📜 HISTORY */}
-        <div style={styles.history}>
-          {(game.history || []).slice(-5).map((h, i) => (
-            <div key={i}>• {h}</div>
-          ))}
-        </div>
-
-        {/* 🖐 HAND */}
         <div style={styles.hand}>
-          {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(c)}
-              style={styles.card}
-              onClick={() => playCard(i)}
-            />
+          {game.hands[myIdx].map((c,i)=>(
+            <img key={i} src={drawCard(c)} style={styles.card} onClick={()=>playCard(i)} />
           ))}
         </div>
 
-        {/* 🏁 RESULT */}
+        {/* 🎉 POPUP */}
         {game.status === "finished" && (
-          <div style={{ textAlign: "center", marginTop: 10 }}>
-            <h3>{isWinner ? "🏆 YOU WON" : "❌ YOU LOST"}</h3>
-            <p>{isWinner ? `+₦${game.pot}` : `-₦${game.pot}`}</p>
-            <p>Redirecting in {countdown}s...</p>
+          <div style={styles.winOverlay}>
+            <div style={styles.winBox}>
+              <h2>{isWinner ? "🎉 YOU WON" : "💀 YOU LOST"}</h2>
+              <p>{isWinner ? `+₦${game.pot}` : `-₦${game.pot}`}</p>
+              <p>Redirecting {countdown}s</p>
+            </div>
           </div>
         )}
-
-        <button onClick={goHome}>Exit</button>
 
       </div>
     </div>
   );
 }
 
-// 🎨 STYLES (COMPLETE)
 const styles = {
-  bg:{
-    minHeight:"100vh",
-    background:"green",
-    display:"flex",
-    justifyContent:"center",
-    alignItems:"center"
-  },
-
-  box:{
-    width:"95%",
-    maxWidth:450,
-    background:"#000000cc",
-    padding:12,
-    color:"#fff",
-    borderRadius:10,
-    position:"relative"
-  },
-
-  row:{
-    display:"flex",
-    justifyContent:"space-between",
-    marginBottom:6
-  },
-
-  hand:{
-    display:"flex",
-    flexWrap:"wrap",
-    gap:6,
-    justifyContent:"center",
-    marginTop:10
-  },
-
-  card:{
-    width:65,
-    cursor:"pointer"
-  },
-
-  center:{
-    display:"flex",
-    justifyContent:"center",
-    gap:10,
-    marginTop:10
-  },
-
-  marketBtn:{
-    background:"gold",
-    padding:10,
-    borderRadius:8,
-    border:"none",
-    cursor:"pointer"
-  },
-
-  history:{
-    maxHeight:80,
-    overflowY:"auto",
-    fontSize:12,
-    marginTop:8,
-    background:"#111",
-    padding:6,
-    borderRadius:6
-  },
-
-  // 💬 MESSAGE BAR
-  messageBar:{
-    display:"flex",
-    justifyContent:"space-between",
-    alignItems:"center",
-    background:"#111",
-    padding:"8px 12px",
-    borderRadius:8,
-    marginBottom:10,
-    fontSize:14,
-    cursor:"pointer",
-    border:"1px solid #222"
-  },
-
-  // 🔴 ERROR
-  error:{
-    color:"red",
-    textAlign:"center",
-    marginBottom:6,
-    fontWeight:"bold"
-  },
-
-  // 🔴 BADGE
-  badge:{
-    background:"red",
-    color:"#fff",
-    padding:"2px 6px",
-    borderRadius:10,
-    fontSize:12,
-    fontWeight:"bold"
-  }
+  bg:{minHeight:"100vh",background:"green",display:"flex",justifyContent:"center",alignItems:"center"},
+  box:{width:"95%",maxWidth:450,background:"#000",padding:12,color:"#fff",borderRadius:10},
+  row:{display:"flex",justifyContent:"space-between"},
+  hand:{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"},
+  card:{width:65,cursor:"pointer"},
+  center:{display:"flex",justifyContent:"center",gap:10},
+  messageBar:{background:"#111",padding:8,marginBottom:8,cursor:"pointer"},
+  badge:{background:"red",padding:"2px 6px",borderRadius:8},
+  error:{color:"red",textAlign:"center"},
+  winOverlay:{position:"absolute",top:0,left:0,width:"100%",height:"100%",background:"#000a",display:"flex",justifyContent:"center",alignItems:"center"},
+  winBox:{background:"#111",padding:20,borderRadius:10}
 };
