@@ -6,15 +6,12 @@ import {
   Query
 } from "./lib/appwrite";
 
-import Messages from "./pages/Messages"; // ✅ CHAT POPUP
-
 const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
 const WALLET_COLLECTION = "wallets";
-const CHAT_COLLECTION = "messages";
 
 // =========================
-// 🔊 SOUND
+// 🔊 SOUND + ERROR
 // =========================
 function beep(freq = 200, duration = 200) {
   try {
@@ -67,7 +64,7 @@ function createDeck() {
 // 🎴 DECODE
 // =========================
 function decodeCard(str) {
-  if (!str) return null;
+  if (!str || typeof str !== "string") return null;
 
   const map = {
     c: "circle",
@@ -103,6 +100,7 @@ function drawCard(card) {
   ctx.fillRect(0, 0, 70, 100);
 
   ctx.strokeStyle = "#e11d48";
+  ctx.lineWidth = 2;
   ctx.strokeRect(2, 2, 66, 96);
 
   ctx.fillStyle = "#e11d48";
@@ -165,26 +163,29 @@ function drawBack() {
 // PARSER
 // =========================
 function parseGame(g) {
-  const split = (v, s) =>
-    typeof v === "string" ? v.split(s).filter(Boolean) : [];
+  const safeSplit = (v, sep) =>
+    typeof v === "string" ? v.split(sep).filter(Boolean) : [];
 
   const players = Array.isArray(g.players)
     ? g.players
-    : split(g.players, ",");
+    : safeSplit(g.players, ",");
 
-  const handsRaw = split(g.hands, "|");
+  const handsRaw = safeSplit(g.hands, "|");
 
   return {
     ...g,
     players,
     hands: handsRaw.length === 2
-      ? handsRaw.map(p => split(p, ","))
+      ? handsRaw.map(p => safeSplit(p, ","))
       : [[], []],
-    deck: split(g.deck, ","),
-    history: split(g.history, "||"),
-    scores: split(g.scores, ",").map(Number) || [0,0],
+    deck: safeSplit(g.deck, ","),
+    discard: g.discard || null,
+    turn: g.turn || null,
+    pendingPick: Number(g.pendingPick || 0),
+    history: safeSplit(g.history, "||"),
+    scores: safeSplit(g.scores, ",").map(Number) || [0,0],
     round: Number(g.round || 1),
-    pendingPick: Number(g.pendingPick || 0)
+    status: g.status || "playing"
   };
 }
 
@@ -205,11 +206,10 @@ function encodeGame(g) {
 // =========================
 // COMPONENT
 // =========================
-export default function WhotGame({ gameId, goHome }) {
+export default function WhotGame({ gameId, goHome, openChat }) {
 
   const [game, setGame] = useState(null);
   const [userId, setUserId] = useState(null);
-  const [chatOpen, setChatOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const [error, setError] = useState("");
 
@@ -239,7 +239,7 @@ export default function WhotGame({ gameId, goHome }) {
 
     databases.listDocuments(
       DATABASE_ID,
-      CHAT_COLLECTION,
+      "messages",
       [
         Query.equal("gameId", gameId),
         Query.notEqual("sender", userId)
@@ -253,9 +253,10 @@ export default function WhotGame({ gameId, goHome }) {
   const oppIdx = myIdx === 0 ? 1 : 0;
 
   const hand = game.hands[myIdx];
-  const oppCards = game.hands[oppIdx].length;
-  const top = decodeCard(game.discard);
 
+  // =========================
+  // PLAY CARD (WITH HISTORY FIX)
+  // =========================
   async function playCard(i) {
     if (actionLock.current) return;
     actionLock.current = true;
@@ -264,6 +265,7 @@ export default function WhotGame({ gameId, goHome }) {
     const card = g.hands[myIdx][i];
 
     g.hands[myIdx].splice(i,1);
+
     g.history = [`You played ${card}`, ...(g.history || [])];
 
     await databases.updateDocument(
@@ -280,10 +282,14 @@ export default function WhotGame({ gameId, goHome }) {
     actionLock.current = false;
   }
 
+  // =========================
+  // DRAW CARD (WITH HISTORY FIX)
+  // =========================
   async function drawMarket() {
     const g = JSON.parse(JSON.stringify(game));
 
     g.hands[myIdx].push(g.deck.pop());
+
     g.history = [`You drew a card`, ...(g.history || [])];
 
     await databases.updateDocument(
@@ -305,41 +311,20 @@ export default function WhotGame({ gameId, goHome }) {
         <div style={styles.header}>
           <h2>🎮 WHOT GAME</h2>
 
-          <button
-            style={styles.chatBtn}
-            onClick={() => {
-              setChatOpen(true);
-              setUnread(0);
-            }}
-          >
+          <button style={styles.chatTop} onClick={() => openChat(gameId)}>
             💬 {unread > 0 && <span style={styles.badge}>{unread}</span>}
           </button>
         </div>
 
-        {/* OPPONENT */}
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-        </div>
-
-        {/* CENTER */}
-        <div style={styles.center}>
-          {top && <img src={drawCard(top)} style={styles.card} />}
-          <button onClick={drawMarket}>🃏</button>
-        </div>
-
-        {/* HAND */}
         <div style={styles.hand}>
           {hand.map((c,i) => (
-            <img
-              key={i}
-              src={drawCard(decodeCard(c))}
-              style={styles.card}
-              onClick={()=>playCard(i)}
-            />
+            <button key={i} onClick={()=>playCard(i)}>
+              {c}
+            </button>
           ))}
         </div>
+
+        <button onClick={drawMarket}>Draw</button>
 
         {/* HISTORY */}
         <div style={styles.history}>
@@ -349,15 +334,6 @@ export default function WhotGame({ gameId, goHome }) {
         </div>
 
         <button onClick={goHome}>Exit</button>
-
-        {/* CHAT POPUP */}
-        {chatOpen && (
-          <Messages
-            gameId={gameId}
-            onClose={() => setChatOpen(false)}
-          />
-        )}
-
       </div>
     </div>
   );
@@ -370,10 +346,8 @@ const styles = {
   bg:{minHeight:"100vh",background:"green",display:"flex",justifyContent:"center",alignItems:"center"},
   box:{width:"95%",maxWidth:450,background:"#000000cc",padding:12,color:"#fff",borderRadius:10},
   header:{display:"flex",justifyContent:"space-between",alignItems:"center"},
-  hand:{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center"},
-  card:{width:65,cursor:"pointer"},
-  center:{display:"flex",justifyContent:"center",gap:10,marginTop:10},
-  chatBtn:{background:"#111",color:"#fff",padding:"6px 12px",borderRadius:8},
+  hand:{display:"flex",gap:6,flexWrap:"wrap"},
+  chatTop:{background:"#111",padding:"6px 12px",borderRadius:8,color:"#fff"},
   badge:{background:"red",marginLeft:6,padding:"2px 6px",borderRadius:10},
   history:{marginTop:10,maxHeight:120,overflow:"auto",fontSize:12,color:"#ff4d4d"}
 };
