@@ -8,7 +8,7 @@ import {
 } from "./lib/appwrite";
 
 // 🆕 CHAT
-import Messages from "./Messages";
+import Messages from "./pages/Messages";
 
 const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
