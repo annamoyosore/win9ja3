@@ -10,7 +10,7 @@ import {
 const CHAT_COLLECTION = "messages";
 const GAME_COLLECTION = "games";
 
-export default function Messages({ gameId, onClose }) {
+export default function Messages({ matchId, onClose }) {
   const [userId, setUserId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -26,20 +26,24 @@ export default function Messages({ gameId, onClose }) {
   // LOAD + REALTIME
   // =========================
   useEffect(() => {
-    if (!gameId) return;
+    if (!matchId) return;
 
     const load = async () => {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        CHAT_COLLECTION,
-        [
-          Query.equal("gameId", gameId),
-          Query.orderDesc("$createdAt"),
-          Query.limit(3) // ✅ ONLY LAST 3
-        ]
-      );
+      try {
+        const res = await databases.listDocuments(
+          DATABASE_ID,
+          CHAT_COLLECTION,
+          [
+            Query.equal("matchId", matchId),
+            Query.orderDesc("$createdAt"),
+            Query.limit(3)
+          ]
+        );
 
-      setMessages(res.documents.reverse());
+        setMessages(res.documents.reverse());
+      } catch (e) {
+        console.error("Load messages failed:", e);
+      }
     };
 
     load();
@@ -48,42 +52,47 @@ export default function Messages({ gameId, onClose }) {
       `databases.${DATABASE_ID}.collections.${CHAT_COLLECTION}.documents`,
       (res) => {
         const m = res.payload;
-        if (m.gameId !== gameId) return;
+
+        if (m.matchId !== matchId) return;
 
         setMessages(prev => {
           const updated = [...prev, m];
-
-          // ✅ KEEP ONLY LAST 3
-          return updated.slice(-3);
+          return updated.slice(-3); // keep last 3
         });
       }
     );
 
     return () => unsub();
-  }, [gameId]);
+  }, [matchId]);
 
   // =========================
-  // AUTO CLEAR WHEN GAME ENDS
+  // TRIM CHAT WHEN GAME ENDS
   // =========================
   useEffect(() => {
-    if (!gameId) return;
+    if (!matchId) return;
 
     const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
       async (res) => {
         const g = res.payload;
+
+        if (g.matchId !== matchId) return;
 
         if (g.status === "finished") {
           try {
             const msgs = await databases.listDocuments(
               DATABASE_ID,
               CHAT_COLLECTION,
-              [Query.equal("gameId", gameId)]
+              [
+                Query.equal("matchId", matchId),
+                Query.orderDesc("$createdAt")
+              ]
             );
 
-            // 🧹 DELETE ALL CHAT
+            const toDelete = msgs.documents.slice(3); // keep last 3
+
             await Promise.all(
-              msgs.documents.map(m =>
+              toDelete.map(m =>
                 databases.deleteDocument(
                   DATABASE_ID,
                   CHAT_COLLECTION,
@@ -92,52 +101,61 @@ export default function Messages({ gameId, onClose }) {
               )
             );
 
-            setMessages([]);
           } catch (e) {
-            console.error("Chat cleanup failed", e);
+            console.error("Chat trim failed:", e);
           }
         }
       }
     );
 
     return () => unsub();
-  }, [gameId]);
+  }, [matchId]);
 
   // =========================
   // SEND MESSAGE
   // =========================
   async function send() {
-    if (!text.trim()) return;
+    if (!text.trim() || !userId) return;
 
-    await databases.createDocument(
-      DATABASE_ID,
-      CHAT_COLLECTION,
-      ID.unique(),
-      {
-        gameId,
-        sender: userId,
-        text
-      }
-    );
+    try {
+      await databases.createDocument(
+        DATABASE_ID,
+        CHAT_COLLECTION,
+        ID.unique(),
+        {
+          matchId,
+          sender: userId,
+          text
+        }
+      );
 
-    setText("");
+      setText("");
+    } catch (e) {
+      console.error("Send failed:", e);
+    }
   }
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.box}>
+    <div
+      style={styles.overlay}
+      onClick={() => onClose?.()} // 👈 click outside closes
+    >
+      <div
+        style={styles.box}
+        onClick={(e) => e.stopPropagation()} // 👈 prevent close inside
+      >
 
         {/* HEADER */}
         <div style={styles.header}>
-          <span>💬 Game Chat</span>
-          <button onClick={onClose}>✖</button>
+          <span>💬 Match Chat</span>
+          <button onClick={() => onClose?.()}>✖</button>
         </div>
 
         {/* MESSAGES */}
         <div style={styles.chat}>
           {messages.map((m, i) => (
             <div
-              key={m.$id || i} // ✅ FIX duplicate issue
+              key={m.$id || i}
               style={{
                 textAlign: m.sender === userId ? "right" : "left",
                 marginBottom: 6
@@ -174,7 +192,7 @@ export default function Messages({ gameId, onClose }) {
 }
 
 // =========================
-// STYLES (UNCHANGED)
+// STYLES
 // =========================
 const styles = {
   overlay: {
