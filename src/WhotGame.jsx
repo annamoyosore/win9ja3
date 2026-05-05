@@ -253,8 +253,8 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
       async (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
+        if (!res.payload.players) return;
+        setGame(parseGame(res.payload));
       }
     );
 
@@ -279,17 +279,22 @@ export default function WhotGame({ gameId, goHome, openChat }) {
     loadUnread();
   }, [gameId, userId]);
 
-  if (!game || !userId) return <div>Loading...</div>;
+  if (!game || !userId || !game.players?.length) {
+    return <div style={{color:"#fff"}}>Loading game...</div>;
+  }
 
   const myIdx = game.players.indexOf(userId);
+  if (myIdx === -1) {
+    return <div style={{color:"#fff"}}>Joining game...</div>;
+  }
+
   const oppIdx = myIdx === 0 ? 1 : 0;
 
-  const hand = game.hands[myIdx] || [];
+  const hand = Array.isArray(game.hands[myIdx]) ? game.hands[myIdx] : [];
   const oppCards = game.hands[oppIdx]?.length || 0;
   const top = game.discard ? decodeCard(game.discard) : null;
 
   const myName = myIdx === 0 ? game.hostName : game.opponentName;
-  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
   async function endRound(g, winnerIdx) {
     g = JSON.parse(JSON.stringify(g));
@@ -342,7 +347,6 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 
     if (!g.hands[myIdx].length) {
       await endRound(g, myIdx);
-      actionLock.current = false;
       return;
     }
 
@@ -396,32 +400,13 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 
         {error && <div style={styles.error}>{error}</div>}
 
-        <div style={styles.row}>
-          <span>{myName}</span>
-          <span>VS</span>
-          <span>{oppName}</span>
-        </div>
-
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-          <div>{oppName}: {oppCards}</div>
-        </div>
-
-        <div style={styles.row}>
-          <span>Round {game.round} / 3</span>
-          <span>{game.scores[0]} - {game.scores[1]}</span>
-        </div>
-
         <div style={styles.center}>
-          {top && <img src={drawCard(top)} style={styles.card} />}
+          {top ? <img src={drawCard(top)} style={styles.card} /> : <div>Loading card...</div>}
           <button style={styles.marketBtn} onClick={drawMarket}>
             🃏 {game.deck.length}
           </button>
         </div>
 
-        {/* HISTORY */}
         <div style={styles.history}>
           {(game.history || []).slice(-5).map((h, i) => (
             <div key={i}>• {h}</div>
@@ -430,12 +415,7 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 
         <div style={styles.hand}>
           {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(decodeCard(c))}
-              style={styles.card}
-              onClick={() => playCard(i)}
-            />
+            <img key={i} src={drawCard(decodeCard(c))} style={styles.card} onClick={() => playCard(i)} />
           ))}
         </div>
 
@@ -451,7 +431,6 @@ export default function WhotGame({ gameId, goHome, openChat }) {
 const styles = {
   bg: { minHeight: "100vh", background: "green", display: "flex", justifyContent: "center", alignItems: "center" },
   box: { width: "95%", maxWidth: 450, background: "#000000cc", padding: 12, color: "#fff", borderRadius: 10, position: "relative" },
-  row: { display: "flex", justifyContent: "space-between", marginBottom: 6 },
   hand: { display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginTop: 10 },
   card: { width: 65, cursor: "pointer" },
   center: { display: "flex", justifyContent: "center", gap: 10, marginTop: 10 },
