@@ -11,7 +11,7 @@ const MATCH_COLLECTION = "matches";
 const WALLET_COLLECTION = "wallets";
 
 // =========================
-// 🔊 SOUND
+// 🔊 SOUND + ERROR
 // =========================
 function beep(freq = 200, duration = 200) {
   try {
@@ -61,7 +61,7 @@ function createDeck() {
 }
 
 // =========================
-// 🎴 DECODE
+// 🎴 DECODE + LABEL
 // =========================
 function decodeCard(str) {
   if (!str || typeof str !== "string") return null;
@@ -80,8 +80,23 @@ function decodeCard(str) {
   };
 }
 
+function cardLabel(cardStr) {
+  const c = decodeCard(cardStr);
+  if (!c) return "";
+
+  const shapeMap = {
+    circle: "●",
+    triangle: "▲",
+    square: "■",
+    star: "★",
+    cross: "✚"
+  };
+
+  return `${shapeMap[c.shape]} ${c.number}`;
+}
+
 // =========================
-// 🎴 DRAW
+// 🎴 DRAW CARD
 // =========================
 const cache = new Map();
 
@@ -220,10 +235,16 @@ export default function WhotGame({ gameId, goHome }) {
   const [match, setMatch] = useState(null);
   const [userId, setUserId] = useState(null);
   const [showWin, setShowWin] = useState(false);
-  const [winAmount, setWinAmount] = useState(0);
+  const [error, setError] = useState("");
 
   const payoutRef = useRef(false);
   const actionLock = useRef(false);
+
+  function invalidMove(msg) {
+    beep(120, 300);
+    setError(msg);
+    setTimeout(() => setError(""), 1000);
+  }
 
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
@@ -231,8 +252,6 @@ export default function WhotGame({ gameId, goHome }) {
 
   useEffect(() => {
     if (!gameId || !userId) return;
-
-    let unsubMatch;
 
     const load = async () => {
       const g = await databases.getDocument(DATABASE_ID, GAME_COLLECTION, gameId);
@@ -245,12 +264,6 @@ export default function WhotGame({ gameId, goHome }) {
           g.matchId
         );
         setMatch(m);
-
-        // 🔥 realtime match
-        unsubMatch = databases.client.subscribe(
-          `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents.${g.matchId}`,
-          (res) => setMatch(res.payload)
-        );
       }
     };
 
@@ -271,13 +284,19 @@ export default function WhotGame({ gameId, goHome }) {
             setTimeout(goHome, 2500);
           }
 
-          // 🔥 payout only once
+          if (parsed.winnerId !== userId) return;
           if (payoutRef.current) return;
-          if (![parsed.winnerId, parsed.players[0]].includes(userId)) return;
-
           payoutRef.current = true;
 
           try {
+            const fresh = await databases.getDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              parsed.$id
+            );
+
+            if (fresh.payoutDone === true) return;
+
             const freshMatch = await databases.getDocument(
               DATABASE_ID,
               MATCH_COLLECTION,
@@ -287,7 +306,7 @@ export default function WhotGame({ gameId, goHome }) {
             const pot = Number(freshMatch?.pot || 0);
             if (pot <= 0) return;
 
-            setWinAmount(pot);
+            const stake = Number(freshMatch?.stake || 0);
 
             await databases.updateDocument(
               DATABASE_ID,
@@ -312,13 +331,37 @@ export default function WhotGame({ gameId, goHome }) {
               );
             }
 
-            // clear match pot
-            await databases.updateDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              parsed.matchId,
-              { pot: 0, status: "finished" }
-            );
+            for (let pid of parsed.players) {
+              const wallets = await databases.listDocuments(
+                DATABASE_ID,
+                WALLET_COLLECTION,
+                [Query.equal("userId", pid)]
+              );
+
+              if (wallets.documents.length) {
+                const w = wallets.documents[0];
+                await databases.updateDocument(
+                  DATABASE_ID,
+                  WALLET_COLLECTION,
+                  w.$id,
+                  {
+                    locked: Math.max(0, Number(w.locked || 0) - stake)
+                  }
+                );
+              }
+            }
+
+            if (parsed.matchId) {
+              await databases.updateDocument(
+                DATABASE_ID,
+                MATCH_COLLECTION,
+                parsed.matchId,
+                {
+                  pot: 0,
+                  status: "finished"
+                }
+              );
+            }
 
           } catch (e) {
             console.error("❌ payout error:", e);
@@ -327,10 +370,7 @@ export default function WhotGame({ gameId, goHome }) {
       }
     );
 
-    return () => {
-      unsub();
-      unsubMatch && unsubMatch();
-    };
+    return () => unsub();
   }, [gameId, userId]);
 
   if (!game || !userId) return <div>Loading...</div>;
@@ -342,176 +382,12 @@ export default function WhotGame({ gameId, goHome }) {
   const oppCards = game.hands[oppIdx]?.length || 0;
   const top = game.discard ? decodeCard(game.discard) : null;
 
-  async function playCard(i) {
-    if (actionLock.current) return;
-    if (game.turn !== userId) return;
-
-    actionLock.current = true;
-
-    const g = JSON.parse(JSON.stringify(game));
-    const card = g.hands[myIdx][i];
-    const current = decodeCard(card);
-    const topDecoded = decodeCard(g.discard);
-
-    if (
-      current.number !== 14 &&
-      current.number !== topDecoded.number &&
-      current.shape !== topDecoded.shape
-    ) {
-      actionLock.current = false;
-      return;
-    }
-
-    g.hands[myIdx].splice(i, 1);
-
-    let nextTurn = g.players[oppIdx];
-
-    if (current.number === 2) g.pendingPick += 2;
-    if (current.number === 8 || current.number === 1) nextTurn = userId;
-
-    if (!g.hands[myIdx].length) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        { ...encodeGame(g), status: "finished", winnerId: userId }
-      );
-      actionLock.current = false;
-      return;
-    }
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        discard: card,
-        turn: nextTurn
-      }
-    );
-
-    actionLock.current = false;
-  }
-
-  async function drawMarket() {
-    if (actionLock.current) return;
-    if (game.turn !== userId) return;
-
-    actionLock.current = true;
-
-    const g = JSON.parse(JSON.stringify(game));
-    let count = g.pendingPick > 0 ? g.pendingPick : 1;
-
-    for (let i = 0; i < count; i++) {
-      if (!g.deck.length) g.deck = createDeck();
-      g.hands[myIdx].push(g.deck.pop());
-    }
-
-    g.pendingPick = 0;
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        turn: g.players[oppIdx]
-      }
-    );
-
-    actionLock.current = false;
-  }
+  const myName = myIdx === 0 ? game.hostName : game.opponentName;
+  const oppName = myIdx === 0 ? game.opponentName : game.hostName;
 
   return (
-    <div style={styles.bg}>
-      <div style={styles.box}>
-
-        <div style={{ textAlign: "center", color: "gold" }}>
-          🏦 ₦{match?.pot || 0}
-        </div>
-
-        <div style={styles.center}>
-          {top && <img src={drawCard(top)} style={styles.card} />}
-          <button style={styles.marketBtn} onClick={drawMarket}>
-            🃏 {game.deck.length}
-          </button>
-        </div>
-
-        <div style={styles.hand}>
-          {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(decodeCard(c))}
-              style={styles.card}
-              onClick={() => playCard(i)}
-            />
-          ))}
-        </div>
-
-        {showWin && (
-          <div style={styles.winBox}>
-            🎉 You Won ₦{winAmount}
-          </div>
-        )}
-
-      </div>
+    <div style={{ color: "#fff" }}>
+      Game running...
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  bg: {
-    minHeight: "100vh",
-    background: "green",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center"
-  },
-  box: {
-    width: "95%",
-    maxWidth: 450,
-    background: "#000000cc",
-    padding: 12,
-    color: "#fff",
-    borderRadius: 10
-  },
-  hand: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 6,
-    justifyContent: "center",
-    marginTop: 10
-  },
-  card: {
-    width: 65,
-    cursor: "pointer"
-  },
-  center: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 10,
-    marginTop: 10
-  },
-  marketBtn: {
-    background: "gold",
-    padding: 10,
-    borderRadius: 8,
-    border: "none"
-  },
-  winBox: {
-    position: "fixed",
-    top: "40%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "gold",
-    color: "#000",
-    padding: 20,
-    borderRadius: 10,
-    fontWeight: "bold",
-    zIndex: 999
-  }
-};
