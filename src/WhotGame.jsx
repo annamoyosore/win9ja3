@@ -338,8 +338,68 @@ export default function WhotGame({ gameId, goHome }) {
 
     return () => unsub();
   }, [gameId, userId]);
+ //=========================
+// 💰 PAYOUT EFFECT (FINAL)
+// =========================
+useEffect(() => {
+  if (!game || !match) return;
 
-  if (!game || !userId) return <div>Loading...</div>;
+  if (game.status !== "finished") return;
+  if (!game.winnerId) return;
+
+  // 🔒 only winner triggers payout
+  if (userId !== game.winnerId) return;
+
+  // prevent double execution
+  if (payoutRef.current) return;
+  payoutRef.current = true;
+
+  const runPayout = async () => {
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", game.winnerId)]
+      );
+
+      if (!res.documents.length) {
+        console.error("❌ Wallet not found");
+        payoutRef.current = false;
+        return;
+      }
+
+      const wallet = res.documents[0];
+      const currentBalance = Number(wallet.balance || 0);
+      const winAmount = Number(match?.pot || 0);
+
+      if (!winAmount || winAmount <= 0) {
+        console.warn("⚠️ Invalid pot:", match?.pot);
+        payoutRef.current = false;
+        return;
+      }
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: currentBalance + winAmount
+        }
+      );
+
+      console.log("✅ Payout success:", winAmount);
+
+    } catch (e) {
+      console.error("❌ Payout failed:", e);
+      payoutRef.current = false;
+    }
+  };
+
+  runPayout();
+
+}, [game?.status, match, userId]);
+
+if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
