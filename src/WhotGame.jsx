@@ -225,7 +225,6 @@ export default function WhotGame({ gameId, goHome }) {
 
   // 🆕 CHAT STATE
   const [showChat, setShowChat] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
 
   const payoutRef = useRef(false);
   const actionLock = useRef(false);
@@ -339,119 +338,8 @@ export default function WhotGame({ gameId, goHome }) {
 
     return () => unsub();
   }, [gameId, userId]);
-// =========================
-// 💰 PAYOUT EFFECT
-// =========================
-useEffect(() => {
-  if (!game || !game.matchId) return;
 
-  if (game.status !== "finished") return;
-  if (!game.winnerId) return;
-  if (game.payoutDone) return;
-
-  // only winner runs payout
-  if (userId !== game.winnerId) return;
-
-  if (payoutRef.current) return;
-
-  const runPayout = async () => {
-    try {
-      // 🔹 GET FRESH MATCH
-      const freshMatch = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        game.matchId
-      );
-
-      const winAmount = Number(freshMatch?.pot || 0);
-
-      if (!winAmount || winAmount <= 0) {
-        console.warn("⚠️ Invalid pot:", freshMatch?.pot);
-        return;
-      }
-
-      // 🔹 GET WALLET
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", game.winnerId)]
-      );
-
-      if (!res.documents.length) {
-        console.error("❌ Wallet not found");
-        return;
-      }
-
-      const wallet = res.documents[0];
-
-      // 🔒 LOCK FIRST
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        game.$id,
-        { payoutDone: true }
-      );
-
-      payoutRef.current = true;
-
-      // 💰 PAY
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: Number(wallet.balance || 0) + winAmount
-        }
-      );
-
-      console.log("✅ Payout success:", winAmount);
-
-    } catch (e) {
-      payoutRef.current = false;
-      console.error("❌ Payout failed:", e);
-    }
-  };
-
-  runPayout();
-
-}, [game, userId]);
-
-// =========================
-// 💬 MESSAGE INDICATOR (FIXED)
-// =========================
-useEffect(() => {
-  if (!game?.matchId || !userId) return;
-
-  const unsub = databases.client.subscribe(
-    `databases.${DATABASE_ID}.collections.messages.documents`,
-    (res) => {
-
-      // 🛑 ADD IT HERE (FIRST LINE INSIDE HANDLER)
-      if (actionLock.current) return;
-
-      // ✅ only new messages
-      if (res.events?.[0] !== "databases.*.collections.*.documents.*.create") return;
-
-      const msg = res.payload;
-
-      if (!msg?.matchId) return;
-
-      // only this match
-      if (msg.matchId !== game.matchId) return;
-
-      // ignore your own messages
-      if (msg.senderId === userId) return;
-
-      console.log("📩 New message detected");
-
-      setHasUnread(true);
-    }
-  );
-
-  return () => unsub();
-}, [game?.matchId, userId]);
-// ⛔ MUST STAY AFTER ALL useEffect
-if (!game || !userId) return <div>Loading...</div>;
+  if (!game || !userId) return <div>Loading...</div>;
 
   const myIdx = game.players.indexOf(userId);
   const oppIdx = myIdx === 0 ? 1 : 0;
@@ -623,14 +511,11 @@ return (
           </p>
 
           <button
-  style={styles.chatBtn}
-  onClick={() => {
-    setShowChat(true);
-    setHasUnread(false); // ✅ clear red dot
-  }}
->
-  💬 Message {hasUnread && <span style={styles.badge}></span>}
-</button>
+            style={styles.chatBtn}
+            onClick={() => setShowChat(true)}
+          >
+            💬 Message
+          </button>
         </div>
 
         <div style={styles.center}>
@@ -790,15 +675,5 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     marginBottom: 8
-  },
-
-  // 🔴 ADD THIS
-  badge: {
-    display: "inline-block",
-    width: 8,
-    height: 8,
-    background: "red",
-    borderRadius: "50%",
-    marginLeft: 6
   }
 };
