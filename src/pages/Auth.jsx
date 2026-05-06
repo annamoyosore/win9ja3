@@ -194,7 +194,7 @@ export default function Auth({ onLogin }) {
             userId: currentUser.$id,
             name: name.trim(),
             phone: formattedPhone,
-            balance: 300,
+            balance: 100,
             locked: 0,
             promoUsed: promoUsed,
             promoCode: savedPromoCode,
