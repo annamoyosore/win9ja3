@@ -14,10 +14,13 @@ const GAME_COLLECTION = "games";
 const MATCH_COLLECTION = "matches";
 const WALLET_COLLECTION = "wallets";
 
-// 🔊 SOUND
+// 🔊 SOUND (SAFE)
 function beep(freq = 200, duration = 200) {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -36,8 +39,10 @@ function beep(freq = 200, duration = 200) {
     );
 
     setTimeout(() => {
-      osc.stop();
-      ctx.close();
+      try {
+        osc.stop();
+        ctx.close();
+      } catch {}
     }, duration);
   } catch {}
 }
@@ -47,7 +52,7 @@ function successSound() {
   setTimeout(() => beep(800, 200), 150);
 }
 
-// 🎴 DECK
+// 🎴 DECK (SAFE SHUFFLE)
 function createDeck() {
   const valid = {
     c: [1,2,3,4,5,7,8,10,11,12,13,14],
@@ -62,9 +67,14 @@ function createDeck() {
     valid[shape].forEach(n => deck.push(shape + n));
   });
 
-  return deck.sort(() => Math.random() - 0.5);
-}
+  // ✅ better shuffle (prevents bias)
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
 
+  return deck;
+}
 // 🎴 DECODE
 function decodeCard(str) {
   if (!str) return null;
@@ -77,11 +87,15 @@ function decodeCard(str) {
     x: "cross"
   };
 
-  return {
-    shape: map[str[0]],
-    number: Number(str.slice(1))
-  };
+  const shape = map[str[0]];
+  const number = Number(str.slice(1));
+
+  // ✅ guard against corrupted data
+  if (!shape || isNaN(number)) return null;
+
+  return { shape, number };
 }
+
 const cache = new Map();
 
 function drawCard(card) {
@@ -93,7 +107,9 @@ function drawCard(card) {
   const c = document.createElement("canvas");
   c.width = 70;
   c.height = 100;
+
   const ctx = c.getContext("2d");
+  if (!ctx) return null; // ✅ safety
 
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, 70, 100);
@@ -113,7 +129,9 @@ function drawCard(card) {
     ctx.fill();
   }
 
-  if (card.shape === "square") ctx.fillRect(cx - 12, cy - 12, 24, 24);
+  if (card.shape === "square") {
+    ctx.fillRect(cx - 12, cy - 12, 24, 24);
+  }
 
   if (card.shape === "triangle") {
     ctx.beginPath();
@@ -123,7 +141,9 @@ function drawCard(card) {
     ctx.fill();
   }
 
-  if (card.shape === "star") ctx.fillText("★", cx - 8, cy + 8);
+  if (card.shape === "star") {
+    ctx.fillText("★", cx - 8, cy + 8);
+  }
 
   if (card.shape === "cross") {
     ctx.fillRect(cx - 3, cy - 12, 6, 24);
@@ -131,15 +151,25 @@ function drawCard(card) {
   }
 
   const img = c.toDataURL();
-  cache.set(key, img);
+
+  // ✅ prevent memory explosion (important for long play)
+  if (cache.size < 200) {
+    cache.set(key, img);
+  }
+
   return img;
 }
 
 function drawBack() {
+  // ✅ cache single back card (performance boost)
+  if (cache.has("BACK_CARD")) return cache.get("BACK_CARD");
+
   const c = document.createElement("canvas");
   c.width = 65;
   c.height = 100;
+
   const ctx = c.getContext("2d");
+  if (!ctx) return null;
 
   ctx.fillStyle = "#111";
   ctx.fillRect(0, 0, 65, 100);
@@ -148,29 +178,47 @@ function drawBack() {
   ctx.strokeRect(2, 2, 61, 96);
 
   ctx.fillStyle = "#fff";
+  ctx.font = "20px Arial";
   ctx.fillText("🂠", 18, 60);
 
-  return c.toDataURL();
-}
+  const img = c.toDataURL();
+  cache.set("BACK_CARD", img);
 
+  return img;
+}
 function parseGame(g) {
-  const split = (v, s) => typeof v === "string" ? v.split(s).filter(Boolean) : [];
+  const split = (v, s) =>
+    typeof v === "string" ? v.split(s).filter(Boolean) : [];
+
+  const parsedScores = split(g.scores, ",").map(Number);
 
   return {
     ...g,
     players: Array.isArray(g.players) ? g.players : split(g.players, ","),
+
     hands: split(g.hands, "|").map(p => split(p, ",")),
     deck: split(g.deck, ","),
+
     discard: g.discard || null,
     turn: g.turn || null,
+
     pendingPick: Number(g.pendingPick || 0),
+
     history: split(g.history, "||"),
-    scores: split(g.scores, ",").map(Number) || [0,0],
+
+    // ✅ FIX: prevent empty []
+    scores: parsedScores.length === 2 ? parsedScores : [0, 0],
+
     round: Number(g.round || 1),
+
     status: g.status || "playing",
+
+    // ✅ keep as boolean (safe)
     payoutDone: Boolean(g.payoutDone),
+
     winnerId: g.winnerId || null,
     matchId: g.matchId || null,
+
     hostName: g.hostName || "Player 1",
     opponentName: g.opponentName || "Player 2"
   };
@@ -182,11 +230,20 @@ function encodeGame(g) {
     deck: g.deck.join(","),
     discard: g.discard || "",
     turn: g.turn,
+
     pendingPick: String(g.pendingPick),
+
     history: (g.history || []).slice(-10).join("||"),
+
     scores: g.scores.join(","),
+
     round: String(g.round),
-    status: g.status
+
+    status: g.status,
+
+    // ✅ FIX: persist payout + winner (NO DUPLICATE PAYOUT)
+    payoutDone: g.payoutDone || false,
+    winnerId: g.winnerId || null
   };
 }
 
@@ -194,27 +251,89 @@ function encodeGame(g) {
 function ensureGameReady(g) {
   if (g.status === "finished") return g;
 
-  if (!g.deck?.length || !g.hands?.[0]?.length || !g.hands?.[1]?.length || !g.discard) {
+  if (
+    !g.deck?.length ||
+    !g.hands?.[0]?.length ||
+    !g.hands?.[1]?.length ||
+    !g.discard
+  ) {
     const deck = createDeck();
+
     return {
       ...g,
       hands: [deck.splice(0,6), deck.splice(0,6)],
       discard: deck.pop(),
       deck,
+
       pendingPick: 0,
       history: [],
+
+      // ✅ FIX: always valid scores
       scores: [0,0],
+
       round: 1,
-      status: "playing"
+      status: "playing",
+
+      // ✅ FIX: initialize payout flag
+      payoutDone: false
     };
   }
+
   return g;
 }
-
 // 📝 HISTORY
 function pushHistory(g, text) {
   return [...(g.history || []), text].slice(-10);
 }
+
+// ✅ FIXED
+function handleEmptyMarket(g, gameId) {
+  const p0 = g.hands[0].length;
+  const p1 = g.hands[1].length;
+
+  let winnerIdx = null;
+
+  if (p0 < p1) winnerIdx = 0;
+  else if (p1 < p0) winnerIdx = 1;
+
+  if (winnerIdx === null) {
+    return {
+      ...g,
+      history: pushHistory(g, "⚖️ Round draw (market finished)")
+    };
+  }
+
+  g.scores[winnerIdx]++;
+
+  // 🏁 MATCH FINISH
+  if (g.scores[winnerIdx] >= 2) {
+    return {
+      ...g,
+      status: "finished",
+      winnerId: g.players[winnerIdx],
+      payoutDone: false, // ✅ ensure payout will run
+      turn: null,
+      history: pushHistory(
+        g,
+        `🏆 ${winnerIdx === 0 ? "Player 1" : "Player 2"} wins (market empty)`
+      )
+    };
+  }
+
+  // 🔁 NEW ROUND
+  const deck = createDeck();
+
+  return {
+    ...g,
+    hands: [deck.splice(0,6), deck.splice(0,6)],
+    discard: deck.pop(),
+    deck,
+    pendingPick: 0,
+    round: g.round + 1,
+    history: pushHistory(g, "♻️ New round (market empty)")
+  };
+}
+
 export default function WhotGame({ gameId, goHome }) {
 
   const [game, setGame] = useState(null);
@@ -226,7 +345,9 @@ export default function WhotGame({ gameId, goHome }) {
   // 🆕 CHAT STATE
   const [showChat, setShowChat] = useState(false);
 
+  // ✅ FIX: payout guard
   const payoutRef = useRef(false);
+
   const actionLock = useRef(false);
 
   function invalidMove(msg) {
@@ -238,178 +359,382 @@ export default function WhotGame({ gameId, goHome }) {
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
-
   useEffect(() => {
-    if (!gameId || !userId) return;
+  if (!gameId || !userId) return;
 
-    const load = async () => {
-      let g = null;
+  const load = async () => {
+    let g = null;
 
-      // 🔹 TRY LOAD GAME
+    // 🔹 TRY LOAD GAME
+    try {
+      g = await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
+    } catch (e) {
+      console.warn("Game not found, recovering...");
+    }
+
+    // 🔹 RECOVER FROM MATCH
+    if (!g && gameId) {
       try {
-        g = await databases.getDocument(
+        const matchRes = await databases.listDocuments(
           DATABASE_ID,
-          GAME_COLLECTION,
-          gameId
+          MATCH_COLLECTION,
+          [Query.equal("gameId", gameId)]
         );
-      } catch (e) {
-        console.warn("Game not found, recovering...");
-      }
 
-      // 🔹 RECOVER FROM MATCH
-      if (!g && gameId) {
-        try {
-          const matchRes = await databases.listDocuments(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            [Query.equal("gameId", gameId)]
-          );
-
-          if (matchRes.documents.length) {
-            const m = matchRes.documents[0];
-            setMatch(m);
-
-            const deck = createDeck();
-
-            const newGame = {
-              players: m.players,
-              hands: [deck.splice(0, 6), deck.splice(0, 6)],
-              discard: deck.pop(),
-              deck,
-              turn: m.players[0],
-              pendingPick: 0,
-              history: [],
-              scores: [0, 0],
-              round: 1,
-              status: "playing",
-              matchId: m.$id,
-              hostName: m.hostName,
-              opponentName: m.opponentName
-            };
-
-            const created = await databases.createDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              ID.unique(),
-              encodeGame(newGame)
-            );
-
-            g = created;
-          }
-        } catch (err) {
-          console.error("Recovery failed:", err);
-        }
-      }
-
-      if (g) {
-        const parsed = ensureGameReady(parseGame(g));
-        setGame(parsed);
-
-        if (g.matchId) {
-          const m = await databases.getDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            g.matchId
-          );
+        if (matchRes.documents.length) {
+          const m = matchRes.documents[0];
           setMatch(m);
+
+          const deck = createDeck();
+
+          const newGame = {
+            players: m.players,
+            hands: [deck.splice(0, 6), deck.splice(0, 6)],
+            discard: deck.pop(),
+            deck,
+            turn: m.players[0],
+            pendingPick: 0,
+            history: [],
+            scores: [0, 0],
+            round: 1,
+            status: "playing",
+            matchId: m.$id,
+            hostName: m.hostName,
+            opponentName: m.opponentName,
+            payoutDone: false // ✅ ensure exists
+          };
+
+          const created = await databases.createDocument(
+            DATABASE_ID,
+            GAME_COLLECTION,
+            ID.unique(),
+            encodeGame(newGame)
+          );
+
+          g = created;
+        }
+      } catch (err) {
+        console.error("Recovery failed:", err);
+      }
+    }
+
+    // ✅ LOAD MATCH ALWAYS (FIX)
+    if (g?.matchId) {
+      try {
+        const m = await databases.getDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          g.matchId
+        );
+        setMatch(m);
+      } catch {}
+    }
+
+    if (g) {
+      const parsed = ensureGameReady(parseGame(g));
+      setGame(parsed);
+
+      // ✅ TRIGGER PAYOUT IF ALREADY FINISHED
+      if (
+        parsed.status === "finished" &&
+        parsed.winnerId &&
+        !parsed.payoutDone &&
+        !payoutRef.current
+      ) {
+        payoutRef.current = true;
+        handlePayout(parsed);
+      }
+    }
+  };
+
+  load();
+
+  const unsub = databases.client.subscribe(
+    `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+    (res) => {
+      const parsed = parseGame(res.payload);
+      setGame(parsed);
+
+      // ✅ REAL-TIME PAYOUT TRIGGER
+      if (
+        parsed.status === "finished" &&
+        parsed.winnerId &&
+        !parsed.payoutDone &&
+        !payoutRef.current
+      ) {
+        payoutRef.current = true;
+        handlePayout(parsed);
+      }
+
+      if (parsed.status === "finished") {
+        if (parsed.winnerId === userId) {
+          setShowWin(true);
+          successSound();
+          setTimeout(goHome, 3000);
+        } else {
+          setTimeout(goHome, 2500);
         }
       }
-    };
+    }
+  );
 
-    load();
+  return () => unsub();
+}, [gameId, userId]);
+async function handlePayout(g) {
+  try {
+    if (!g.matchId || !g.winnerId) return;
 
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
+    // 🛑 prevent double run
+    if (payoutRef.current) return;
 
-        if (parsed.status === "finished") {
-          if (parsed.winnerId === userId) {
-            setShowWin(true);
-            successSound();
-            setTimeout(goHome, 3000);
-          } else {
-            setTimeout(goHome, 2500);
-          }
-        }
+    const matchDoc = await databases.getDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      g.matchId
+    );
+
+    // already paid
+    if (matchDoc.payoutDone) return;
+
+    const pot = Number(matchDoc.pot || 0);
+    if (!pot) return;
+
+    // 🏦 winner wallet
+    const walletRes = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", g.winnerId), Query.limit(1)]
+    );
+
+    if (!walletRes.documents.length) return;
+
+    const wallet = walletRes.documents[0];
+
+    // 💰 CREDIT WINNER
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      {
+        balance: Number(wallet.balance || 0) + pot
       }
     );
 
-    return () => unsub();
-  }, [gameId, userId]);
+    // 🧹 CLEAR POT + MARK PAID
+    await databases.updateDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      matchDoc.$id,
+      {
+        pot: 0,
+        payoutDone: true
+      }
+    );
 
-  if (!game || !userId) return <div>Loading...</div>;
+    // 🧠 MARK GAME
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        payoutDone: true
+      }
+    );
 
-  const myIdx = game.players.indexOf(userId);
-  const oppIdx = myIdx === 0 ? 1 : 0;
+  } catch (err) {
+    console.error("Payout error:", err);
+  }
+}// 🔁 SPECIAL RULES
+if (current.number === 1 || current.number === 8) nextTurn = userId;
+if (current.number === 2) g.pendingPick += 2;
+if (current.number === 14) g.pendingPick += 1;
 
-  const myLabel = myIdx === 0 ? "Player 1" : "Player 2";
-  const oppLabel = oppIdx === 0 ? "Player 1" : "Player 2";
+g.history = pushHistory(g, `${myLabel} played ${card}`);
 
-  const hand = game.hands[myIdx] || [];
-  const oppCards = game.hands[oppIdx]?.length || 0;
-  const top = decodeCard(game.discard);
+// 🏆 ROUND WIN
+if (!g.hands[myIdx].length) {
+  g.scores[myIdx]++;
 
-  async function playCard(i) {
-    if (actionLock.current || game.status === "finished") return;
-    if (game.turn !== userId) return invalidMove("Not your turn");
+  // 🏁 MATCH WIN
+  if (g.scores[myIdx] >= 2) {
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        status: "finished",
+        winnerId: userId,
+        payoutDone: false, // ✅ FIX
+        turn: null
+      }
+    );
 
-    actionLock.current = true;
+    if (g.matchId) {
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        g.matchId,
+        {
+          status: "finished",
+          winnerId: userId,
+          payoutDone: false // ✅ FIX
+        }
+      );
+    }
 
+    return;
+  }
+
+  // 🔁 NEW ROUND
+  const deck = createDeck();
+  g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
+  g.discard = deck.pop();
+  g.deck = deck;
+  g.pendingPick = 0;
+  g.round++;
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    gameId,
+    encodeGame(g)
+  );
+
+  return;
+}
+
+// ✅ NORMAL TURN
+await databases.updateDocument(
+  DATABASE_ID,
+  GAME_COLLECTION,
+  gameId,
+  {
+    ...encodeGame(g),
+    discard: card,
+    turn: nextTurn
+  }
+);
+
+} catch (err) {
+  console.error(err);
+} finally {
+  actionLock.current = false;
+}
+}
+async function playCard(i) {
+  if (actionLock.current || game.status === "finished") return;
+  if (game.turn !== userId) return invalidMove("Not your turn");
+
+  actionLock.current = true;
+
+  try {
     const g = JSON.parse(JSON.stringify(game));
     const card = g.hands[myIdx][i];
     const current = decodeCard(card);
     const topDecoded = decodeCard(g.discard);
 
-    if (g.pendingPick > 0 && ![2,14].includes(current.number)) {
-      actionLock.current = false;
+    // 🔒 PICK STACK RULE
+    if (g.pendingPick > 0 && ![2, 14].includes(current.number)) {
       return invalidMove("Use 2 or 14");
     }
 
+    // ❌ INVALID MOVE
     if (
       current.number !== topDecoded.number &&
       current.shape !== topDecoded.shape &&
       current.number !== 14
     ) {
-      actionLock.current = false;
       return invalidMove("Wrong move");
     }
 
+    // ✅ REMOVE CARD
     g.hands[myIdx].splice(i, 1);
 
     let nextTurn = g.players[oppIdx];
 
+    // 🔁 SPECIAL RULES
     if (current.number === 1 || current.number === 8) nextTurn = userId;
     if (current.number === 2) g.pendingPick += 2;
     if (current.number === 14) g.pendingPick += 1;
 
     g.history = pushHistory(g, `${myLabel} played ${card}`);
 
+    // 🏆 ROUND WIN
     if (!g.hands[myIdx].length) {
       g.scores[myIdx]++;
 
+      // 🏁 MATCH WIN
       if (g.scores[myIdx] >= 2) {
+
+        // 🔥 PAYOUT (ONLY ONCE)
+        if (!g.payoutDone && g.matchId) {
+          try {
+            const m = await databases.getDocument(
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              g.matchId
+            );
+
+            const pot = Number(m.pot || 0);
+
+            // 💰 CREDIT WINNER
+            const walletRes = await databases.listDocuments(
+              DATABASE_ID,
+              WALLET_COLLECTION,
+              [Query.equal("userId", userId)]
+            );
+
+            if (walletRes.documents.length) {
+              const wallet = walletRes.documents[0];
+
+              await databases.updateDocument(
+                DATABASE_ID,
+                WALLET_COLLECTION,
+                wallet.$id,
+                {
+                  balance: Number(wallet.balance || 0) + pot
+                }
+              );
+            }
+
+            // 🧹 RESET POT
+            await databases.updateDocument(
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              g.matchId,
+              {
+                status: "finished",
+                winnerId: userId,
+                pot: 0
+              }
+            );
+
+            g.payoutDone = true;
+
+          } catch (err) {
+            console.error("Payout failed:", err);
+          }
+        }
+
         await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
           ...encodeGame(g),
           status: "finished",
           winnerId: userId,
+          payoutDone: true,
           turn: null
         });
 
-        if (g.matchId) {
-          await databases.updateDocument(DATABASE_ID, MATCH_COLLECTION, g.matchId, {
-            status: "finished",
-            winnerId: userId
-          });
-        }
-
-        actionLock.current = false;
         return;
       }
 
+      // 🔁 NEW ROUND
       const deck = createDeck();
-      g.hands = [deck.splice(0,6), deck.splice(0,6)];
+      g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
       g.discard = deck.pop();
       g.deck = deck;
       g.pendingPick = 0;
@@ -422,10 +747,10 @@ export default function WhotGame({ gameId, goHome }) {
         encodeGame(g)
       );
 
-      actionLock.current = false;
       return;
     }
 
+    // ✅ NORMAL TURN
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
@@ -437,23 +762,16 @@ export default function WhotGame({ gameId, goHome }) {
       }
     );
 
+  } catch (err) {
+    console.error(err);
+  } finally {
     actionLock.current = false;
   }
-
-  async function drawMarket() {
-    if (game.status === "finished") return;
-    if (game.turn !== userId) return invalidMove("Wait your turn");
-
-    const g = JSON.parse(JSON.stringify(game));
-    let count = g.pendingPick > 0 ? g.pendingPick : 1;
-
-    g.history = pushHistory(g, `${myLabel} picked ${count}`);
-
-    for (let i = 0; i < count; i++) {
-      if (!g.deck.length) break;
-      g.hands[myIdx].push(g.deck.pop());
+  }
+      return;
     }
 
+    // NORMAL FLOW
     g.pendingPick = 0;
 
     await databases.updateDocument(
@@ -465,7 +783,13 @@ export default function WhotGame({ gameId, goHome }) {
         turn: g.players[oppIdx]
       }
     );
+
+  } catch (err) {
+    console.error(err);
+  } finally {
+    actionLock.current = false;
   }
+}
 return (
     <div style={styles.bg}>
       <div style={styles.box}>
@@ -535,49 +859,78 @@ return (
             />
           ))}
         </div>
+{showWin && (
+  <div style={styles.winBox}>
+    🎉 You Won ₦{match?.pot || 0}
+  </div>
+)}
 
-        {showWin && (
-          <div style={styles.winBox}>
-            🎉 You Won ₦{match?.pot || 0}
-          </div>
-        )}
+{/* 📝 HISTORY */}
+<div style={styles.history}>
+  {game.history.slice().reverse().map((h, i) => (
+    <div key={i}>{h}</div>
+  ))}
+</div>
 
-        {/* 📝 HISTORY */}
-        <div style={styles.history}>
-          {game.history.slice().reverse().map((h, i) => (
-            <div key={i}>{h}</div>
-          ))}
-        </div>
+{/* ✅ MESSAGE BUTTON (NOW BELOW POT AREA) */}
+<div style={{ textAlign: "center", marginTop: 6 }}>
+  <button
+    style={{ ...styles.chatBtn, position: "relative" }}
+    onClick={() => {
+      setShowChat(true);
 
-        <button onClick={goHome}>Exit</button>
+      // 🔴 clear unread instantly
+      setMatch(prev =>
+        prev ? { ...prev, hasUnread: false } : prev
+      );
+    }}
+  >
+    💬 Message
 
-        {/* ===================== */}
-        {/* 💬 CHAT POPUP */}
-        {/* ===================== */}
-        {showChat && (
-          <div style={styles.chatOverlay}>
-            <div style={styles.chatBox}>
+    {/* 🔴 RED DOT */}
+    {match?.hasUnread && (
+      <span
+        style={{
+          position: "absolute",
+          top: -3,
+          right: -3,
+          width: 10,
+          height: 10,
+          background: "red",
+          borderRadius: "50%"
+        }}
+      />
+    )}
+  </button>
+</div>
 
-              {/* ❌ EXIT */}
-              <div style={styles.chatHeader}>
-                <span>💬 Match Chat</span>
-                <button onClick={() => setShowChat(false)}>❌</button>
-              </div>
+<button onClick={goHome}>Exit</button>
 
-              {/* 📩 LOAD YOUR CHAT PAGE */}
-              {/* 👉 IMPORTANT: Messages.jsx must accept matchId */}
-              <Messages matchId={game.matchId} />
+{/* ===================== */}
+{/* 💬 CHAT POPUP */}
+{/* ===================== */}
+{showChat && (
+  <div style={styles.chatOverlay}>
+    <div style={styles.chatBox}>
 
-            </div>
-          </div>
-        )}
-
+      <div style={styles.chatHeader}>
+        <span>💬 Match Chat</span>
+        <button onClick={() => setShowChat(false)}>❌</button>
       </div>
-    </div>
-  );
-}
 
-// 🎨 FINAL STYLES
+      <Messages 
+        matchId={game.matchId}
+        onRead={() => {
+          setMatch(prev =>
+            prev ? { ...prev, hasUnread: false } : prev
+          );
+        }}
+      />
+
+    </div>
+  </div>
+)}
+        // 🎨 FINAL STYLES
 const styles = {
   bg: {
     minHeight: "100vh",
@@ -606,7 +959,10 @@ const styles = {
     justifyContent: "center",
     marginTop: 10
   },
-  card: { width: 65, cursor: "pointer" },
+  card: {
+    width: 65,
+    cursor: "pointer"
+  },
   center: {
     display: "flex",
     justifyContent: "center",
@@ -650,7 +1006,8 @@ const styles = {
     padding: "6px 12px",
     borderRadius: 6,
     border: "none",
-    cursor: "pointer"
+    cursor: "pointer",
+    position: "relative"
   },
   chatOverlay: {
     position: "fixed",
