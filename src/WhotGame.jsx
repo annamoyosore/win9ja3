@@ -288,7 +288,7 @@ function pushHistory(g, text) {
 
 // ✅ FIXED (HARD STOP ON FINISHED)
 function handleEmptyMarket(g) {
-  if (g.status === "finished") return g; // 🔒 prevent override
+  if (g.status === "finished") return g;
 
   const p0 = g.hands[0].length;
   const p1 = g.hands[1].length;
@@ -298,6 +298,7 @@ function handleEmptyMarket(g) {
   if (p0 < p1) winnerIdx = 0;
   else if (p1 < p0) winnerIdx = 1;
 
+  // ⚖️ DRAW (no new round if already close to finish)
   if (winnerIdx === null) {
     return {
       ...g,
@@ -307,7 +308,7 @@ function handleEmptyMarket(g) {
 
   g.scores[winnerIdx]++;
 
-  // 🏁 MATCH FINISH
+  // 🏁 HARD MATCH FINISH (MAIN FIX)
   if (g.scores[winnerIdx] >= 2) {
     return {
       ...g,
@@ -317,22 +318,22 @@ function handleEmptyMarket(g) {
       turn: null,
       history: pushHistory(
         g,
-        `🏆 ${winnerIdx === 0 ? "Player 1" : "Player 2"} wins (market empty)`
+        `🏆 ${winnerIdx === 0 ? "Player 1" : "Player 2"} wins match`
       )
     };
   }
 
-  // 🔁 NEW ROUND
+  // 🔁 ONLY START NEW ROUND IF NOT FINISHED
   const deck = createDeck();
 
   return {
     ...g,
-    hands: [deck.splice(0,6), deck.splice(0,6)],
+    hands: [deck.splice(0, 6), deck.splice(0, 6)],
     discard: deck.pop(),
     deck,
     pendingPick: 0,
     round: g.round + 1,
-    history: pushHistory(g, "♻️ New round (market empty)")
+    history: pushHistory(g, "♻️ New round")
   };
 }
 
@@ -629,7 +630,7 @@ export default function WhotGame({ gameId, goHome }) {
     }
   }
 // =========================
-// 🎮 DRAW MARKET (CRITICAL FIX)
+// 🎮 DRAW MARKET (FINAL FIX)
 // =========================
 async function drawMarket() {
   if (actionLock.current || game.status === "finished") return;
@@ -641,35 +642,28 @@ async function drawMarket() {
     const g = JSON.parse(JSON.stringify(game));
     const drawCount = g.pendingPick > 0 ? g.pendingPick : 1;
 
-    // 🧠 EMPTY MARKET FIX
+    // 🧠 EMPTY MARKET (CRITICAL FIX)
     if (!g.deck.length) {
       const updated = handleEmptyMarket(g);
 
-      if (updated.status === "finished") {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            ...encodeGame(updated),
-            status: "finished",
-            winnerId: updated.winnerId,
-            payoutDone: false,
-            turn: null
-          }
-        );
-      } else {
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          encodeGame(updated)
-        );
-      }
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        {
+          ...encodeGame(updated),
+          status: updated.status,
+          winnerId: updated.winnerId || null,
+          payoutDone:
+            updated.status === "finished" ? false : updated.payoutDone,
+          turn: updated.status === "finished" ? null : updated.turn
+        }
+      );
 
       return;
     }
 
+    // 🃏 NORMAL DRAW
     for (let i = 0; i < drawCount; i++) {
       if (!g.deck.length) break;
       g.hands[myIdx].push(g.deck.pop());
@@ -697,24 +691,8 @@ async function drawMarket() {
   }
 }
 
-// =========================
-// 🧠 DERIVED
-// =========================
-if (!game || !userId) return null;
-
-const myIdx = game.players.indexOf(userId);
-const oppIdx = myIdx === 0 ? 1 : 0;
-
-const hand = game.hands?.[myIdx] || [];
-const oppCards = game.hands?.[oppIdx]?.length || 0;
-
-const top = decodeCard(game.discard);
-
-const myLabel = myIdx === 0 ? "Player 1" : "Player 2";
-const oppLabel = myIdx === 0 ? "Player 2" : "Player 1";
-
 // =====================
-// 🎨 UI (CLEANED)
+// 🎨 CLEAN UI (NO DUPLICATE CHAT BUTTON)
 // =====================
 return (
   <div style={styles.bg}>
@@ -787,6 +765,7 @@ return (
         ))}
       </div>
 
+      {/* ✅ SINGLE CHAT BUTTON ONLY */}
       <button onClick={() => setShowChat(true)} style={styles.chatBtn}>
         💬 Chat
       </button>
@@ -809,7 +788,6 @@ return (
     </div>
   </div>
 );
-
 // =====================
 // 🎨 STYLES
 // =====================
