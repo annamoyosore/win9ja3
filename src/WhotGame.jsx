@@ -359,23 +359,42 @@ export default function WhotGame({ gameId, goHome }) {
   useEffect(() => {
     account.get().then(u => setUserId(u.$id));
   }, []);
+
+  // ✅ 👉 DERIVED STATE MUST BE HERE (AFTER STATE, BEFORE FUNCTIONS)
+  if (!game || !userId) return null;
+
+  const myIdx = game.players.indexOf(userId);
+  const oppIdx = myIdx === 0 ? 1 : 0;
+
+  const hand = game.hands?.[myIdx] || [];
+  const oppCards = game.hands?.[oppIdx]?.length || 0;
+
+  const top = decodeCard(game.discard);
+
+  const myLabel = myIdx === 0 ? "Player 1" : "Player 2";
+  const oppLabel = myIdx === 0 ? "Player 2" : "Player 1";
+
+  // =========================
+  // 🔄 LOAD GAME
+  // =========================
   useEffect(() => {
-  if (!gameId || !userId) return;
+    if (!gameId || !userId) return;
 
-  const load = async () => {
-    let g = null;
+    const load = async () => {
+      let g = null;
 
-    // 🔹 TRY LOAD GAME
-    try {
-      g = await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
-    } catch (e) {
-      console.warn("Game not found, recovering...");
-    }
+      // 🔹 TRY LOAD GAME
+      try {
+        g = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId
+        );
+      } catch (e) {
+        console.warn("Game not found, recovering...");
+      }
 
+      // (rest of your load logic continues...)
     // 🔹 RECOVER FROM MATCH
     if (!g && gameId) {
       try {
@@ -488,9 +507,6 @@ async function handlePayout(g) {
   try {
     if (!g.matchId || !g.winnerId) return;
 
-    // 🛑 prevent double run
-    if (payoutRef.current) return;
-
     const matchDoc = await databases.getDocument(
       DATABASE_ID,
       MATCH_COLLECTION,
@@ -548,84 +564,10 @@ async function handlePayout(g) {
   } catch (err) {
     console.error("Payout error:", err);
   }
-}// 🔁 SPECIAL RULES
-if (current.number === 1 || current.number === 8) nextTurn = userId;
-if (current.number === 2) g.pendingPick += 2;
-if (current.number === 14) g.pendingPick += 1;
+} // ✅ FIXED: function properly closed
 
-g.history = pushHistory(g, `${myLabel} played ${card}`);
 
-// 🏆 ROUND WIN
-if (!g.hands[myIdx].length) {
-  g.scores[myIdx]++;
-
-  // 🏁 MATCH WIN
-  if (g.scores[myIdx] >= 2) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        status: "finished",
-        winnerId: userId,
-        payoutDone: false, // ✅ FIX
-        turn: null
-      }
-    );
-
-    if (g.matchId) {
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        g.matchId,
-        {
-          status: "finished",
-          winnerId: userId,
-          payoutDone: false // ✅ FIX
-        }
-      );
-    }
-
-    return;
-  }
-
-  // 🔁 NEW ROUND
-  const deck = createDeck();
-  g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
-  g.discard = deck.pop();
-  g.deck = deck;
-  g.pendingPick = 0;
-  g.round++;
-
-  await databases.updateDocument(
-    DATABASE_ID,
-    GAME_COLLECTION,
-    gameId,
-    encodeGame(g)
-  );
-
-  return;
-}
-
-// ✅ NORMAL TURN
-await databases.updateDocument(
-  DATABASE_ID,
-  GAME_COLLECTION,
-  gameId,
-  {
-    ...encodeGame(g),
-    discard: card,
-    turn: nextTurn
-  }
-);
-
-} catch (err) {
-  console.error(err);
-} finally {
-  actionLock.current = false;
-}
-}
+// 👇 NOW COMPLETELY SEPARATE FUNCTION
 async function playCard(i) {
   if (actionLock.current || game.status === "finished") return;
   if (game.turn !== userId) return invalidMove("Not your turn");
@@ -656,7 +598,6 @@ async function playCard(i) {
     g.hands[myIdx].splice(i, 1);
 
     let nextTurn = g.players[oppIdx];
-
     // 🔁 SPECIAL RULES
     if (current.number === 1 || current.number === 8) nextTurn = userId;
     if (current.number === 2) g.pendingPick += 2;
@@ -664,124 +605,109 @@ async function playCard(i) {
 
     g.history = pushHistory(g, `${myLabel} played ${card}`);
 
-    // 🏆 ROUND WIN
-    if (!g.hands[myIdx].length) {
-      g.scores[myIdx]++;
+ // 🏆 ROUND WIN
+if (!g.hands[myIdx].length) {
+  g.scores[myIdx]++;
 
-      // 🏁 MATCH WIN
-      if (g.scores[myIdx] >= 2) {
-
-        // 🔥 PAYOUT (ONLY ONCE)
-        if (!g.payoutDone && g.matchId) {
-          try {
-            const m = await databases.getDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              g.matchId
-            );
-
-            const pot = Number(m.pot || 0);
-
-            // 💰 CREDIT WINNER
-            const walletRes = await databases.listDocuments(
-              DATABASE_ID,
-              WALLET_COLLECTION,
-              [Query.equal("userId", userId)]
-            );
-
-            if (walletRes.documents.length) {
-              const wallet = walletRes.documents[0];
-
-              await databases.updateDocument(
-                DATABASE_ID,
-                WALLET_COLLECTION,
-                wallet.$id,
-                {
-                  balance: Number(wallet.balance || 0) + pot
-                }
-              );
-            }
-
-            // 🧹 RESET POT
-            await databases.updateDocument(
-              DATABASE_ID,
-              MATCH_COLLECTION,
-              g.matchId,
-              {
-                status: "finished",
-                winnerId: userId,
-                pot: 0
-              }
-            );
-
-            g.payoutDone = true;
-
-          } catch (err) {
-            console.error("Payout failed:", err);
-          }
-        }
-
-        await databases.updateDocument(DATABASE_ID, GAME_COLLECTION, gameId, {
-          ...encodeGame(g),
-          status: "finished",
-          winnerId: userId,
-          payoutDone: true,
-          turn: null
-        });
-
-        return;
+  // 🏁 MATCH WIN
+  if (g.scores[myIdx] >= 2) {
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        ...encodeGame(g),
+        status: "finished",
+        winnerId: userId,
+        payoutDone: false, // ✅ correct
+        turn: null
       }
+    );
 
-      // 🔁 NEW ROUND
-      const deck = createDeck();
-      g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
-      g.discard = deck.pop();
-      g.deck = deck;
-      g.pendingPick = 0;
-      g.round++;
+    return;
+  }
+
+  // 🔁 NEW ROUND
+  const deck = createDeck();
+  g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
+  g.discard = deck.pop();
+  g.deck = deck;
+  g.pendingPick = 0;
+  g.round++;
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    gameId,
+    encodeGame(g)
+  );
+
+  return;
+}
+
+    // ✅ NORMAL TURN
+await databases.updateDocument(
+  DATABASE_ID,
+  GAME_COLLECTION,
+  gameId,
+  {
+    ...encodeGame(g),
+    discard: card,
+    turn: nextTurn
+  }
+);
+
+} catch (err) {
+  console.error(err);
+} finally {
+  actionLock.current = false;
+}
+} // ✅ playCard ends here
+
+
+// 👇 ADD IT HERE (NOT ABOVE, NOT INSIDE)
+async function drawMarket() {
+  if (actionLock.current || game.status === "finished") return;
+  if (game.turn !== userId) return invalidMove("Not your turn");
+
+  actionLock.current = true;
+
+  try {
+    const g = JSON.parse(JSON.stringify(game));
+
+    let drawCount = g.pendingPick > 0 ? g.pendingPick : 1;
+
+    if (!g.deck.length) {
+      const updated = handleEmptyMarket(g, gameId);
 
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId,
-        encodeGame(g)
+        encodeGame(updated)
       );
 
       return;
     }
 
-    // ✅ NORMAL TURN
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId,
-      {
-        ...encodeGame(g),
-        discard: card,
-        turn: nextTurn
-      }
-    );
-
-  } catch (err) {
-    console.error(err);
-  } finally {
-    actionLock.current = false;
-  }
-  }
-      return;
+    for (let i = 0; i < drawCount; i++) {
+      if (!g.deck.length) break;
+      g.hands[myIdx].push(g.deck.pop());
     }
 
-    // NORMAL FLOW
     g.pendingPick = 0;
+    g.turn = g.players[oppIdx];
+
+    g.history = pushHistory(
+      g,
+      `${myLabel} drew ${drawCount} card${drawCount > 1 ? "s" : ""}`
+    );
 
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
       gameId,
-      {
-        ...encodeGame(g),
-        turn: g.players[oppIdx]
-      }
+      encodeGame(g)
     );
 
   } catch (err) {
@@ -790,147 +716,165 @@ async function playCard(i) {
     actionLock.current = false;
   }
 }
+// ✅ DERIVED STATE (MISSING BEFORE)
+if (!game || !userId) return null;
+
+const myIdx = game.players.indexOf(userId);
+const oppIdx = myIdx === 0 ? 1 : 0;
+
+const hand = game.hands?.[myIdx] || [];
+const oppCards = game.hands?.[oppIdx]?.length || 0;
+
+const top = decodeCard(game.discard);
+
+const myLabel = myIdx === 0 ? "Player 1" : "Player 2";
+const oppLabel = myIdx === 0 ? "Player 2" : "Player 1";
+
+
+// =====================
+// 🎨 UI RENDER
+// =====================
 return (
-    <div style={styles.bg}>
-      <div style={styles.box}>
+  <div style={styles.bg}>
+    <div style={styles.box}>
 
-        {error && <div style={styles.error}>{error}</div>}
+      {error && <div style={styles.error}>{error}</div>}
 
-        {/* 🆕 TITLE */}
-        <h3 style={{ textAlign: "center", marginBottom: 6 }}>
-          🎮 Whot Game
-        </h3>
+      <h3 style={{ textAlign: "center", marginBottom: 6 }}>
+        🎮 Whot Game
+      </h3>
 
-        <div style={styles.row}>
-          <span>Player 1 ({game.hostName})</span>
-          <span>VS</span>
-          <span>Player 2 ({game.opponentName})</span>
-        </div>
-
-        <div style={{ textAlign: "center" }}>
-          {Array.from({ length: oppCards }).map((_, i) => (
-            <img key={i} src={drawBack()} style={{ width: 40 }} />
-          ))}
-          <div>{oppLabel} Cards: {oppCards}</div>
-        </div>
-
-        <div style={styles.row}>
-          <span>Round {game.round}</span>
-          <span>{game.scores[0]} - {game.scores[1]}</span>
-        </div>
-
-        <div style={styles.row}>
-          <span>₦{match?.stake || 0}</span>
-          <span>🏦 ₦{match?.pot || 0}</span>
-        </div>
-
-        {/* 🆕 TURN + MESSAGE BUTTON */}
-        <div style={{ textAlign: "center", marginTop: 6 }}>
-          <p>
-            {game.status === "finished"
-              ? "🏁 FINISHED"
-              : game.turn === userId
-              ? "🟢 YOUR TURN"
-              : "⏳ OPPONENT"}
-          </p>
-
-          <button
-            style={styles.chatBtn}
-            onClick={() => setShowChat(true)}
-          >
-            💬 Message
-          </button>
-        </div>
-
-        <div style={styles.center}>
-          {top && <img src={drawCard(top)} style={styles.card} />}
-          <button style={styles.marketBtn} onClick={drawMarket}>
-            🃏 {game.deck.length}
-          </button>
-        </div>
-
-        <div style={styles.hand}>
-          {hand.map((c, i) => (
-            <img
-              key={i}
-              src={drawCard(decodeCard(c))}
-              style={styles.card}
-              onClick={() => playCard(i)}
-            />
-          ))}
-        </div>
-{showWin && (
-  <div style={styles.winBox}>
-    🎉 You Won ₦{match?.pot || 0}
-  </div>
-)}
-
-{/* 📝 HISTORY */}
-<div style={styles.history}>
-  {game.history.slice().reverse().map((h, i) => (
-    <div key={i}>{h}</div>
-  ))}
-</div>
-
-{/* ✅ MESSAGE BUTTON (NOW BELOW POT AREA) */}
-<div style={{ textAlign: "center", marginTop: 6 }}>
-  <button
-    style={{ ...styles.chatBtn, position: "relative" }}
-    onClick={() => {
-      setShowChat(true);
-
-      // 🔴 clear unread instantly
-      setMatch(prev =>
-        prev ? { ...prev, hasUnread: false } : prev
-      );
-    }}
-  >
-    💬 Message
-
-    {/* 🔴 RED DOT */}
-    {match?.hasUnread && (
-      <span
-        style={{
-          position: "absolute",
-          top: -3,
-          right: -3,
-          width: 10,
-          height: 10,
-          background: "red",
-          borderRadius: "50%"
-        }}
-      />
-    )}
-  </button>
-</div>
-
-<button onClick={goHome}>Exit</button>
-
-{/* ===================== */}
-{/* 💬 CHAT POPUP */}
-{/* ===================== */}
-{showChat && (
-  <div style={styles.chatOverlay}>
-    <div style={styles.chatBox}>
-
-      <div style={styles.chatHeader}>
-        <span>💬 Match Chat</span>
-        <button onClick={() => setShowChat(false)}>❌</button>
+      <div style={styles.row}>
+        <span>Player 1 ({game.hostName})</span>
+        <span>VS</span>
+        <span>Player 2 ({game.opponentName})</span>
       </div>
 
-      <Messages 
-        matchId={game.matchId}
-        onRead={() => {
-          setMatch(prev =>
-            prev ? { ...prev, hasUnread: false } : prev
-          );
-        }}
-      />
+      <div style={{ textAlign: "center" }}>
+        {Array.from({ length: oppCards }).map((_, i) => (
+          <img key={i} src={drawBack()} style={{ width: 40 }} />
+        ))}
+        <div>{oppLabel} Cards: {oppCards}</div>
+      </div>
 
+      <div style={styles.row}>
+        <span>Round {game.round}</span>
+        <span>{game.scores[0]} - {game.scores[1]}</span>
+      </div>
+
+      <div style={styles.row}>
+        <span>₦{match?.stake || 0}</span>
+        <span>🏦 ₦{match?.pot || 0}</span>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: 6 }}>
+        <p>
+          {game.status === "finished"
+            ? "🏁 FINISHED"
+            : game.turn === userId
+            ? "🟢 YOUR TURN"
+            : "⏳ OPPONENT"}
+        </p>
+
+        <button
+          style={styles.chatBtn}
+          onClick={() => setShowChat(true)}
+        >
+          💬 Message
+        </button>
+      </div>
+
+      <div style={styles.center}>
+        {top && <img src={drawCard(top)} style={styles.card} />}
+        <button style={styles.marketBtn} onClick={drawMarket}>
+          🃏 {game.deck.length}
+        </button>
+      </div>
+
+      <div style={styles.hand}>
+        {hand.map((c, i) => (
+          <img
+            key={i}
+            src={drawCard(decodeCard(c))}
+            style={styles.card}
+            onClick={() => playCard(i)}
+          />
+        ))}
+      </div>
+
+      {showWin && (
+        <div style={styles.winBox}>
+          🎉 You Won ₦{match?.pot || 0}
+        </div>
+      )}
+
+      <div style={styles.history}>
+        {game.history.slice().reverse().map((h, i) => (
+          <div key={i}>{h}</div>
+        ))}
+      </div>
+
+      {/* CHAT BUTTON WITH RED DOT */}
+      <div style={{ textAlign: "center", marginTop: 6 }}>
+        <button
+          style={{ ...styles.chatBtn, position: "relative" }}
+          onClick={() => {
+            setShowChat(true);
+            setMatch(prev =>
+              prev ? { ...prev, hasUnread: false } : prev
+            );
+          }}
+        >
+          💬 Message
+
+          {match?.hasUnread && (
+            <span
+              style={{
+                position: "absolute",
+                top: -3,
+                right: -3,
+                width: 10,
+                height: 10,
+                background: "red",
+                borderRadius: "50%"
+              }}
+            />
+          )}
+        </button>
+      </div>
+
+      <button onClick={goHome}>Exit</button>
+
+      {/* CHAT POPUP */}
+      {showChat && (
+        <div style={styles.chatOverlay}>
+          <div style={styles.chatBox}>
+
+            <div style={styles.chatHeader}>
+              <span>💬 Match Chat</span>
+              <button onClick={() => setShowChat(false)}>❌</button>
+            </div>
+
+            <Messages 
+              matchId={game.matchId}
+              onRead={() => {
+                setMatch(prev =>
+                  prev ? { ...prev, hasUnread: false } : prev
+                );
+              }}
+            />
+
+          </div>
+        </div>
+      )}
     </div>
   </div>
-)}
-        // 🎨 FINAL STYLES
+);
+
+
+// =====================
+// 🎨 STYLES (MOVED OUTSIDE JSX)
+// =====================
 const styles = {
   bg: {
     minHeight: "100vh",
@@ -998,8 +942,6 @@ const styles = {
     fontSize: 12,
     color: "#ff4d4d"
   },
-
-  // 💬 CHAT UI
   chatBtn: {
     background: "#2563eb",
     color: "#fff",
