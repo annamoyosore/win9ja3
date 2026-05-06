@@ -273,6 +273,26 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
+  // CANCEL MATCH (HOST)
+  // =========================
+  async function cancelMatch(matchId) {
+    if (!confirm("Cancel this match?")) return;
+
+    try {
+      await databases.deleteDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        matchId
+      );
+
+      refresh(user.$id);
+
+    } catch (err) {
+      alert("Failed to cancel match");
+    }
+  }
+
+  // =========================
   // UI
   // =========================
   return (
@@ -299,6 +319,9 @@ export default function Lobby({ goGame, back }) {
               : "🔴 Opponent Turn";
         }
 
+        const isHost = m.hostId === user.$id;
+        const isWaiting = m.status === "waiting" && !m.opponentId;
+
         return (
           <div key={m.$id} style={styles.card}>
             <div>
@@ -307,11 +330,19 @@ export default function Lobby({ goGame, back }) {
               {turnLabel && <p>{turnLabel}</p>}
             </div>
 
-            {/* ✅ FIXED SECTION */}
             {m.status === "finished" ? (
               <button style={styles.finishedBtn} disabled>
                 ✅ Finished
               </button>
+
+            ) : isWaiting && isHost ? (
+              <button
+                style={styles.cancelBtn}
+                onClick={() => cancelMatch(m.$id)}
+              >
+                ❌ Cancel
+              </button>
+
             ) : m.gameId ? (
               <button
                 style={styles.resumeBtn}
@@ -319,6 +350,7 @@ export default function Lobby({ goGame, back }) {
               >
                 ▶ Resume
               </button>
+
             ) : null}
           </div>
         );
@@ -370,5 +402,12 @@ const styles = {
   },
   joinBtn: { background: "gold", padding: 8 },
   resumeBtn: { background: "green", padding: 8, color: "#fff" },
-  finishedBtn: { background: "#16a34a", padding: 8, color: "#fff" }
+  finishedBtn: { background: "#16a34a", padding: 8, color: "#fff" },
+  cancelBtn: {
+    background: "#dc2626",
+    padding: 8,
+    color: "#fff",
+    border: "none",
+    cursor: "pointer"
+  }
 };
