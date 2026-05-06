@@ -118,7 +118,6 @@ export default function Lobby({ goGame, back }) {
     await Promise.all(
       mine.map(async (m) => {
         if (!m.gameId) return;
-
         try {
           const g = await databases.getDocument(
             DATABASE_ID,
@@ -166,7 +165,6 @@ export default function Lobby({ goGame, back }) {
     setCreating(true);
 
     try {
-      // 🔹 DEDUCT HOST MONEY (LOCK)
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -176,7 +174,11 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // 🔹 CREATE MATCH
+      setWallet(prev => ({
+        ...prev,
+        balance: Number(prev.balance || 0) - amount
+      }));
+
       await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -185,7 +187,7 @@ export default function Lobby({ goGame, back }) {
           hostId: user.$id,
           opponentId: null,
           stake: amount,
-          pot: amount, // locked
+          pot: amount,
           status: "waiting",
           gameId: "",
           createdAt: new Date().toISOString()
@@ -202,7 +204,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN MATCH (OPPONENT PAYS)
+  // JOIN MATCH
   // =========================
   async function joinMatch(match) {
     if (loadingJoin) return;
@@ -228,7 +230,7 @@ export default function Lobby({ goGame, back }) {
         throw new Error("Insufficient balance");
       }
 
-      // 🔹 DEDUCT OPPONENT MONEY
+      // deduct opponent
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -238,11 +240,16 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
+      setWallet(prev => ({
+        ...prev,
+        balance: Number(prev.balance || 0) - fresh.stake
+      }));
+
       const total = fresh.stake * 2;
       const adminCut = Math.floor(total * 0.1);
       const finalPot = total - adminCut;
 
-      // 🔹 ADMIN CUT
+      // admin
       const adminRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -262,7 +269,6 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
-      // 🔹 UPDATE MATCH
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -293,7 +299,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // CANCEL (REFUND HOST)
+  // CANCEL MATCH (REFUND)
   // =========================
   async function cancelMatch(match) {
     if (canceling) return;
@@ -305,27 +311,20 @@ export default function Lobby({ goGame, back }) {
     setCanceling(match.$id);
 
     try {
-      const walletRes = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", match.hostId), Query.limit(1)]
-      );
-
-      if (!walletRes.documents.length) {
-        throw new Error("Wallet not found");
-      }
-
-      const walletDoc = walletRes.documents[0];
-
-      // 🔹 REFUND
+      // refund using LOCAL wallet
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
-        walletDoc.$id,
+        wallet.$id,
         {
-          balance: Number(walletDoc.balance || 0) + match.stake
+          balance: Number(wallet.balance || 0) + match.stake
         }
       );
+
+      setWallet(prev => ({
+        ...prev,
+        balance: Number(prev.balance || 0) + match.stake
+      }));
 
       await databases.deleteDocument(
         DATABASE_ID,
@@ -334,6 +333,7 @@ export default function Lobby({ goGame, back }) {
       );
 
     } catch (err) {
+      console.error(err);
       alert("Cancel failed");
     }
 
@@ -347,47 +347,60 @@ export default function Lobby({ goGame, back }) {
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
 
-      <h3>
+      <p>
         Running: {
           activeMatches.filter(m => m.status !== "finished").length
         } / 7
-      </h3>
+      </p>
 
       <h2>Your Matches</h2>
 
-      {activeMatches.map(m => (
-        <div key={m.$id} style={styles.card}>
-          <div>
-            <p>₦{m.stake}</p>
-            <p>{m.status}</p>
+      {activeMatches.map(m => {
+        const game = gameMap[m.gameId];
+
+        let turnLabel = "";
+        if (game && game.status !== "finished") {
+          turnLabel =
+            game.turn === user.$id
+              ? "🟢 Your Turn"
+              : "🔴 Opponent Turn";
+        }
+
+        return (
+          <div key={m.$id} style={styles.card}>
+            <div>
+              <p>₦{m.stake}</p>
+              <p>{m.status}</p>
+              {turnLabel && <p>{turnLabel}</p>}
+            </div>
+
+            {m.status === "finished" ? (
+              <button style={styles.finishedBtn}>Finished</button>
+
+            ) : m.gameId ? (
+              <button
+                style={styles.resumeBtn}
+                onClick={() => goGame(m.gameId, m.stake)}
+              >
+                Resume
+              </button>
+
+            ) : m.hostId === user.$id &&
+              m.status === "waiting" &&
+              !m.opponentId ? (
+              <button
+                style={styles.cancelBtn}
+                onClick={() => cancelMatch(m)}
+              >
+                {canceling === m.$id ? "Canceling..." : "Cancel"}
+              </button>
+
+            ) : (
+              <span>Waiting...</span>
+            )}
           </div>
-
-          {m.status === "finished" ? (
-            <button style={styles.finishedBtn}>Finished</button>
-
-          ) : m.gameId ? (
-            <button
-              style={styles.resumeBtn}
-              onClick={() => goGame(m.gameId, m.stake)}
-            >
-              Resume
-            </button>
-
-          ) : m.hostId === user.$id &&
-            m.status === "waiting" &&
-            !m.opponentId ? (
-            <button
-              style={styles.cancelBtn}
-              onClick={() => cancelMatch(m)}
-            >
-              {canceling === m.$id ? "Canceling..." : "Cancel"}
-            </button>
-
-          ) : (
-            <span>Waiting...</span>
-          )}
-        </div>
-      ))}
+        );
+      })}
 
       <h2>Available Matches</h2>
 
@@ -424,7 +437,7 @@ export default function Lobby({ goGame, back }) {
 }
 
 // =========================
-// 🎨 MODERN BUTTON STYLES
+// STYLES
 // =========================
 const baseBtn = {
   padding: "10px 16px",
