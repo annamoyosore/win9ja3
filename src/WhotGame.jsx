@@ -1297,7 +1297,7 @@ async function playCard(i) {
 // =========================
 async function drawMarket() {
 
-  // 🔒 LOCK FINISHED GAME
+  // 🔒 BLOCK ACTIONS
   if (
     actionLock.current ||
     game.status === "finished" ||
@@ -1310,10 +1310,25 @@ async function drawMarket() {
 
   try {
 
-    // ✅ USE LIVE REALTIME STATE
-    const g = JSON.parse(
-      JSON.stringify(game)
-    );
+    // ✅ ALWAYS LOAD FRESH GAME
+    const freshDoc =
+      await databases.getDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId
+      );
+
+    const g =
+      parseGame(freshDoc);
+
+    // 🔒 RECHECK STATUS
+    if (
+      g.status === "finished" ||
+      g.payoutDone
+    ) {
+
+      return;
+    }
 
     // 🔒 REAL TURN VALIDATION
     if (g.turn !== userId) {
