@@ -1694,48 +1694,52 @@ return (
         Exit
       </button>
 
-      {/* CHAT POPUP */}
-      {showChat && game?.matchId && (
+ {/* CHAT POPUP */}
+{showChat && game?.matchId && (
 
-        <div style={styles.chatOverlay}>
+  <div style={styles.chatOverlay}>
 
-          <div style={styles.chatBox}>
+    <div style={styles.chatBox}>
 
-            <div style={styles.chatHeader}>
+      <div style={styles.chatHeader}>
 
-              <span>
-                💬 Match Chat
-              </span>
+        <span>
+          💬 Match Chat
+        </span>
 
-              <button
-                onClick={() =>
-                  setShowChat(false)
+        <button
+          onClick={() =>
+            setShowChat(false)
+          }
+        >
+          ❌
+        </button>
+
+      </div>
+
+      <Messages
+        matchId={game.matchId}
+
+        onRead={() => {
+
+          setMatch(prev =>
+            prev
+              ? {
+                  ...prev,
+                  hasUnread: false
                 }
-              >
-                ❌
-              </button>
+              : prev
+          );
+        }}
+      />
 
-            </div>
+    </div>
 
-            <Messages
-              matchId={game.matchId}
+  </div>
+)}
 
-              onRead={() => {
-
-                setMatch(prev =>
-                  prev
-                    ? {
-                        ...prev,
-                        hasUnread: false
-                      }
-                    : prev
-                );
-              }}
-            />
-
-          </div>
-
-        </div>
+    </div>
+  </div>
 );
 }
 
