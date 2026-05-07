@@ -430,7 +430,7 @@ function encodeGame(g) {
 // =========================
 function ensureGameReady(g) {
 
-  // 🛑 NEVER REBUILD FINISHED / PAID GAME
+  // 🛑 NEVER TOUCH FINISHED GAME
   if (
     g.status === "finished" ||
     g.payoutDone ||
@@ -439,45 +439,55 @@ function ensureGameReady(g) {
     return g;
   }
 
-  // 🛑 ONLY INIT TRULY EMPTY GAME
+  // ✅ STRUCTURE CHECK ONLY
+  // deck CAN legally be 0
   const invalidGame =
-    !g.deck?.length ||
-    !g.hands?.length ||
+    !Array.isArray(g.hands) ||
     g.hands.length < 2 ||
-    !g.hands?.[0] ||
-    !g.hands?.[1] ||
+    !Array.isArray(g.hands[0]) ||
+    !Array.isArray(g.hands[1]) ||
+    !Array.isArray(g.deck) ||
     !g.discard;
 
-  if (invalidGame) {
+  // ✅ GAME IS VALID
+  if (!invalidGame) {
+    return g;
+  }
 
-    const deck = createDeck();
+  // =========================
+  // 🔄 TRUE RECOVERY ONLY
+  // =========================
+  const deck = createDeck();
 
-    return {
-      ...g,
+  return {
+    ...g,
 
-      hands: [
-        deck.splice(0, 6),
-        deck.splice(0, 6)
-      ],
+    hands: [
+      deck.splice(0, 6),
+      deck.splice(0, 6)
+    ],
 
-      discard: deck.pop(),
+    discard: deck.pop(),
 
-      deck,
+    deck,
 
-      pendingPick: 0,
+    pendingPick: 0,
 
-      history: [],
+    history: [],
 
-      // ✅ SAFE SCORES
-      scores: [0, 0],
+    scores: [0, 0],
 
-      round: 1,
+    round: 1,
 
-      status: "playing",
+    status: "playing",
 
-      payoutDone: false,
+    payoutDone: false,
 
-      winnerId: null
+    winnerId: null,
+
+    turn: g.players?.[0] || null
+  };
+}
     };
   }
 
@@ -1311,13 +1321,11 @@ async function drawMarket() {
 
   try {
 
-    // ✅ USE LOCAL LIVE GAME STATE
-    // prevents realtime/Appwrite desync
+    // ✅ DEEP COPY
     const g = JSON.parse(
       JSON.stringify(game)
     );
 
-    // ✅ SAFE INDEX
     const myIdx =
       g.players.indexOf(userId);
 
@@ -1333,47 +1341,14 @@ async function drawMarket() {
         ? "Player 1"
         : "Player 2";
 
-    // ✅ PICK STACK
-    const drawCount =
-      g.pendingPick > 0
-        ? g.pendingPick
-        : 1;
-
     // =========================
-    // 🧠 EMPTY MARKET
+    // 🏁 MARKET EMPTY
     // =========================
-    if (!g.deck?.length) {
+    if (g.deck.length <= 0) {
 
       const updated =
         handleEmptyMarket(g);
 
-      // 🏁 MATCH FINISH
-      if (
-        updated.status ===
-        "finished"
-      ) {
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          gameId,
-          {
-            ...encodeGame(
-              updated
-            ),
-
-            status: "finished",
-
-            payoutDone: false,
-
-            turn: null
-          }
-        );
-
-        return;
-      }
-
-      // 🔁 NORMAL MARKET RESET
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -1385,65 +1360,82 @@ async function drawMarket() {
     }
 
     // =========================
-    // 🃏 DRAW CARDS
+    // 🃏 DRAW COUNT
     // =========================
+    const drawCount =
+      g.pendingPick > 0
+        ? g.pendingPick
+        : 1;
+
     let drawn = 0;
 
+    // =========================
+    // 🃏 DRAW LOOP
+    // =========================
     for (
       let i = 0;
       i < drawCount;
       i++
     ) {
 
-      // 🛑 STOP IF MARKET ENDS
-      if (!g.deck.length)
+      // 🏁 MARKET ENDS MID-DRAW
+      if (g.deck.length <= 0) {
         break;
+      }
 
-      const newCard =
+      const card =
         g.deck.pop();
 
-      if (newCard) {
+      if (card) {
 
-        g.hands[myIdx].push(
-          newCard
-        );
+        g.hands[myIdx].push(card);
 
         drawn++;
       }
     }
 
     // =========================
-    // 🛑 NO CARD DRAWN
+    // 🏁 MARKET FULLY EMPTY
+    // AFTER DRAW
     // =========================
-    if (drawn <= 0) {
+    if (g.deck.length <= 0) {
 
-      invalidMove(
-        "Market empty"
+      g.pendingPick = 0;
+
+      g.turn =
+        g.players[oppIdx];
+
+      g.history = pushHistory(
+        g,
+        `${myLabel} drew ${drawn} card${drawn !== 1 ? "s" : ""}`
+      );
+
+      const updated =
+        handleEmptyMarket(g);
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        encodeGame(updated)
       );
 
       return;
     }
 
     // =========================
-    // 🔁 RESET PICK STACK
+    // 🔁 NORMAL TURN
     // =========================
     g.pendingPick = 0;
 
-    // ✅ NEXT TURN
     g.turn =
       g.players[oppIdx];
 
-    // =========================
-    // 📝 HISTORY
-    // =========================
     g.history = pushHistory(
       g,
-      `${myLabel} drew ${drawn} card${drawn > 1 ? "s" : ""}`
+      `${myLabel} drew ${drawn} card${drawn !== 1 ? "s" : ""}`
     );
 
-    // =========================
-    // 💾 SAVE GAME
-    // =========================
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
@@ -1464,7 +1456,7 @@ async function drawMarket() {
 
   } finally {
 
-    // ✅ ALWAYS RELEASE LOCK
+    // ✅ ALWAYS RELEASE
     actionLock.current = false;
   }
 }
