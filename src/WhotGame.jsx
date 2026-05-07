@@ -441,12 +441,11 @@ function ensureGameReady(g) {
 
   // 🛑 ONLY INIT TRULY EMPTY GAME
   const invalidGame =
-    !g.deck?.length ||
-    !g.hands?.length ||
-    g.hands.length < 2 ||
-    !g.hands?.[0] ||
-    !g.hands?.[1] ||
-    !g.discard;
+  !g.hands?.length ||
+  g.hands.length < 2 ||
+  !g.hands?.[0] ||
+  !g.hands?.[1] ||
+  !g.discard;
 
   if (invalidGame) {
 
@@ -578,11 +577,11 @@ function handleEmptyMarket(g) {
     scores,
 
     hands: [
-      deck.splice(0, 6),
-      deck.splice(0, 6)
-    ],
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ],
 
-    discard: deck.pop(),
+  discard: deck.shift(),
 
     deck,
 
@@ -723,13 +722,12 @@ export default function WhotGame({
 
               players: m.players,
 
-              hands: [
-                deck.splice(0, 6),
-                deck.splice(0, 6)
-              ],
+               hands: [
+    deck.splice(0, 6),
+    deck.splice(0, 6)
+  ],
 
-              discard: deck.pop(),
-
+  discard: deck.shift(),
               deck,
 
               turn: m.players[0],
@@ -1207,13 +1205,13 @@ async function playCard(i) {
       // =========================
       const deck = createDeck();
 
-      g.hands = [
-        deck.splice(0, 6),
-        deck.splice(0, 6)
-      ];
+      
+g.hands = [
+  deck.splice(0, 6),
+  deck.splice(0, 6)
+];
 
-      g.discard = deck.pop();
-
+g.discard = deck.shift();
       g.deck = deck;
 
       g.pendingPick = 0;
@@ -1321,10 +1319,12 @@ async function drawMarket() {
         ? "Player 1"
         : "Player 2";
 
-    const drawCount =
-      g.pendingPick > 0
-        ? g.pendingPick
-        : 1;
+    const drawCount = Math.min(
+  g.pendingPick > 0
+    ? g.pendingPick
+    : 1,
+  g.deck.length
+);
 
     // =========================
     // 🧠 EMPTY MARKET
@@ -1372,10 +1372,12 @@ async function drawMarket() {
 
       if (!g.deck.length) break;
 
-      g.hands[myIdx].push(
-        g.deck.pop()
-      );
-    }
+const drawn = g.deck.shift();
+
+if (drawn) {
+  g.hands[myIdx].push(drawn);
+}
+}
 
     // =========================
     // 🔁 RESET STATE
