@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import {
   account,
@@ -17,11 +14,12 @@ const MATCH_COLLECTION = "matches";
 const TRANSACTION_COLLECTION = "transactions";
 const CASINO_COLLECTION = "casino_records";
 
+// 🔒 SECURITY ADMIN LOGIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
-// =========================
-// COMPONENT
-// =========================
+// 💰 ADMIN CASINO WALLET ID
+const ADMIN_WALLET_ID = "69f2482600125d496354";
+
 export default function AdminDashboard({ back }) {
 
   const [user, setUser] = useState(null);
@@ -29,20 +27,16 @@ export default function AdminDashboard({ back }) {
   const [withdrawals, setWithdrawals] = useState([]);
   const [matches, setMatches] = useState([]);
 
-  // 🔥 wallet name map (userId -> name)
   const [walletMap, setWalletMap] = useState({});
-
   const [casinoStats, setCasinoStats] = useState({
     totalStake: 0,
     totalWin: 0,
-    reserve: 0
+    reserve: 0,
+    profit: 0
   });
 
   const [loading, setLoading] = useState(false);
 
-  // =========================
-  // INIT
-  // =========================
   useEffect(() => {
     init();
   }, []);
@@ -56,6 +50,7 @@ export default function AdminDashboard({ back }) {
     }
 
     setUser(u);
+
     await loadAll();
     await loadWalletNames();
     await loadCasinoStats();
@@ -70,7 +65,7 @@ export default function AdminDashboard({ back }) {
   }
 
   // =========================
-  // LOAD WALLET NAMES (FIX)
+  // WALLET MAP (SAFE)
   // =========================
   async function loadWalletNames() {
     try {
@@ -82,7 +77,7 @@ export default function AdminDashboard({ back }) {
 
       const map = {};
 
-      res.documents.forEach((w) => {
+      res.documents.forEach(w => {
         map[w.userId] = w.name || "Unknown";
       });
 
@@ -94,14 +89,15 @@ export default function AdminDashboard({ back }) {
   }
 
   // =========================
-  // CASINO STATS
+  // CASINO STATS (FIXED)
   // =========================
   async function loadCasinoStats() {
     try {
+
       const admin = await databases.getDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
-        ADMIN_ID
+        ADMIN_WALLET_ID
       );
 
       const res = await databases.listDocuments(
@@ -113,7 +109,7 @@ export default function AdminDashboard({ back }) {
       let totalStake = 0;
       let totalWin = 0;
 
-      res.documents.forEach((t) => {
+      res.documents.forEach(t => {
         totalStake += Number(t.stake || 0);
         totalWin += Number(t.win || 0);
       });
@@ -121,7 +117,8 @@ export default function AdminDashboard({ back }) {
       setCasinoStats({
         totalStake,
         totalWin,
-        reserve: admin.casinoReserve || 0
+        reserve: Number(admin.casinoReserve || 0),
+        profit: Number(admin.casinoProfit || 0)
       });
 
     } catch (err) {
@@ -129,9 +126,6 @@ export default function AdminDashboard({ back }) {
     }
   }
 
-  // =========================
-  // LOAD DATA
-  // =========================
   async function loadDeposits() {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -158,15 +152,13 @@ export default function AdminDashboard({ back }) {
     );
 
     setMatches(
-      res.documents.filter(
-        m => m.status !== "finished" && m.status !== "cancelled"
+      res.documents.filter(m =>
+        m.status !== "finished" &&
+        m.status !== "cancelled"
       )
     );
   }
 
-  // =========================
-  // WALLET HELPER
-  // =========================
   async function getWallet(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -174,10 +166,18 @@ export default function AdminDashboard({ back }) {
       [Query.equal("userId", userId)]
     );
 
-    if (!res.documents.length)
+    if (!res.documents.length) {
       throw new Error("Wallet not found");
+    }
 
     return res.documents[0];
+  }
+
+  // =========================
+  // CONFIRM ACTION HELPER
+  // =========================
+  function confirmAction(msg) {
+    return window.confirm(msg);
   }
 
   // =========================
@@ -194,11 +194,12 @@ export default function AdminDashboard({ back }) {
         <p>💰 Reserve: ₦{casinoStats.reserve}</p>
         <p>📊 Total Stake: ₦{casinoStats.totalStake}</p>
         <p>🎁 Total Paid: ₦{casinoStats.totalWin}</p>
-        <p>📉 Profit: ₦{casinoStats.totalStake - casinoStats.totalWin}</p>
+        <p>📈 Profit: ₦{casinoStats.profit}</p>
       </div>
 
       {/* DEPOSITS */}
       <h2>💰 Pending Deposits</h2>
+
       {deposits.map(d => (
         <div key={d.$id} style={styles.card}>
           <div>
@@ -207,11 +208,32 @@ export default function AdminDashboard({ back }) {
               {walletMap[d.userId] || "Unknown"} ({d.userId})
             </div>
           </div>
+
+          <div>
+            <button
+              onClick={async () => {
+                if (!confirmAction("Approve deposit?")) return;
+                alert("Connect your approve logic here");
+              }}
+            >
+              Approve
+            </button>
+
+            <button
+              onClick={() => {
+                if (!confirmAction("Reject deposit?")) return;
+                alert("Reject logic here");
+              }}
+            >
+              Reject
+            </button>
+          </div>
         </div>
       ))}
 
       {/* WITHDRAWALS */}
       <h2>💸 Withdrawals</h2>
+
       {withdrawals.map(w => (
         <div key={w.$id} style={styles.card}>
           <div>
@@ -220,11 +242,32 @@ export default function AdminDashboard({ back }) {
               {walletMap[w.userId] || "Unknown"} ({w.userId})
             </div>
           </div>
+
+          <div>
+            <button
+              onClick={() => {
+                if (!confirmAction("Approve withdrawal?")) return;
+                alert("Approve logic here");
+              }}
+            >
+              Approve
+            </button>
+
+            <button
+              onClick={() => {
+                if (!confirmAction("Reject withdrawal?")) return;
+                alert("Reject logic here");
+              }}
+            >
+              Reject
+            </button>
+          </div>
         </div>
       ))}
 
       {/* MATCHES */}
       <h2>🎮 Active Matches</h2>
+
       {matches.map(m => (
         <div key={m.$id} style={styles.card}>
           <div>
@@ -236,6 +279,7 @@ export default function AdminDashboard({ back }) {
       ))}
 
       <button onClick={back}>⬅ Back</button>
+
     </div>
   );
 }
