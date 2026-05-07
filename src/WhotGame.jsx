@@ -422,16 +422,7 @@ function ensureGameReady(g) {
   };
 }
 
-// =========================
-// 📝 PUSH HISTORY
-// =========================
-function pushHistory(g, text) {
-
-  return [
-    ...(g.history || []),
-    text
-  ].slice(-10);
-}
+// ===============
 // 📝 HISTORY
 function pushHistory(g, text) {
   return [...(g.history || []), text].slice(-10);
