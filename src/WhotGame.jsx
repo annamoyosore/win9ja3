@@ -18,6 +18,7 @@ const WALLET_COLLECTION = "wallets";
 function beep(freq = 200, duration = 200) {
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
+
     if (!AudioCtx) return;
 
     const ctx = new AudioCtx();
@@ -33,6 +34,7 @@ function beep(freq = 200, duration = 200) {
     osc.start();
 
     gain.gain.setValueAtTime(0.3, ctx.currentTime);
+
     gain.gain.exponentialRampToValueAtTime(
       0.001,
       ctx.currentTime + duration / 1000
@@ -44,16 +46,21 @@ function beep(freq = 200, duration = 200) {
         ctx.close();
       } catch {}
     }, duration);
+
   } catch {}
 }
 
 function successSound() {
   beep(600, 200);
-  setTimeout(() => beep(800, 200), 150);
+
+  setTimeout(() => {
+    beep(800, 200);
+  }, 150);
 }
 
 // 🎴 DECK (SAFE SHUFFLE)
 function createDeck() {
+
   const valid = {
     c: [1,2,3,4,5,7,8,10,11,12,13,14],
     t: [1,2,3,4,5,7,8,10,11,12,13,14],
@@ -63,20 +70,29 @@ function createDeck() {
   };
 
   let deck = [];
+
   Object.keys(valid).forEach(shape => {
-    valid[shape].forEach(n => deck.push(shape + n));
+    valid[shape].forEach(n => {
+      deck.push(shape + n);
+    });
   });
 
-  // ✅ better shuffle (prevents bias)
+  // ✅ BETTER SHUFFLE
   for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+
+    const j = Math.floor(
+      Math.random() * (i + 1)
+    );
+
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
 
   return deck;
 }
+
 // 🎴 DECODE
 function decodeCard(str) {
+
   if (!str) return null;
 
   const map = {
@@ -90,26 +106,37 @@ function decodeCard(str) {
   const shape = map[str[0]];
   const number = Number(str.slice(1));
 
-  // ✅ guard against corrupted data
-  if (!shape || isNaN(number)) return null;
+  // ✅ CORRUPT DATA GUARD
+  if (!shape || isNaN(number)) {
+    return null;
+  }
 
-  return { shape, number };
+  return {
+    shape,
+    number
+  };
 }
 
 const cache = new Map();
 
 function drawCard(card) {
+
   if (!card) return null;
 
   const key = `${card.shape}_${card.number}`;
-  if (cache.has(key)) return cache.get(key);
+
+  if (cache.has(key)) {
+    return cache.get(key);
+  }
 
   const c = document.createElement("canvas");
+
   c.width = 70;
   c.height = 100;
 
   const ctx = c.getContext("2d");
-  if (!ctx) return null; // ✅ safety
+
+  if (!ctx) return null;
 
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, 70, 100);
@@ -119,40 +146,85 @@ function drawCard(card) {
 
   ctx.fillStyle = "#e11d48";
   ctx.font = "bold 14px Arial";
+
   ctx.fillText(card.number, 6, 18);
 
-  const cx = 35, cy = 55;
+  const cx = 35;
+  const cy = 55;
 
   if (card.shape === "circle") {
+
     ctx.beginPath();
-    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+
+    ctx.arc(
+      cx,
+      cy,
+      12,
+      0,
+      Math.PI * 2
+    );
+
     ctx.fill();
   }
 
   if (card.shape === "square") {
-    ctx.fillRect(cx - 12, cy - 12, 24, 24);
+
+    ctx.fillRect(
+      cx - 12,
+      cy - 12,
+      24,
+      24
+    );
   }
 
   if (card.shape === "triangle") {
+
     ctx.beginPath();
+
     ctx.moveTo(cx, cy - 12);
-    ctx.lineTo(cx - 12, cy + 12);
-    ctx.lineTo(cx + 12, cy + 12);
+
+    ctx.lineTo(
+      cx - 12,
+      cy + 12
+    );
+
+    ctx.lineTo(
+      cx + 12,
+      cy + 12
+    );
+
     ctx.fill();
   }
 
   if (card.shape === "star") {
-    ctx.fillText("★", cx - 8, cy + 8);
+
+    ctx.fillText(
+      "★",
+      cx - 8,
+      cy + 8
+    );
   }
 
   if (card.shape === "cross") {
-    ctx.fillRect(cx - 3, cy - 12, 6, 24);
-    ctx.fillRect(cx - 12, cy - 3, 24, 6);
+
+    ctx.fillRect(
+      cx - 3,
+      cy - 12,
+      6,
+      24
+    );
+
+    ctx.fillRect(
+      cx - 12,
+      cy - 3,
+      24,
+      6
+    );
   }
 
   const img = c.toDataURL();
 
-  // ✅ prevent memory explosion (important for long play)
+  // ✅ MEMORY GUARD
   if (cache.size < 200) {
     cache.set(key, img);
   }
@@ -161,134 +233,204 @@ function drawCard(card) {
 }
 
 function drawBack() {
-  // ✅ cache single back card (performance boost)
-  if (cache.has("BACK_CARD")) return cache.get("BACK_CARD");
+
+  // ✅ CACHE BACK CARD
+  if (cache.has("BACK_CARD")) {
+    return cache.get("BACK_CARD");
+  }
 
   const c = document.createElement("canvas");
+
   c.width = 65;
   c.height = 100;
 
   const ctx = c.getContext("2d");
+
   if (!ctx) return null;
 
   ctx.fillStyle = "#111";
+
   ctx.fillRect(0, 0, 65, 100);
 
   ctx.strokeStyle = "#fff";
+
   ctx.strokeRect(2, 2, 61, 96);
 
   ctx.fillStyle = "#fff";
+
   ctx.font = "20px Arial";
+
   ctx.fillText("🂠", 18, 60);
 
   const img = c.toDataURL();
+
   cache.set("BACK_CARD", img);
 
   return img;
 }
-function parseGame(g) {
-  const split = (v, s) =>
-    typeof v === "string" ? v.split(s).filter(Boolean) : [];
 
-  const parsedScores = split(g.scores, ",").map(Number);
+// =========================
+// 🧠 SAFE GAME PARSER
+// =========================
+function parseGame(g) {
+
+  const split = (v, s) =>
+    typeof v === "string"
+      ? v.split(s).filter(Boolean)
+      : [];
+
+  const parsedScores =
+    split(g.scores, ",").map(Number);
 
   return {
     ...g,
-    players: Array.isArray(g.players) ? g.players : split(g.players, ","),
 
-    hands: split(g.hands, "|").map(p => split(p, ",")),
-    deck: split(g.deck, ","),
+    // ✅ SAFE PLAYERS
+    players:
+      Array.isArray(g.players)
+        ? g.players
+        : split(g.players, ","),
+
+    // ✅ SAFE HANDS
+    hands:
+      typeof g.hands === "string"
+        ? split(g.hands, "|").map(
+            p => split(p, ",")
+          )
+        : Array.isArray(g.hands)
+        ? g.hands
+        : [[], []],
+
+    // ✅ SAFE DECK
+    deck:
+      typeof g.deck === "string"
+        ? split(g.deck, ",")
+        : Array.isArray(g.deck)
+        ? g.deck
+        : [],
 
     discard: g.discard || null,
+
     turn: g.turn || null,
 
-    pendingPick: Number(g.pendingPick || 0),
+    pendingPick: Number(
+      g.pendingPick || 0
+    ),
 
-    history: split(g.history, "||"),
+    history:
+      typeof g.history === "string"
+        ? split(g.history, "||")
+        : Array.isArray(g.history)
+        ? g.history
+        : [],
 
-    // ✅ FIX: prevent empty []
-    scores: parsedScores.length === 2 ? parsedScores : [0, 0],
+    // ✅ SAFE SCORES
+    scores:
+      parsedScores.length === 2
+        ? parsedScores
+        : Array.isArray(g.scores)
+        ? g.scores
+        : [0, 0],
 
     round: Number(g.round || 1),
 
-    status: g.status || "playing",
+    // ✅ NEVER OVERRIDE FINISHED
+    status:
+      g.status === "finished"
+        ? "finished"
+        : "playing",
 
-    // ✅ keep as boolean (safe)
-    payoutDone: Boolean(g.payoutDone),
+    // ✅ BOOLEAN FIX
+    payoutDone:
+      g.payoutDone === true ||
+      g.payoutDone === "true",
 
     winnerId: g.winnerId || null,
+
     matchId: g.matchId || null,
 
-    hostName: g.hostName || "Player 1",
-    opponentName: g.opponentName || "Player 2"
-  };
-}
+    hostName:
+      g.hostName || "Player 1",
 
-function encodeGame(g) {
-  return {
-    hands: g.hands.map(p => p.join(",")).join("|"),
-    deck: g.deck.join(","),
-    discard: g.discard || "",
-    turn: g.turn,
-
-    pendingPick: String(g.pendingPick),
-
-    history: (g.history || []).slice(-10).join("||"),
-
-    scores: g.scores.join(","),
-
-    round: String(g.round),
-
-    status: g.status,
-
-    // ✅ FIX: persist payout + winner (NO DUPLICATE PAYOUT)
-    payoutDone: g.payoutDone || false,
-    winnerId: g.winnerId || null
+    opponentName:
+      g.opponentName || "Player 2"
   };
 }
 
 // 🧠 SAFE INIT
 function ensureGameReady(g) {
-  if (g.status === "finished") return g;
 
+  // 🛑 NEVER REBUILD FINISHED / PAID GAME
   if (
-    !g.deck?.length ||
-    !g.hands?.[0]?.length ||
-    !g.hands?.[1]?.length ||
-    !g.discard
+    g.status === "finished" ||
+    g.payoutDone ||
+    g.winnerId
   ) {
+    return g;
+  }
+
+  // 🛑 ONLY INIT TRULY EMPTY GAME
+  const invalidGame =
+    !g.deck?.length ||
+    !g.hands?.length ||
+    g.hands.length < 2 ||
+    !g.hands?.[0] ||
+    !g.hands?.[1] ||
+    !g.discard;
+
+  if (invalidGame) {
+
     const deck = createDeck();
 
     return {
       ...g,
-      hands: [deck.splice(0,6), deck.splice(0,6)],
+
+      hands: [
+        deck.splice(0, 6),
+        deck.splice(0, 6)
+      ],
+
       discard: deck.pop(),
+
       deck,
 
       pendingPick: 0,
+
       history: [],
 
-      // ✅ FIX: always valid scores
-      scores: [0,0],
+      // ✅ SAFE SCORES
+      scores: [0, 0],
 
       round: 1,
+
       status: "playing",
 
-      // ✅ FIX: initialize payout flag
-      payoutDone: false
+      payoutDone: false,
+
+      winnerId: null
     };
   }
 
   return g;
 }
+
 // 📝 HISTORY
 function pushHistory(g, text) {
-  return [...(g.history || []), text].slice(-10);
+  return [...(g.history || []), text]
+    .slice(-10);
 }
 
-// ✅ FIXED (HARD STOP ON FINISHED)
+// ✅ EMPTY MARKET HANDLER
 function handleEmptyMarket(g) {
-  if (g.status === "finished") return g;
+
+  // 🛑 NEVER TOUCH FINISHED GAME
+  if (
+    g.status === "finished" ||
+    g.payoutDone ||
+    g.winnerId
+  ) {
+    return g;
+  }
 
   const p0 = g.hands[0].length;
   const p1 = g.hands[1].length;
@@ -298,385 +440,1023 @@ function handleEmptyMarket(g) {
   if (p0 < p1) winnerIdx = 0;
   else if (p1 < p0) winnerIdx = 1;
 
-  // ⚖️ DRAW (no new round if already close to finish)
+  // ⚖️ DRAW
   if (winnerIdx === null) {
+
     return {
       ...g,
-      history: pushHistory(g, "⚖️ Round draw (market finished)")
-    };
-  }
 
-  g.scores[winnerIdx]++;
-
-  // 🏁 HARD MATCH FINISH (MAIN FIX)
-  if (g.scores[winnerIdx] >= 2) {
-    return {
-      ...g,
-      status: "finished",
-      winnerId: g.players[winnerIdx],
-      payoutDone: false,
-      turn: null,
       history: pushHistory(
         g,
-        `🏆 ${winnerIdx === 0 ? "Player 1" : "Player 2"} wins match`
+        "⚖️ Round draw (market finished)"
       )
     };
   }
 
-  // 🔁 ONLY START NEW ROUND IF NOT FINISHED
+  // ✅ SAFE SCORE UPDATE
+  const scores = [...(g.scores || [0, 0])];
+
+  scores[winnerIdx]++;
+
+  // 🏁 MATCH FINISH
+  if (scores[winnerIdx] >= 2) {
+
+    return {
+      ...g,
+
+      scores,
+
+      status: "finished",
+
+      winnerId: g.players[winnerIdx],
+
+      payoutDone: false,
+
+      turn: null,
+
+      history: pushHistory(
+        g,
+        `🏆 ${
+          winnerIdx === 0
+            ? "Player 1"
+            : "Player 2"
+        } wins (market empty)`
+      )
+    };
+  }
+
+  // 🔁 NEXT ROUND
   const deck = createDeck();
 
   return {
     ...g,
-    hands: [deck.splice(0, 6), deck.splice(0, 6)],
+
+    scores,
+
+    hands: [
+      deck.splice(0, 6),
+      deck.splice(0, 6)
+    ],
+
     discard: deck.pop(),
+
     deck,
+
     pendingPick: 0,
-    round: g.round + 1,
-    history: pushHistory(g, "♻️ New round")
+
+    round: (g.round || 1) + 1,
+
+    history: pushHistory(
+      g,
+      "♻️ New round (market empty)"
+    )
   };
 }
 
-export default function WhotGame({ gameId, goHome }) {
+export default function WhotGame({
+  gameId,
+  goHome
+}) {
 
   const [game, setGame] = useState(null);
-  const [match, setMatch] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [error, setError] = useState("");
-  const [showWin, setShowWin] = useState(false);
-  const [showChat, setShowChat] = useState(false);
 
+  const [match, setMatch] = useState(null);
+
+  const [userId, setUserId] = useState(null);
+
+  const [error, setError] = useState("");
+
+  const [showWin, setShowWin] =
+    useState(false);
+
+  // 🆕 CHAT STATE
+  const [showChat, setShowChat] =
+    useState(false);
+
+  // 🏁 FINISH COUNTDOWN
+  const [countdown, setCountdown] =
+    useState(4);
+
+  // ✅ payout guard
   const payoutRef = useRef(false);
+
+  // ✅ logout guard
+  const finishRef = useRef(false);
+
   const actionLock = useRef(false);
 
   function invalidMove(msg) {
+
     beep(120, 300);
+
     setError(msg);
-    setTimeout(() => setError(""), 1200);
+
+    setTimeout(() => {
+      setError("");
+    }, 1200);
   }
 
+  // 🔑 GET USER
   useEffect(() => {
-    account.get().then(u => setUserId(u.$id));
+
+    account.get()
+      .then(u => setUserId(u.$id));
+
   }, []);
 
   // =========================
   // 🔄 LOAD + REALTIME
   // =========================
   useEffect(() => {
+
     if (!gameId || !userId) return;
 
     const load = async () => {
+
       let g = null;
 
+      // 🔹 LOAD GAME
       try {
+
         g = await databases.getDocument(
           DATABASE_ID,
           GAME_COLLECTION,
           gameId
         );
-      } catch {}
 
-      if (!g) {
-        const matchRes = await databases.listDocuments(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          [Query.equal("gameId", gameId)]
+      } catch {
+
+        console.warn(
+          "Game not found, checking recovery..."
         );
+      }
 
-        if (matchRes.documents.length) {
-          const m = matchRes.documents[0];
-          setMatch(m);
+      // 🔹 RECOVER ONLY ACTIVE MATCH
+      if (!g) {
 
-          const deck = createDeck();
+        try {
 
-          const newGame = {
-            players: m.players,
-            hands: [deck.splice(0, 6), deck.splice(0, 6)],
-            discard: deck.pop(),
-            deck,
-            turn: m.players[0],
-            pendingPick: 0,
-            history: [],
-            scores: [0, 0],
-            round: 1,
-            status: "playing",
-            matchId: m.$id,
-            hostName: m.hostName,
-            opponentName: m.opponentName,
-            payoutDone: false
-          };
+          const matchRes =
+            await databases.listDocuments(
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              [
+                Query.equal(
+                  "gameId",
+                  gameId
+                )
+              ]
+            );
 
-          g = await databases.createDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            ID.unique(),
-            encodeGame(newGame)
+          if (matchRes.documents.length) {
+
+            const m =
+              matchRes.documents[0];
+
+            // 🛑 NEVER RECOVER FINISHED MATCH
+            if (
+              m.status === "finished" ||
+              m.payoutDone ||
+              m.winnerId
+            ) {
+
+              goHome();
+              return;
+            }
+
+            setMatch(m);
+
+            const deck = createDeck();
+
+            const newGame = {
+
+              players: m.players,
+
+              hands: [
+                deck.splice(0, 6),
+                deck.splice(0, 6)
+              ],
+
+              discard: deck.pop(),
+
+              deck,
+
+              turn: m.players[0],
+
+              pendingPick: 0,
+
+              history: [],
+
+              scores: [0, 0],
+
+              round: 1,
+
+              status: "playing",
+
+              matchId: m.$id,
+
+              hostName: m.hostName,
+
+              opponentName:
+                m.opponentName,
+
+              payoutDone: false,
+
+              winnerId: null
+            };
+
+            // ✅ IMPORTANT:
+            // USE SAME GAME ID
+            g = await databases.createDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              gameId,
+              encodeGame(newGame)
+            );
+          }
+
+        } catch (err) {
+
+          console.error(
+            "Recovery failed:",
+            err
           );
         }
       }
 
+      // 🔹 LOAD MATCH
       if (g?.matchId) {
+
         try {
-          const m = await databases.getDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            g.matchId
-          );
+
+          const m =
+            await databases.getDocument(
+              DATABASE_ID,
+              MATCH_COLLECTION,
+              g.matchId
+            );
+
           setMatch(m);
+
         } catch {}
       }
 
+      // 🔹 SET GAME
       if (g) {
-        const parsed = ensureGameReady(parseGame(g));
+
+        const parsed =
+          ensureGameReady(
+            parseGame(g)
+          );
+
         setGame(parsed);
 
+        // 🏁 FINISHED GAME
         if (
-          parsed.status === "finished" &&
-          parsed.winnerId &&
-          !parsed.payoutDone &&
-          !payoutRef.current
+          parsed.status === "finished"
         ) {
-          payoutRef.current = true;
-          handlePayout(parsed);
+
+          // 💰 PAYOUT WINNER ONLY
+          if (
+            parsed.winnerId === userId &&
+            !parsed.payoutDone &&
+            !payoutRef.current
+          ) {
+
+            payoutRef.current = true;
+
+            handlePayout(parsed);
+          }
+
+          // 🎉 SHOW WIN MESSAGE
+          if (
+            parsed.winnerId === userId
+          ) {
+
+            setShowWin(true);
+
+            successSound();
+          }
+
+          // ⏳ AUTO EXIT BOTH PLAYERS
+          if (!finishRef.current) {
+
+            finishRef.current = true;
+
+            let time = 4;
+
+            setCountdown(4);
+
+            const timer =
+              setInterval(() => {
+
+                time--;
+
+                setCountdown(time);
+
+                if (time <= 0) {
+
+                  clearInterval(timer);
+
+                  goHome();
+                }
+
+              }, 1000);
+          }
+
+          return;
         }
       }
     };
 
     load();
 
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
-      (res) => {
-        const parsed = parseGame(res.payload);
-        setGame(parsed);
+    // =========================
+    // 🔄 REALTIME SUBSCRIBE
+    // =========================
+    const unsub =
+      databases.client.subscribe(
+        `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+        (res) => {
 
+          const parsed =
+            ensureGameReady(
+              parseGame(res.payload)
+            );
+
+          setGame(parsed);
+
+          // 🏁 FINISHED GAME
+          if (
+            parsed.status === "finished"
+          ) {
+
+            // 💰 PAYOUT WINNER ONLY
+            if (
+              parsed.winnerId === userId &&
+              !parsed.payoutDone &&
+              !payoutRef.current
+            ) {
+
+              payoutRef.current = true;
+
+              handlePayout(parsed);
+            }
+
+            // 🎉 WIN UI
+            if (
+              parsed.winnerId === userId
+            ) {
+
+              setShowWin(true);
+
+              successSound();
+            }
+
+            // ⏳ AUTO EXIT
+            if (!finishRef.current) {
+
+              finishRef.current = true;
+
+              let time = 4;
+
+              setCountdown(4);
+
+              const timer =
+                setInterval(() => {
+
+                  time--;
+
+                  setCountdown(time);
+
+                  if (time <= 0) {
+
+                    clearInterval(timer);
+
+                    goHome();
+                  }
+
+                }, 1000);
+            }
+          }
+        }
+      );
+
+    return () => unsub();
+
+  }, [gameId, userId]);
+
+    // 🔹 LOAD MATCH
+if (g?.matchId) {
+  try {
+    const m = await databases.getDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      g.matchId
+    );
+
+    setMatch(m);
+
+  } catch (err) {
+    console.error("Match load failed:", err);
+  }
+}
+
+// 🔹 SET GAME
+if (g) {
+
+  // ✅ IMPORTANT:
+  // Never recreate finished games
+  const parsed = parseGame(g);
+
+  // 🛑 LOCK FINISHED GAME
+  if (parsed.status === "finished") {
+
+    setGame(parsed);
+
+    // 💰 PAYOUT RUNS ONLY ONCE
+    if (
+      parsed.winnerId &&
+      !parsed.payoutDone &&
+      !payoutRef.current
+    ) {
+
+      payoutRef.current = true;
+
+      // 💰 run payout in background
+      handlePayout(parsed);
+    }
+
+    return; // ✅ STOP
+  }
+
+  // ✅ ONLY repair broken ACTIVE games
+  const safeGame = ensureGameReady(parsed);
+
+  setGame(safeGame);
+}
+
+};
+
+load();
+
+// 🔄 REALTIME
+const unsub = databases.client.subscribe(
+  `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents.${gameId}`,
+  async (res) => {
+
+    const parsed = parseGame(res.payload);
+
+    // =========================
+    // 🛑 GAME FINISHED
+    // =========================
+    if (parsed.status === "finished") {
+
+      setGame(parsed);
+
+      // =========================
+      // 🏆 WINNER FLOW
+      // =========================
+      if (parsed.winnerId === userId) {
+
+        setShowWin(true);
+
+        successSound();
+
+        // 💰 PAYOUT ONLY ONCE
         if (
-          parsed.status === "finished" &&
-          parsed.winnerId &&
           !parsed.payoutDone &&
           !payoutRef.current
         ) {
+
           payoutRef.current = true;
-          handlePayout(parsed);
+
+          await handlePayout(parsed);
         }
 
-        if (parsed.status === "finished") {
-          if (parsed.winnerId === userId) {
-            setShowWin(true);
-            successSound();
-            setTimeout(goHome, 3000);
-          } else {
-            setTimeout(goHome, 2500);
+        // ⏳ SHOW COUNTDOWN
+        let count = 4;
+
+        setError(`🎉 You won! Leaving in ${count}...`);
+
+        const timer = setInterval(() => {
+
+          count--;
+
+          if (count > 0) {
+            setError(`🎉 You won! Leaving in ${count}...`);
           }
-        }
+
+          if (count <= 0) {
+
+            clearInterval(timer);
+
+            goHome?.();
+          }
+
+        }, 1000);
+      }
+
+      // =========================
+      // ❌ LOSER FLOW
+      // =========================
+      else {
+
+        beep(150, 700);
+
+        let count = 4;
+
+        setError(`❌ You lost! Leaving in ${count}...`);
+
+        const timer = setInterval(() => {
+
+          count--;
+
+          if (count > 0) {
+            setError(`❌ You lost! Leaving in ${count}...`);
+          }
+
+          if (count <= 0) {
+
+            clearInterval(timer);
+
+            goHome?.();
+          }
+
+        }, 1000);
+      }
+
+      return; // ✅ STOP ALL GAME LOGIC
+    }
+
+    // ✅ NORMAL GAME UPDATE
+    setGame(parsed);
+  }
+);
+
+return () => unsub();
+
+}, [gameId, userId]);
+
+// =========================
+// 💰 PAYOUT
+// =========================
+async function handlePayout(g) {
+
+  try {
+
+    if (!g.matchId || !g.winnerId) return;
+
+    // 🔒 GET MATCH
+    const matchDoc = await databases.getDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      g.matchId
+    );
+
+    // ✅ already paid
+    if (matchDoc.payoutDone) return;
+
+    const pot = Number(matchDoc.pot || 0);
+
+    // ✅ no money
+    if (pot <= 0) return;
+
+    // =========================
+    // 🏦 FIND WINNER WALLET
+    // =========================
+    const walletRes = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [
+        Query.equal("userId", g.winnerId),
+        Query.limit(1)
+      ]
+    );
+
+    if (!walletRes.documents.length) {
+
+      console.error("Winner wallet not found");
+
+      return;
+    }
+
+    const wallet = walletRes.documents[0];
+
+    // =========================
+    // 💰 CREDIT WINNER
+    // =========================
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      {
+        balance: Number(wallet.balance || 0) + pot
       }
     );
 
-    return () => unsub();
-  }, [gameId, userId]);
+    // =========================
+    // 🧹 EMPTY POT
+    // =========================
+    await databases.updateDocument(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      matchDoc.$id,
+      {
+        pot: 0,
+        payoutDone: true,
+        status: "finished"
+      }
+    );
 
-  // =========================
-  // 💰 PAYOUT (UNCHANGED SAFE)
-  // =========================
-  async function handlePayout(g) {
-    try {
-      if (!g.matchId || !g.winnerId) return;
+    // =========================
+    // 🔒 LOCK GAME
+    // =========================
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+        payoutDone: true,
+        status: "finished",
+        turn: null
+      }
+    );
 
-      const matchDoc = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        g.matchId
-      );
+    console.log("✅ payout success");
 
-      if (matchDoc.payoutDone) return;
+  } catch (err) {
 
-      const pot = Number(matchDoc.pot || 0);
-      if (!pot) return;
+    console.error("❌ Payout error:", err);
+  }
+}
+         
+// =========================
+// 🎮 PLAY CARD
+// =========================
+async function playCard(i) {
 
-      const walletRes = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", g.winnerId), Query.limit(1)]
-      );
+  // 🔒 BLOCK ACTIONS
+  if (
+    actionLock.current ||
+    game.status === "finished"
+  ) return;
 
-      if (!walletRes.documents.length) return;
-
-      const wallet = walletRes.documents[0];
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: Number(wallet.balance || 0) + pot
-        }
-      );
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        matchDoc.$id,
-        {
-          pot: 0,
-          payoutDone: true
-        }
-      );
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        { payoutDone: true }
-      );
-
-    } catch (err) {
-      console.error("Payout error:", err);
-    }
+  // 🔒 TURN CHECK
+  if (game.turn !== userId) {
+    return invalidMove("Not your turn");
   }
 
-  // =========================
-  // 🎮 PLAY CARD (FIXED END)
-  // =========================
-  async function playCard(i) {
-    if (actionLock.current || game.status === "finished") return;
-    if (game.turn !== userId) return invalidMove("Not your turn");
+  actionLock.current = true;
 
-    actionLock.current = true;
+  try {
 
-    try {
-      const g = JSON.parse(JSON.stringify(game));
+    // ✅ SAFE CLONE
+    const g = JSON.parse(JSON.stringify(game));
 
-      const card = g.hands[myIdx][i];
-      const current = decodeCard(card);
-      const topDecoded = decodeCard(g.discard);
+    // ✅ SAFE INDEX
+    const myIdx = g.players.indexOf(userId);
 
-      if (g.pendingPick > 0 && ![2, 14].includes(current.number)) {
-        actionLock.current = false;
-        return invalidMove("Use 2 or 14");
-      }
+    if (myIdx === -1) {
+      actionLock.current = false;
+      return;
+    }
 
-      if (
-        current.number !== topDecoded.number &&
-        current.shape !== topDecoded.shape &&
-        current.number !== 14
-      ) {
-        actionLock.current = false;
-        return invalidMove("Wrong move");
-      }
+    const oppIdx = myIdx === 0 ? 1 : 0;
 
-      g.hands[myIdx].splice(i, 1);
+    const myLabel =
+      myIdx === 0 ? "Player 1" : "Player 2";
 
-      let nextTurn = g.players[oppIdx];
+    // ✅ SAFE CARD
+    const card = g.hands?.[myIdx]?.[i];
 
-      if (current.number === 1 || current.number === 8) nextTurn = userId;
-      if (current.number === 2) g.pendingPick += 2;
-      if (current.number === 14) g.pendingPick += 1;
+    if (!card) {
+      actionLock.current = false;
+      return invalidMove("Invalid card");
+    }
 
-      g.history = pushHistory(g, `${myLabel} played ${card}`);
+    const current = decodeCard(card);
+    const topDecoded = decodeCard(g.discard);
 
-      // 🏆 ROUND WIN
-      if (!g.hands[myIdx].length) {
-        g.scores[myIdx]++;
+    // ✅ SAFETY
+    if (!current || !topDecoded) {
 
-        if (g.scores[myIdx] >= 2) {
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            gameId,
-            {
-              ...encodeGame(g),
-              status: "finished",
-              winnerId: userId,
-              payoutDone: false,
-              turn: null
-            }
-          );
-          return;
-        }
+      actionLock.current = false;
 
-        const deck = createDeck();
+      return invalidMove("Game error");
+    }
 
-        g.hands = [deck.splice(0, 6), deck.splice(0, 6)];
-        g.discard = deck.pop();
-        g.deck = deck;
-        g.pendingPick = 0;
-        g.round++;
+    // =========================
+    // 🔒 PICK STACK RULE
+    // =========================
+    if (
+      g.pendingPick > 0 &&
+      ![2, 14].includes(current.number)
+    ) {
+
+      actionLock.current = false;
+
+      return invalidMove("Use 2 or 14");
+    }
+
+    // =========================
+    // ❌ INVALID MOVE
+    // =========================
+    if (
+      current.number !== topDecoded.number &&
+      current.shape !== topDecoded.shape &&
+      current.number !== 14
+    ) {
+
+      actionLock.current = false;
+
+      return invalidMove("Wrong move");
+    }
+
+    // =========================
+    // ✅ REMOVE CARD
+    // =========================
+    g.hands[myIdx].splice(i, 1);
+
+    // ✅ NEW TOP CARD
+    g.discard = card;
+
+    let nextTurn = g.players[oppIdx];
+
+    // =========================
+    // 🔁 SPECIAL RULES
+    // =========================
+    if (
+      current.number === 1 ||
+      current.number === 8
+    ) {
+      nextTurn = userId;
+    }
+
+    if (current.number === 2) {
+      g.pendingPick += 2;
+    }
+
+    if (current.number === 14) {
+      g.pendingPick += 1;
+    }
+
+    // =========================
+    // 📝 HISTORY
+    // =========================
+    g.history = pushHistory(
+      g,
+      `${myLabel} played ${card}`
+    );
+
+    // =========================
+    // 🏆 ROUND WIN
+    // =========================
+    if (!g.hands[myIdx].length) {
+
+      const newScores = [...(g.scores || [0, 0])];
+
+      newScores[myIdx]++;
+
+      // =========================
+      // 🏁 MATCH FINISH
+      // =========================
+      if (newScores[myIdx] >= 2) {
 
         await databases.updateDocument(
           DATABASE_ID,
           GAME_COLLECTION,
           gameId,
-          encodeGame(g)
+          {
+
+            // ✅ SAFE DATABASE FORMAT
+            hands: g.hands
+              .map(p => p.join(","))
+              .join("|"),
+
+            deck: g.deck.join(","),
+
+            discard: card,
+
+            turn: null,
+
+            pendingPick: String(g.pendingPick || 0),
+
+            scores: newScores.join(","),
+
+            round: String(g.round || 1),
+
+            // 🔒 FINISH GAME
+            status: "finished",
+
+            winnerId: userId,
+
+            payoutDone: false,
+
+            // 📝 FINAL HISTORY
+            history: pushHistory(
+              g,
+              `🏆 ${myLabel} wins the match`
+            ).join("||")
+          }
         );
 
         return;
       }
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId,
-        {
-          ...encodeGame(g),
-          discard: card,
-          turn: nextTurn
-        }
+      // =========================
+      // 🔁 NEXT ROUND
+      // =========================
+      const deck = createDeck();
+
+      g.hands = [
+        deck.splice(0, 6),
+        deck.splice(0, 6)
+      ];
+
+      g.discard = deck.pop();
+
+      g.deck = deck;
+
+      g.pendingPick = 0;
+
+      g.round = (g.round || 1) + 1;
+
+      g.scores = newScores;
+
+      g.history = pushHistory(
+        g,
+        `♻️ Round ${g.round} started`
       );
 
-    } catch (err) {
-      console.error(err);
-    } finally {
-      actionLock.current = false;
-    }
-  }
-// =========================
-// 🎮 DRAW MARKET (FINAL FIX)
-// =========================
-async function drawMarket() {
-  if (actionLock.current || game.status === "finished") return;
-  if (game.turn !== userId) return invalidMove("Not your turn");
-
-  actionLock.current = true;
-
-  try {
-    const g = JSON.parse(JSON.stringify(game));
-    const drawCount = g.pendingPick > 0 ? g.pendingPick : 1;
-
-    // 🧠 EMPTY MARKET (CRITICAL FIX)
-    if (!g.deck.length) {
-      const updated = handleEmptyMarket(g);
-
+      // ✅ SAVE ROUND
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
         gameId,
-        {
-          ...encodeGame(updated),
-          status: updated.status,
-          winnerId: updated.winnerId || null,
-          payoutDone:
-            updated.status === "finished" ? false : updated.payoutDone,
-          turn: updated.status === "finished" ? null : updated.turn
-        }
+        encodeGame(g)
       );
 
       return;
     }
 
-    // 🃏 NORMAL DRAW
-    for (let i = 0; i < drawCount; i++) {
-      if (!g.deck.length) break;
-      g.hands[myIdx].push(g.deck.pop());
+    // =========================
+    // 🎮 NORMAL TURN
+    // =========================
+    await databases.updateDocument(
+      DATABASE_ID,
+      GAME_COLLECTION,
+      gameId,
+      {
+
+        // ✅ SAFE FORMAT
+        hands: g.hands
+          .map(p => p.join(","))
+          .join("|"),
+
+        deck: g.deck.join(","),
+
+        discard: card,
+
+        turn: nextTurn,
+
+        pendingPick: String(g.pendingPick || 0),
+
+        scores: g.scores.join(","),
+
+        round: String(g.round || 1),
+
+        status: g.status || "playing",
+
+        payoutDone: g.payoutDone || false,
+
+        winnerId: g.winnerId || null,
+
+        history: g.history.join("||")
+      }
+    );
+
+  } catch (err) {
+
+    console.error("playCard error:", err);
+
+  } finally {
+
+    actionLock.current = false;
+  }
+}
+
+// =========================
+// 🎮 ACTION: DRAW FROM MARKET
+// =========================
+async function drawMarket() {
+
+  // 🔒 LOCK FINISHED GAME
+  if (
+    actionLock.current ||
+    game.status === "finished" ||
+    game.payoutDone
+  ) return;
+
+  if (game.turn !== userId) {
+    return invalidMove("Not your turn");
+  }
+
+  actionLock.current = true;
+
+  try {
+
+    const g = JSON.parse(JSON.stringify(game));
+
+    // ✅ SAFE INDEX
+    const myIdx = g.players.indexOf(userId);
+
+    if (myIdx === -1) {
+      actionLock.current = false;
+      return;
     }
 
+    const oppIdx = myIdx === 0 ? 1 : 0;
+
+    const myLabel =
+      myIdx === 0
+        ? "Player 1"
+        : "Player 2";
+
+    const drawCount =
+      g.pendingPick > 0
+        ? g.pendingPick
+        : 1;
+
+    // =========================
+    // 🧠 EMPTY MARKET
+    // =========================
+    if (!g.deck.length) {
+
+      const updated = handleEmptyMarket(g);
+
+      // 🏁 GAME ENDED
+      if (updated.status === "finished") {
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          {
+            ...encodeGame(updated),
+
+            status: "finished",
+
+            payoutDone: false,
+
+            turn: null
+          }
+        );
+
+        return;
+      }
+
+      // 🔁 NORMAL SAVE
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        gameId,
+        encodeGame(updated)
+      );
+
+      return;
+    }
+
+    // =========================
+    // 🃏 DRAW CARDS
+    // =========================
+    for (let i = 0; i < drawCount; i++) {
+
+      if (!g.deck.length) break;
+
+      g.hands[myIdx].push(
+        g.deck.pop()
+      );
+    }
+
+    // =========================
+    // 🔁 RESET STATE
+    // =========================
     g.pendingPick = 0;
+
     g.turn = g.players[oppIdx];
 
+    // =========================
+    // 📝 HISTORY
+    // =========================
     g.history = pushHistory(
       g,
       `${myLabel} drew ${drawCount} card${drawCount > 1 ? "s" : ""}`
     );
 
+    // =========================
+    // 💾 SAVE GAME
+    // =========================
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
@@ -685,208 +1465,575 @@ async function drawMarket() {
     );
 
   } catch (err) {
-    console.error("drawMarket error:", err);
+
+    console.error(
+      "drawMarket error:",
+      err
+    );
+
   } finally {
+
     actionLock.current = false;
   }
 }
 
+
+// =========================
+// 🧠 DERIVED STATE
+// =========================
+if (!game || !userId) return null;
+
+const myIdx =
+  game.players.indexOf(userId);
+
+if (myIdx === -1) return null;
+
+const oppIdx =
+  myIdx === 0 ? 1 : 0;
+
+const hand =
+  game.hands?.[myIdx] || [];
+
+const oppCards =
+  game.hands?.[oppIdx]?.length || 0;
+
+const top =
+  decodeCard(game.discard);
+
+const myLabel =
+  myIdx === 0
+    ? "Player 1"
+    : "Player 2";
+
+const oppLabel =
+  myIdx === 0
+    ? "Player 2"
+    : "Player 1";
+
+
 // =====================
-// 🎨 CLEAN UI (NO DUPLICATE CHAT BUTTON)
+// 🎨 UI RENDER
 // =====================
 return (
   <div style={styles.bg}>
     <div style={styles.box}>
 
-      {error && <div style={styles.error}>{error}</div>}
+      {/* ERROR / COUNTDOWN */}
+      {error && (
+        <div style={styles.error}>
+          {error}
+        </div>
+      )}
 
-      <h3 style={{ textAlign: "center" }}>🎮 Whot Game</h3>
+      <h3
+        style={{
+          textAlign: "center",
+          marginBottom: 6
+        }}
+      >
+        🎮 Whot Game
+      </h3>
 
+      {/* PLAYERS */}
       <div style={styles.row}>
-        <span>{game.hostName}</span>
+        <span>
+          Player 1 ({game.hostName})
+        </span>
+
         <span>VS</span>
-        <span>{game.opponentName}</span>
+
+        <span>
+          Player 2 ({game.opponentName})
+        </span>
       </div>
 
+      {/* OPPONENT CARDS */}
       <div style={{ textAlign: "center" }}>
-        {Array.from({ length: oppCards }).map((_, i) => (
-          <img key={i} src={drawBack()} style={{ width: 40 }} />
+
+        {Array.from({
+          length: oppCards
+        }).map((_, i) => (
+          <img
+            key={i}
+            src={drawBack()}
+            style={{ width: 40 }}
+          />
         ))}
-        <div>{oppLabel}: {oppCards}</div>
+
+        <div>
+          {oppLabel} Cards: {oppCards}
+        </div>
       </div>
 
+      {/* SCORE */}
       <div style={styles.row}>
-        <span>Round {game.round}</span>
-        <span>{game.scores[0]} - {game.scores[1]}</span>
+        <span>
+          Round {game.round}
+        </span>
+
+        <span>
+          {game.scores[0]} - {game.scores[1]}
+        </span>
       </div>
 
+      {/* MONEY */}
       <div style={styles.row}>
-        <span>₦{match?.stake || 0}</span>
-        <span>🏦 ₦{match?.pot || 0}</span>
+        <span>
+          ₦{match?.stake || 0}
+        </span>
+
+        <span>
+          🏦 ₦{match?.pot || 0}
+        </span>
       </div>
 
-      <div style={{ textAlign: "center" }}>
+      {/* STATUS */}
+      <div
+        style={{
+          textAlign: "center",
+          marginTop: 6
+        }}
+      >
         <p>
+
           {game.status === "finished"
             ? "🏁 FINISHED"
+
             : game.turn === userId
             ? "🟢 YOUR TURN"
+
             : "⏳ OPPONENT"}
+
         </p>
+
+        <button
+          style={styles.chatBtn}
+          onClick={() =>
+            setShowChat(true)
+          }
+        >
+          💬 Message
+        </button>
       </div>
 
+      {/* MARKET */}
       <div style={styles.center}>
-        {top && <img src={drawCard(top)} style={styles.card} />}
-        <button style={styles.marketBtn} onClick={drawMarket}>
+
+        {top && (
+          <img
+            src={drawCard(top)}
+            style={styles.card}
+          />
+        )}
+
+        <button
+          style={{
+            ...styles.marketBtn,
+
+            opacity:
+              game.turn !== userId ||
+              game.status === "finished"
+                ? 0.5
+                : 1
+          }}
+
+          disabled={
+            game.turn !== userId ||
+            game.status === "finished"
+          }
+
+          onClick={drawMarket}
+        >
           🃏 {game.deck.length}
         </button>
       </div>
 
+      {/* PLAYER HAND */}
       <div style={styles.hand}>
+
         {hand.map((c, i) => (
+
           <img
             key={i}
-            src={drawCard(decodeCard(c))}
-            style={styles.card}
-            onClick={() => playCard(i)}
+
+            src={drawCard(
+              decodeCard(c)
+            )}
+
+            style={{
+              ...styles.card,
+
+              opacity:
+                game.status === "finished"
+                  ? 0.6
+                  : 1
+            }}
+
+            onClick={() => {
+
+              // 🔒 LOCK FINISHED GAME
+              if (
+                game.status === "finished"
+              ) return;
+
+              playCard(i);
+            }}
           />
+
         ))}
       </div>
 
+      {/* WIN BOX */}
       {showWin && (
         <div style={styles.winBox}>
           🎉 You Won ₦{match?.pot || 0}
         </div>
       )}
 
+      {/* HISTORY */}
       <div style={styles.history}>
-        {(game.history || []).slice().reverse().map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
+
+        {(game.history || [])
+          .slice()
+          .reverse()
+          .map((h, i) => (
+            <div key={i}>
+              {h}
+            </div>
+          ))}
+
       </div>
 
-      {/* ✅ SINGLE CHAT BUTTON ONLY */}
-      <button onClick={() => setShowChat(true)} style={styles.chatBtn}>
-        💬 Chat
+      {/* CHAT BUTTON */}
+      <div
+        style={{
+          textAlign: "center",
+          marginTop: 6
+        }}
+      >
+        <button
+          style={{
+            ...styles.chatBtn,
+            position: "relative"
+          }}
+
+          onClick={() => {
+
+            setShowChat(true);
+
+            setMatch(prev =>
+              prev
+                ? {
+                    ...prev,
+                    hasUnread: false
+                  }
+                : prev
+            );
+          }}
+        >
+          💬 Message
+
+          {match?.hasUnread && (
+            <span
+              style={{
+                position: "absolute",
+                top: -3,
+                right: -3,
+                width: 10,
+                height: 10,
+                background: "red",
+                borderRadius: "50%"
+              }}
+            />
+          )}
+        </button>
+      </div>
+
+      {/* EXIT */}
+      <button onClick={goHome}>
+        Exit
       </button>
 
-      <button onClick={goHome}>Exit</button>
-
+      {/* CHAT POPUP */}
       {showChat && game?.matchId && (
+
         <div style={styles.chatOverlay}>
+
           <div style={styles.chatBox}>
+
             <div style={styles.chatHeader}>
-              <span>💬 Chat</span>
-              <button onClick={() => setShowChat(false)}>❌</button>
+
+              <span>
+                💬 Match Chat
+              </span>
+
+              <button
+                onClick={() =>
+                  setShowChat(false)
+                }
+              >
+                ❌
+              </button>
+
             </div>
 
-            <Messages matchId={game.matchId} />
+            <Messages
+              matchId={game.matchId}
+
+              onRead={() => {
+
+                setMatch(prev =>
+                  prev
+                    ? {
+                        ...prev,
+                        hasUnread: false
+                      }
+                    : prev
+                );
+              }}
+            />
+
           </div>
+
         </div>
       )}
 
     </div>
   </div>
 );
+
+
 // =====================
-// 🎨 STYLES
+// 🎨 STYLES (FINAL)
 // =====================
 const styles = {
+
   bg: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #065f46, #064e3b)",
+    background:
+      "linear-gradient(135deg, #065f46, #064e3b)",
+
     display: "flex",
     justifyContent: "center",
-    alignItems: "center"
+    alignItems: "center",
+
+    padding: 10
   },
+
   box: {
     width: "95%",
     maxWidth: 450,
+
     background: "#000000cc",
+
     padding: 12,
+
     color: "#fff",
-    borderRadius: 12
+
+    borderRadius: 12,
+
+    backdropFilter: "blur(6px)",
+
+    boxShadow:
+      "0 0 20px rgba(0,0,0,0.6)",
+
+    position: "relative",
+
+    overflow: "hidden"
   },
+
   row: {
     display: "flex",
+
     justifyContent: "space-between",
-    marginBottom: 6
+
+    alignItems: "center",
+
+    marginBottom: 6,
+
+    fontSize: 13,
+
+    gap: 6
   },
+
   hand: {
     display: "flex",
+
     flexWrap: "wrap",
+
     gap: 6,
-    justifyContent: "center"
+
+    justifyContent: "center",
+
+    marginTop: 10
   },
+
   card: {
     width: 65,
-    cursor: "pointer"
+
+    cursor: "pointer",
+
+    transition:
+      "transform 0.15s ease",
+
+    borderRadius: 8
   },
+
+  // 🔥 small UX boost
+  cardHover: {
+    transform: "scale(1.08)"
+  },
+
   center: {
     display: "flex",
+
     justifyContent: "center",
-    gap: 10
+
+    alignItems: "center",
+
+    gap: 10,
+
+    marginTop: 10
   },
+
   marketBtn: {
     background: "gold",
+
     padding: 10,
+
     borderRadius: 8,
-    border: "none"
+
+    border: "none",
+
+    fontWeight: "bold",
+
+    cursor: "pointer",
+
+    minWidth: 70
   },
-  winBox: {
-    position: "fixed",
-    top: "40%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "gold",
-    color: "#000",
-    padding: 20,
-    borderRadius: 12,
-    zIndex: 999
-  },
-  error: {
-    background: "#dc2626",
-    padding: 6,
-    textAlign: "center",
-    marginBottom: 6
-  },
-  history: {
-    marginTop: 10,
-    maxHeight: 120,
-    overflowY: "auto",
-    fontSize: 12,
-    background: "#111",
-    padding: 6
-  },
+
   chatBtn: {
     background: "#2563eb",
+
     color: "#fff",
-    padding: 8,
-    borderRadius: 6,
+
     border: "none",
-    marginTop: 8
+
+    padding: "8px 14px",
+
+    borderRadius: 8,
+
+    cursor: "pointer",
+
+    fontWeight: "bold",
+
+    marginTop: 5
   },
+
+  error: {
+    background: "#dc2626",
+
+    padding: 10,
+
+    borderRadius: 8,
+
+    marginBottom: 10,
+
+    textAlign: "center",
+
+    fontWeight: "bold",
+
+    animation:
+      "pulse 0.8s infinite alternate"
+  },
+
+  history: {
+    marginTop: 10,
+
+    background: "#111",
+
+    padding: 8,
+
+    borderRadius: 8,
+
+    maxHeight: 140,
+
+    overflowY: "auto",
+
+    fontSize: 12
+  },
+
+  winBox: {
+    marginTop: 10,
+
+    background:
+      "linear-gradient(135deg,#16a34a,#22c55e)",
+
+    padding: 14,
+
+    borderRadius: 10,
+
+    textAlign: "center",
+
+    fontWeight: "bold",
+
+    fontSize: 18,
+
+    animation:
+      "pulse 1s infinite alternate"
+  },
+
   chatOverlay: {
     position: "fixed",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    background: "rgba(0,0,0,0.75)",
+
+    inset: 0,
+
+    background:
+      "rgba(0,0,0,0.7)",
+
+    zIndex: 999,
+
     display: "flex",
+
     justifyContent: "center",
-    alignItems: "center"
+
+    alignItems: "center",
+
+    padding: 10
   },
+
   chatBox: {
-    width: "95%",
-    maxWidth: 400,
-    background: "#111",
-    padding: 10,
-    borderRadius: 12
+    width: "100%",
+
+    maxWidth: 420,
+
+    height: "80vh",
+
+    background: "#0f172a",
+
+    borderRadius: 12,
+
+    overflow: "hidden",
+
+    display: "flex",
+
+    flexDirection: "column"
   },
+
   chatHeader: {
     display: "flex",
+
     justifyContent: "space-between",
-    marginBottom: 8
+
+    alignItems: "center",
+
+    padding: 10,
+
+    background: "#1e293b",
+
+    borderBottom:
+      "1px solid rgba(255,255,255,0.1)",
+
+    fontWeight: "bold"
   }
 };
