@@ -439,8 +439,7 @@ function ensureGameReady(g) {
     return g;
   }
 
-  // ✅ STRUCTURE CHECK ONLY
-  // deck CAN legally be 0
+  // ✅ VALID STRUCTURE CHECK
   const invalidGame =
     !Array.isArray(g.hands) ||
     g.hands.length < 2 ||
@@ -449,7 +448,7 @@ function ensureGameReady(g) {
     !Array.isArray(g.deck) ||
     !g.discard;
 
-  // ✅ GAME IS VALID
+  // ✅ GAME ALREADY VALID
   if (!invalidGame) {
     return g;
   }
@@ -488,12 +487,6 @@ function ensureGameReady(g) {
     turn: g.players?.[0] || null
   };
 }
-    };
-  }
-
-  return g;
-}
-
 // =========================
 // 📝 HISTORY
 // =========================
