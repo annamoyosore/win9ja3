@@ -1,5 +1,3 @@
-Now want to update this my free spin to have all funds lost by various users to be sedn to  admin wallet in a particular separate attribute and funds won to them should be deducted from another attribute in my admim wallet so money don't just add up or just lost without going to any wallet
-
 import { useState, useEffect, useRef } from "react";
 import {
 databases,
