@@ -455,14 +455,12 @@ function ensureGameReady(g) {
     return {
       ...g,
 
-      hands: [
-        deck.splice(0, 6),
-        deck.splice(0, 6)
-      ],
+    hands: [
+      deck.splice(0, 6),
+      deck.splice(0, 6)
+    ],
 
-      discard: deck.pop(),
-
-      deck,
+    discard: deck.shift(),      deck,
 
       pendingPick: 0,
 
