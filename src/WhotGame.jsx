@@ -1301,12 +1301,9 @@ async function drawMarket() {
   if (
     actionLock.current ||
     game.status === "finished" ||
-    game.payoutDone ||
-    game.turn !== userId
+    game.payoutDone
   ) {
-    return invalidMove(
-      "Not your turn"
-    );
+    return;
   }
 
   actionLock.current = true;
@@ -1317,6 +1314,14 @@ async function drawMarket() {
     const g = JSON.parse(
       JSON.stringify(game)
     );
+
+    // 🔒 REAL TURN VALIDATION
+    if (g.turn !== userId) {
+
+      return invalidMove(
+        "Not your turn"
+      );
+    }
 
     // ✅ SAFE INDEX
     const myIdx =
@@ -1413,6 +1418,7 @@ async function drawMarket() {
     // 🔒 NO CARD DRAWN FIX
     // =========================
     if (drawn <= 0) {
+
       return invalidMove(
         "Market empty"
       );
@@ -1456,7 +1462,6 @@ async function drawMarket() {
     actionLock.current = false;
   }
 }
-
 // =========================
 // 🧠 DERIVED STATE
 // =========================
@@ -1880,20 +1885,17 @@ const styles = {
   },
 
   marketBtn: {
-    background: "gold",
-
-    padding: 10,
-
-    borderRadius: 8,
-
-    border: "none",
-
-    fontWeight: "bold",
-
-    cursor: "pointer",
-
-    minWidth: 70
-  },
+  background: "gold",
+  padding: "14px 18px",
+  borderRadius: 10,
+  border: "none",
+  cursor: "pointer",
+  fontWeight: "bold",
+  fontSize: 18,
+  minWidth: 70,
+  minHeight: 70,
+  boxShadow: "0 0 12px rgba(255,215,0,0.5)"
+},
 
   chatBtn: {
     background: "#2563eb",
