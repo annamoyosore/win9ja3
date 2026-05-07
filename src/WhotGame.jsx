@@ -1310,21 +1310,31 @@ async function drawMarket() {
   // 🔒 BLOCK ACTIONS
   if (
     actionLock.current ||
-    !isMyTurn ||
+    !game ||
     game.status === "finished" ||
-    game.payoutDone
+    game.payoutDone ||
+    game.turn !== userId
   ) {
-    return;
+    return invalidMove("Not your turn");
   }
 
   actionLock.current = true;
 
   try {
 
-    // ✅ DEEP COPY
+    // ✅ SAFE CLONE
     const g = JSON.parse(
       JSON.stringify(game)
     );
+
+    // ✅ HARD SAFETY
+    if (!Array.isArray(g.deck)) {
+      g.deck = [];
+    }
+
+    if (!Array.isArray(g.hands)) {
+      g.hands = [[], []];
+    }
 
     const myIdx =
       g.players.indexOf(userId);
@@ -1395,20 +1405,28 @@ async function drawMarket() {
     }
 
     // =========================
-    // 🏁 MARKET FULLY EMPTY
-    // AFTER DRAW
+    // 🔄 RESET PICK STACK
+    // =========================
+    g.pendingPick = 0;
+
+    // =========================
+    // 🔁 NEXT TURN
+    // =========================
+    g.turn =
+      g.players[oppIdx];
+
+    // =========================
+    // 📝 HISTORY
+    // =========================
+    g.history = pushHistory(
+      g,
+      `${myLabel} drew ${drawn} card${drawn !== 1 ? "s" : ""}`
+    );
+
+    // =========================
+    // 🏁 MARKET EMPTY AFTER DRAW
     // =========================
     if (g.deck.length <= 0) {
-
-      g.pendingPick = 0;
-
-      g.turn =
-        g.players[oppIdx];
-
-      g.history = pushHistory(
-        g,
-        `${myLabel} drew ${drawn} card${drawn !== 1 ? "s" : ""}`
-      );
 
       const updated =
         handleEmptyMarket(g);
@@ -1424,18 +1442,8 @@ async function drawMarket() {
     }
 
     // =========================
-    // 🔁 NORMAL TURN
+    // 💾 SAVE GAME
     // =========================
-    g.pendingPick = 0;
-
-    g.turn =
-      g.players[oppIdx];
-
-    g.history = pushHistory(
-      g,
-      `${myLabel} drew ${drawn} card${drawn !== 1 ? "s" : ""}`
-    );
-
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
@@ -1456,7 +1464,7 @@ async function drawMarket() {
 
   } finally {
 
-    // ✅ ALWAYS RELEASE
+    // ✅ ALWAYS RELEASE LOCK
     actionLock.current = false;
   }
 }
@@ -1502,6 +1510,11 @@ const isMyTurn =
   game.status !==
     "finished" &&
   !game.payoutDone;
+
+// =====================
+// 🎨 UI RENDER
+// =====================
+return
 
 // =====================
 // 🎨 UI RENDER
