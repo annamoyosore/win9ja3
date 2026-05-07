@@ -1374,9 +1374,7 @@ return (
           <img
             key={i}
 
-            src={drawCard(
-              decodeCard(c)
-            )}
+            src={drawCard(decodeCard(c))}
 
             style={styles.card}
 
