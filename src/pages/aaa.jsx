@@ -15,18 +15,29 @@ const DEPOSIT_COLLECTION = "deposit_requests";
 const WITHDRAW_COLLECTION = "withdrawal_requests";
 const MATCH_COLLECTION = "matches";
 const TRANSACTION_COLLECTION = "transactions";
+const CASINO_COLLECTION = "casino_records";
 
-// 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
 // COMPONENT
 // =========================
 export default function AdminDashboard({ back }) {
+
   const [user, setUser] = useState(null);
   const [deposits, setDeposits] = useState([]);
   const [withdrawals, setWithdrawals] = useState([]);
   const [matches, setMatches] = useState([]);
+
+  // 🔥 wallet name map (userId -> name)
+  const [walletMap, setWalletMap] = useState({});
+
+  const [casinoStats, setCasinoStats] = useState({
+    totalStake: 0,
+    totalWin: 0,
+    reserve: 0
+  });
+
   const [loading, setLoading] = useState(false);
 
   // =========================
@@ -45,7 +56,9 @@ export default function AdminDashboard({ back }) {
     }
 
     setUser(u);
-    loadAll();
+    await loadAll();
+    await loadWalletNames();
+    await loadCasinoStats();
   }
 
   async function loadAll() {
@@ -54,6 +67,66 @@ export default function AdminDashboard({ back }) {
       loadWithdrawals(),
       loadMatches()
     ]);
+  }
+
+  // =========================
+  // LOAD WALLET NAMES (FIX)
+  // =========================
+  async function loadWalletNames() {
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        []
+      );
+
+      const map = {};
+
+      res.documents.forEach((w) => {
+        map[w.userId] = w.name || "Unknown";
+      });
+
+      setWalletMap(map);
+
+    } catch (err) {
+      console.log("Wallet map error:", err);
+    }
+  }
+
+  // =========================
+  // CASINO STATS
+  // =========================
+  async function loadCasinoStats() {
+    try {
+      const admin = await databases.getDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        ADMIN_ID
+      );
+
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        CASINO_COLLECTION,
+        [Query.limit(100)]
+      );
+
+      let totalStake = 0;
+      let totalWin = 0;
+
+      res.documents.forEach((t) => {
+        totalStake += Number(t.stake || 0);
+        totalWin += Number(t.win || 0);
+      });
+
+      setCasinoStats({
+        totalStake,
+        totalWin,
+        reserve: admin.casinoReserve || 0
+      });
+
+    } catch (err) {
+      console.log(err);
+    }
   }
 
   // =========================
@@ -84,11 +157,11 @@ export default function AdminDashboard({ back }) {
       [Query.orderDesc("$createdAt"), Query.limit(6)]
     );
 
-    const active = res.documents.filter(
-      m => m.status !== "finished" && m.status !== "cancelled"
+    setMatches(
+      res.documents.filter(
+        m => m.status !== "finished" && m.status !== "cancelled"
+      )
     );
-
-    setMatches(active);
   }
 
   // =========================
@@ -101,154 +174,10 @@ export default function AdminDashboard({ back }) {
       [Query.equal("userId", userId)]
     );
 
-    if (!res.documents.length) throw new Error("Wallet not found");
+    if (!res.documents.length)
+      throw new Error("Wallet not found");
 
     return res.documents[0];
-  }
-
-  // =========================
-  // APPROVE DEPOSIT
-  // =========================
-  async function approveDeposit(d) {
-    if (loading) return;
-    setLoading(true);
-
-    try {
-      if (d.status !== "pending") {
-        alert("Already processed");
-        return;
-      }
-
-      const wallet = await getWallet(d.userId);
-
-      // 💰 CREDIT USER
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: Number(wallet.balance || 0) + Number(d.amount)
-        }
-      );
-
-      // ✅ UPDATE STATUS
-      await databases.updateDocument(
-        DATABASE_ID,
-        DEPOSIT_COLLECTION,
-        d.$id,
-        { status: "completed" }
-      );
-
-      // 🧾 LOG TRANSACTION
-      await databases.createDocument(
-        DATABASE_ID,
-        TRANSACTION_COLLECTION,
-        ID.unique(),
-        {
-          userId: d.userId,
-          type: "deposit",
-          amount: d.amount,
-          status: "completed",
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      loadDeposits();
-
-    } catch (e) {
-      alert(e.message);
-    }
-
-    setLoading(false);
-  }
-
-  // =========================
-  // REJECT DEPOSIT
-  // =========================
-  async function rejectDeposit(d) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      DEPOSIT_COLLECTION,
-      d.$id,
-      { status: "rejected" }
-    );
-
-    loadDeposits();
-  }
-
-  // =========================
-  // APPROVE WITHDRAWAL
-  // =========================
-  async function approveWithdrawal(w) {
-    if (loading) return;
-    setLoading(true);
-
-    try {
-      if (w.status !== "pending") {
-        alert("Already processed");
-        return;
-      }
-
-      const wallet = await getWallet(w.userId);
-
-      if (wallet.balance < w.amount) {
-        alert("Insufficient balance");
-        return;
-      }
-
-      // 💸 DEDUCT USER BALANCE
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: Number(wallet.balance || 0) - Number(w.amount)
-        }
-      );
-
-      // ✅ UPDATE STATUS
-      await databases.updateDocument(
-        DATABASE_ID,
-        WITHDRAW_COLLECTION,
-        w.$id,
-        { status: "paid" }
-      );
-
-      // 🧾 LOG TRANSACTION
-      await databases.createDocument(
-        DATABASE_ID,
-        TRANSACTION_COLLECTION,
-        ID.unique(),
-        {
-          userId: w.userId,
-          type: "withdrawal",
-          amount: w.amount,
-          status: "completed",
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      loadWithdrawals();
-
-    } catch (e) {
-      alert(e.message);
-    }
-
-    setLoading(false);
-  }
-
-  // =========================
-  // REJECT WITHDRAWAL
-  // =========================
-  async function rejectWithdrawal(w) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      WITHDRAW_COLLECTION,
-      w.$id,
-      { status: "rejected" }
-    );
-
-    loadWithdrawals();
   }
 
   // =========================
@@ -256,7 +185,17 @@ export default function AdminDashboard({ back }) {
   // =========================
   return (
     <div style={styles.container}>
+
       <h1 style={styles.title}>🛠 Admin Dashboard</h1>
+
+      {/* CASINO STATS */}
+      <div style={styles.statsBox}>
+        <h2>🎰 Casino Overview</h2>
+        <p>💰 Reserve: ₦{casinoStats.reserve}</p>
+        <p>📊 Total Stake: ₦{casinoStats.totalStake}</p>
+        <p>🎁 Total Paid: ₦{casinoStats.totalWin}</p>
+        <p>📉 Profit: ₦{casinoStats.totalStake - casinoStats.totalWin}</p>
+      </div>
 
       {/* DEPOSITS */}
       <h2>💰 Pending Deposits</h2>
@@ -265,12 +204,8 @@ export default function AdminDashboard({ back }) {
           <div>
             <strong>₦{d.amount}</strong>
             <div style={styles.subText}>
-              {d.name || "Unknown"} ({d.userId})
+              {walletMap[d.userId] || "Unknown"} ({d.userId})
             </div>
-          </div>
-          <div>
-            <button onClick={() => approveDeposit(d)}>Approve</button>
-            <button onClick={() => rejectDeposit(d)}>Reject</button>
           </div>
         </div>
       ))}
@@ -282,12 +217,8 @@ export default function AdminDashboard({ back }) {
           <div>
             <strong>₦{w.amount}</strong>
             <div style={styles.subText}>
-              {w.name || "Unknown"} ({w.userId})
+              {walletMap[w.userId] || "Unknown"} ({w.userId})
             </div>
-          </div>
-          <div>
-            <button onClick={() => approveWithdrawal(w)}>Approve</button>
-            <button onClick={() => rejectWithdrawal(w)}>Reject</button>
           </div>
         </div>
       ))}
@@ -322,6 +253,13 @@ const styles = {
   title: {
     fontSize: 26,
     marginBottom: 10
+  },
+  statsBox: {
+    background: "#0f172a",
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 20,
+    border: "1px solid gold"
   },
   card: {
     background: "#111827",
