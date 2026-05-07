@@ -9,6 +9,9 @@ import {
   ID
 } from "../lib/appwrite";
 
+// 🔥 ADMIN CASINO WALLET
+const ADMIN_WALLET_ID = "69f2482600125d496354";
+
 const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David","Zainab"];
 const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
 
@@ -43,7 +46,9 @@ export default function CasinoWheel() {
   const segmentAngle = 360 / segments.length;
 
   const gradient = `conic-gradient(from -90deg, ${segments
-    .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
+    .map((s, i) =>
+      `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`
+    )
     .join(",")})`;
 
   const amount = Number(stake) || 0;
@@ -52,23 +57,33 @@ export default function CasinoWheel() {
     loadWallet();
 
     const style = document.createElement("style");
+
     style.innerHTML = `
       @keyframes fall {
-        to { transform: translateY(110vh) rotate(360deg); opacity: 0; }
+        to {
+          transform: translateY(110vh) rotate(360deg);
+          opacity: 0;
+        }
       }
     `;
+
     document.head.appendChild(style);
 
     const interval = setInterval(() => {
+
       const name = names[Math.floor(Math.random() * names.length)];
       const city = cities[Math.floor(Math.random() * cities.length)];
       const amt = Math.floor(Math.random() * 50000) + 2000;
 
       const id = Date.now();
-      setFeed(prev => [...prev, {
-        id,
-        msg: `💰 ${name} from ${city} won ₦${amt}`
-      }]);
+
+      setFeed(prev => [
+        ...prev,
+        {
+          id,
+          msg: \`💰 \${name} from \${city} won ₦\${amt}\`
+        }
+      ]);
 
       setTimeout(() => {
         setFeed(prev => prev.filter(f => f.id !== id));
@@ -77,19 +92,26 @@ export default function CasinoWheel() {
     }, 4000);
 
     return () => clearInterval(interval);
+
   }, []);
 
   async function loadWallet() {
+
     const u = await account.get();
+
     const res = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
       [Query.equal("userId", u.$id)]
     );
-    if (res.documents.length) setWallet(res.documents[0]);
+
+    if (res.documents.length) {
+      setWallet(res.documents[0]);
+    }
   }
 
   const getResult = () => {
+
     const r = Math.random();
 
     if (r < 0.45) return "LOSE";
@@ -98,128 +120,305 @@ export default function CasinoWheel() {
     if (r < 0.83) return "FREE";
     if (r < 0.93) return "X1";
     if (r < 0.98) return "X2";
+
     return "X3";
   };
 
   function spawnFlowers() {
+
     const items = Array.from({ length: 25 }).map((_, i) => ({
       id: i,
       left: Math.random() * 100
     }));
+
     setFlowers(items);
+
     setTimeout(() => setFlowers([]), 3000);
   }
 
   const spin = async () => {
+
     if (spinning || !wallet) return;
 
     const bet = Number(stake);
+
     if (!bet || bet < 50) return;
-    if (wallet.balance < bet) return;
+
+    if (wallet.balance < bet) {
+      setResult("❌ INSUFFICIENT BALANCE");
+      return;
+    }
 
     setSpinning(true);
     setCanStop(true);
     setGlow(true);
 
-    let deducted = wallet.balance - bet;
+    try {
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      { balance: deducted }
-    );
+      // 🔥 DEDUCT PLAYER BALANCE
+      const deducted = wallet.balance - bet;
 
-    setWallet(prev => ({ ...prev, balance: deducted }));
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: deducted
+        }
+      );
 
-    const outcome = getResult();
-    let index = segments.findIndex(s => s.type === outcome);
+      setWallet(prev => ({
+        ...prev,
+        balance: deducted
+      }));
 
-    const jackpotIndex = segments.findIndex(s => s.type === "JACKPOT");
-    if (index === jackpotIndex || index === -1) {
-      index = segments.findIndex(s => s.type === "LOSE");
+      // 🔥 ADD STAKE TO ADMIN RESERVE
+      try {
+
+        const adminWallet = await databases.getDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          ADMIN_WALLET_ID
+        );
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          ADMIN_WALLET_ID,
+          {
+            casinoReserve:
+              (adminWallet.casinoReserve || 0) + bet
+          }
+        );
+
+      } catch (err) {
+        console.log("Admin reserve update failed", err);
+      }
+
+      // 🎯 OUTCOME
+      const outcome = getResult();
+
+      let index = segments.findIndex(
+        s => s.type === outcome
+      );
+
+      const jackpotIndex = segments.findIndex(
+        s => s.type === "JACKPOT"
+      );
+
+      if (index === jackpotIndex || index === -1) {
+        index = segments.findIndex(s => s.type === "LOSE");
+      }
+
+      const centerAngle =
+        index * segmentAngle + segmentAngle / 2;
+
+      const pointerOffset = 90;
+
+      const spins = 360 * 5;
+
+      const finalAngle =
+        spins + (360 - centerAngle + pointerOffset);
+
+      spinDataRef.current = {
+        outcome,
+        bet,
+        deducted,
+        index
+      };
+
+      setRotation(finalAngle);
+
+      timeoutRef.current = setTimeout(
+        finishSpin,
+        4000
+      );
+
+    } catch (err) {
+
+      console.log(err);
+
+      setResult("❌ SPIN FAILED");
+
+      setSpinning(false);
+      setCanStop(false);
+      setGlow(false);
     }
-
-    const centerAngle = index * segmentAngle + segmentAngle / 2;
-
-    // 🎯 FIXED POINTER ALIGNMENT
-    const pointerOffset = 90;
-
-    const spins = 360 * 5;
-    const finalAngle = spins + (360 - centerAngle + pointerOffset);
-
-    spinDataRef.current = { outcome, bet, deducted, index };
-
-    setRotation(finalAngle);
-    timeoutRef.current = setTimeout(finishSpin, 4000);
   };
 
   const finishSpin = async () => {
+
     const data = spinDataRef.current;
+
     if (!data) return;
 
-    const { outcome, bet, deducted, index } = data;
+    const {
+      outcome,
+      bet,
+      deducted,
+      index
+    } = data;
 
     let win = 0;
-    const mult = { X1:1, X2:2, X3:3 }[outcome];
 
-    if (outcome === "FREE") {
-      win = bet;
-      setResult("🎁 FREE SPIN");
-    } else if (outcome === "ALMOST") {
-      setResult("😬 ALMOST! TRY AGAIN");
-    } else if (mult) {
-      win = bet * mult;
-      setResult(`🎉 YOU WON ₦${win}`);
-      setWon(win);
-      if (win > bet) spawnFlowers();
-    } else {
-      setResult("❌ YOU LOST");
-    }
-
-    const finalBalance = deducted + win;
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      { balance: finalBalance }
-    );
-
-    setWallet(prev => ({ ...prev, balance: finalBalance }));
+    const mult = {
+      X1: 1,
+      X2: 2,
+      X3: 3
+    }[outcome];
 
     try {
-      await databases.createDocument(
+
+      // 🔥 LOAD ADMIN WALLET
+      let adminWallet = null;
+
+      try {
+
+        adminWallet = await databases.getDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          ADMIN_WALLET_ID
+        );
+
+      } catch {}
+
+      // 🎁 RESULT LOGIC
+      if (outcome === "FREE") {
+
+        win = bet;
+
+        setResult("🎁 FREE SPIN");
+
+      } else if (outcome === "ALMOST") {
+
+        setResult("😬 ALMOST! TRY AGAIN");
+
+      } else if (mult) {
+
+        win = bet * mult;
+
+        // 🔥 CHECK RESERVE
+        if (
+          adminWallet &&
+          (adminWallet.casinoReserve || 0) < win
+        ) {
+
+          setResult("❌ CASINO BUSY");
+
+          setSpinning(false);
+          setCanStop(false);
+          setGlow(false);
+
+          return;
+        }
+
+        setResult(`🎉 YOU WON ₦${win}`);
+
+        setWon(win);
+
+        if (win > bet) {
+          spawnFlowers();
+        }
+
+      } else {
+
+        setResult("❌ YOU LOST");
+
+        // 🔥 TRACK CASINO PROFIT
+        if (adminWallet) {
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            ADMIN_WALLET_ID,
+            {
+              casinoProfit:
+                (adminWallet.casinoProfit || 0) + bet
+            }
+          );
+        }
+      }
+
+      // 🔥 REMOVE PAYOUT FROM RESERVE
+      if (win > 0 && adminWallet) {
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          ADMIN_WALLET_ID,
+          {
+            casinoReserve:
+              (adminWallet.casinoReserve || 0) - win
+          }
+        );
+      }
+
+      // 🔥 FINAL PLAYER BALANCE
+      const finalBalance = deducted + win;
+
+      await databases.updateDocument(
         DATABASE_ID,
-        CASINO_COLLECTION,
-        ID.unique(),
+        WALLET_COLLECTION,
+        wallet.$id,
         {
-          userId: wallet.userId || wallet.$id,
-          stake: bet,
-          win,
-          result: outcome,
-          createdAt: new Date().toISOString()
+          balance: finalBalance
         }
       );
-    } catch {}
 
-    setFlashIndex(index);
+      setWallet(prev => ({
+        ...prev,
+        balance: finalBalance
+      }));
+
+      // 🔥 SAVE CASINO HISTORY
+      try {
+
+        await databases.createDocument(
+          DATABASE_ID,
+          CASINO_COLLECTION,
+          ID.unique(),
+          {
+            userId: wallet.userId || wallet.$id,
+            stake: bet,
+            win,
+            result: outcome,
+            createdAt: new Date().toISOString()
+          }
+        );
+
+      } catch {}
+
+      setFlashIndex(index);
+
+    } catch (err) {
+
+      console.log(err);
+
+      setResult("❌ RESULT FAILED");
+
+    }
+
     setGlow(false);
     setSpinning(false);
     setCanStop(false);
 
     setTimeout(() => {
+
       setFlashIndex(null);
       setResult("");
       setWon(0);
       setRotation(0);
       setStake("");
+
     }, 4000);
   };
 
   const handleStop = () => {
+
     if (!spinning) return;
+
     clearTimeout(timeoutRef.current);
+
     finishSpin();
   };
 
@@ -242,23 +441,34 @@ export default function CasinoWheel() {
         <div>x1 → ₦{amount}</div>
         <div>x2 → ₦{amount * 2}</div>
         <div>x3 → ₦{amount * 3}</div>
-        <div style={{ marginTop: 6, textShadow: "0 0 6px gold" }}>
+
+        <div style={{
+          marginTop: 6,
+          textShadow: "0 0 6px gold"
+        }}>
           💎 JACKPOT → ₦100,000
         </div>
       </div>
 
-      {/* FEED */}
-      <div style={{ position: "fixed", top: 10, right: 10 }}>
+      {/* LIVE FEED */}
+      <div style={{
+        position: "fixed",
+        top: 10,
+        right: 10
+      }}>
         {feed.map(f => (
-          <div key={f.id} style={{
-            background: "#000",
-            color: "gold",
-            fontWeight: "bold",
-            padding: 8,
-            margin: 4,
-            borderRadius: 6,
-            border: "1px solid gold"
-          }}>
+          <div
+            key={f.id}
+            style={{
+              background: "#000",
+              color: "gold",
+              fontWeight: "bold",
+              padding: 8,
+              margin: 4,
+              borderRadius: 6,
+              border: "1px solid gold"
+            }}
+          >
             {f.msg}
           </div>
         ))}
@@ -271,15 +481,27 @@ export default function CasinoWheel() {
         placeholder="Min ₦50"
         value={stake}
         onChange={e => setStake(e.target.value)}
-        style={{ padding: 10, textAlign: "center" }}
+        style={{
+          padding: 10,
+          textAlign: "center"
+        }}
       />
 
-      <p style={{ color: "red", fontWeight: "bold" }}>
+      <p style={{
+        color: "red",
+        fontWeight: "bold"
+      }}>
         Stake: ₦{stake || 0}
       </p>
 
       {/* WHEEL */}
-      <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
+      <div style={{
+        position: "relative",
+        width: 300,
+        margin: "20px auto"
+      }}>
+
+        {/* POINTER */}
         <div style={{
           position: "absolute",
           top: -5,
@@ -291,31 +513,51 @@ export default function CasinoWheel() {
           zIndex: 10
         }} />
 
+        {/* WHEEL BODY */}
         <div style={{
           width: 280,
           height: 280,
           borderRadius: "50%",
           background: gradient,
           transform: `rotate(${rotation}deg)`,
-          transition: spinning ? "transform 4s cubic-bezier(0.1,0.7,0.2,1)" : "none",
-          boxShadow: glow ? "0 0 30px gold" : ""
+          transition: spinning
+            ? "transform 4s cubic-bezier(0.1,0.7,0.2,1)"
+            : "none",
+          boxShadow: glow
+            ? "0 0 30px gold"
+            : ""
         }}>
+
           {segments.map((s, i) => (
-            <div key={i} style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: `rotate(${i * segmentAngle}deg) translate(0,-140px) rotate(-${i * segmentAngle}deg)`,
-              color: flashIndex === i ? "gold" : "#fff",
-              fontWeight: "bold"
-            }}>
+
+            <div
+              key={i}
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform:
+                  `rotate(${i * segmentAngle}deg)
+                   translate(0,-140px)
+                   rotate(-${i * segmentAngle}deg)`,
+
+                color:
+                  flashIndex === i
+                    ? "gold"
+                    : "#fff",
+
+                fontWeight: "bold"
+              }}
+            >
               {s.label}
             </div>
+
           ))}
+
         </div>
       </div>
 
-      {/* BUTTONS */}
+      {/* BUTTON */}
       <button
         onClick={spin}
         disabled={spinning}
@@ -324,7 +566,8 @@ export default function CasinoWheel() {
           fontSize: 20,
           fontWeight: "bold",
           borderRadius: 14,
-          background: "linear-gradient(135deg, gold, orange)",
+          background:
+            "linear-gradient(135deg, gold, orange)",
           border: "none",
           boxShadow: "0 0 15px gold"
         }}
@@ -332,9 +575,12 @@ export default function CasinoWheel() {
         {spinning ? "Spinning..." : "SPIN"}
       </button>
 
+      {/* STOP BUTTON */}
       {spinning && (
         <div style={{ marginTop: 10 }}>
-          <button onClick={handleStop}>STOP</button>
+          <button onClick={handleStop}>
+            STOP
+          </button>
         </div>
       )}
 
@@ -343,24 +589,39 @@ export default function CasinoWheel() {
         fontSize: 36,
         fontWeight: "bold",
         marginTop: 20,
+
         color:
-          result.includes("WON") ? "gold" :
-          result.includes("LOST") ? "red" :
-          result.includes("ALMOST") ? "orange" : "#fff"
+          result.includes("WON")
+            ? "gold"
+            : result.includes("LOST")
+            ? "red"
+            : result.includes("ALMOST")
+            ? "orange"
+            : "#fff"
       }}>
         {result}
       </div>
 
-      {won > 0 && <h2 style={{ color: "gold" }}>₦{won}</h2>}
+      {/* WIN */}
+      {won > 0 && (
+        <h2 style={{ color: "gold" }}>
+          ₦{won}
+        </h2>
+      )}
 
       {/* FLOWERS */}
       {flowers.map(f => (
-        <div key={f.id} style={{
-          position: "fixed",
-          top: "-10px",
-          left: `${f.left}%`,
-          animation: "fall 3s linear"
-        }}>🌸</div>
+        <div
+          key={f.id}
+          style={{
+            position: "fixed",
+            top: "-10px",
+            left: `${f.left}%`,
+            animation: "fall 3s linear"
+          }}
+        >
+          🌸
+        </div>
       ))}
 
     </div>
