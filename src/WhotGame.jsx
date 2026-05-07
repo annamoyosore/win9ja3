@@ -1300,6 +1300,7 @@ async function drawMarket() {
   // 🔒 BLOCK ACTIONS
   if (
     actionLock.current ||
+    !isMyTurn ||
     game.status === "finished" ||
     game.payoutDone
   ) {
@@ -1310,33 +1311,11 @@ async function drawMarket() {
 
   try {
 
-    // ✅ ALWAYS LOAD FRESH GAME
-    const freshDoc =
-      await databases.getDocument(
-        DATABASE_ID,
-        GAME_COLLECTION,
-        gameId
-      );
-
-    const g =
-      parseGame(freshDoc);
-
-    // 🔒 RECHECK STATUS
-    if (
-      g.status === "finished" ||
-      g.payoutDone
-    ) {
-
-      return;
-    }
-
-    // 🔒 REAL TURN VALIDATION
-    if (g.turn !== userId) {
-
-      return invalidMove(
-        "Not your turn"
-      );
-    }
+    // ✅ USE LOCAL LIVE GAME STATE
+    // prevents realtime/Appwrite desync
+    const g = JSON.parse(
+      JSON.stringify(game)
+    );
 
     // ✅ SAFE INDEX
     const myIdx =
@@ -1354,6 +1333,7 @@ async function drawMarket() {
         ? "Player 1"
         : "Player 2";
 
+    // ✅ PICK STACK
     const drawCount =
       g.pendingPick > 0
         ? g.pendingPick
@@ -1362,11 +1342,12 @@ async function drawMarket() {
     // =========================
     // 🧠 EMPTY MARKET
     // =========================
-    if (!g.deck.length) {
+    if (!g.deck?.length) {
 
       const updated =
         handleEmptyMarket(g);
 
+      // 🏁 MATCH FINISH
       if (
         updated.status ===
         "finished"
@@ -1392,6 +1373,7 @@ async function drawMarket() {
         return;
       }
 
+      // 🔁 NORMAL MARKET RESET
       await databases.updateDocument(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -1413,6 +1395,7 @@ async function drawMarket() {
       i++
     ) {
 
+      // 🛑 STOP IF MARKET ENDS
       if (!g.deck.length)
         break;
 
@@ -1430,20 +1413,23 @@ async function drawMarket() {
     }
 
     // =========================
-    // 🔒 NO CARD DRAWN FIX
+    // 🛑 NO CARD DRAWN
     // =========================
     if (drawn <= 0) {
 
-      return invalidMove(
+      invalidMove(
         "Market empty"
       );
+
+      return;
     }
 
     // =========================
-    // 🔁 RESET STATE
+    // 🔁 RESET PICK STACK
     // =========================
     g.pendingPick = 0;
 
+    // ✅ NEXT TURN
     g.turn =
       g.players[oppIdx];
 
@@ -1472,11 +1458,17 @@ async function drawMarket() {
       err
     );
 
+    invalidMove(
+      "Market failed"
+    );
+
   } finally {
 
+    // ✅ ALWAYS RELEASE LOCK
     actionLock.current = false;
   }
 }
+
 // =========================
 // 🧠 DERIVED STATE
 // =========================
@@ -1637,12 +1629,16 @@ return (
             ...styles.marketBtn,
 
             opacity:
-              !isMyTurn
+              !isMyTurn ||
+              actionLock.current
                 ? 0.5
                 : 1
           }}
 
-          disabled={!isMyTurn}
+          disabled={
+            !isMyTurn ||
+            actionLock.current
+          }
 
           onClick={drawMarket}
         >
