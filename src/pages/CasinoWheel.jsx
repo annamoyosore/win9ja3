@@ -12,23 +12,8 @@ import {
 // 🔥 ADMIN CASINO WALLET
 const ADMIN_WALLET_ID = "69f2482600125d496354";
 
-const names = [
-  "Emeka",
-  "Tunde",
-  "Chioma",
-  "Ibrahim",
-  "Mary",
-  "David",
-  "Zainab"
-];
-
-const cities = [
-  "Lagos",
-  "Abuja",
-  "Ibadan",
-  "Kano",
-  "Enugu"
-];
+const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David","Zainab"];
+const cities = ["Lagos","Abuja","Ibadan","Kano","Enugu"];
 
 export default function CasinoWheel() {
 
@@ -60,72 +45,18 @@ export default function CasinoWheel() {
 
   const segmentAngle = 360 / segments.length;
 
-  const gradient = `conic-gradient(
-    from -90deg,
-    ${segments
-      .map(
-        (s, i) =>
-          `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`
-      )
-      .join(",")}
-  )`;
+  const gradient = `conic-gradient(from -90deg, ${segments
+    .map((s, i) => `${s.color} ${i * segmentAngle}deg ${(i + 1) * segmentAngle}deg`)
+    .join(",")})`;
 
   const amount = Number(stake) || 0;
 
   useEffect(() => {
-
     loadWallet();
-
-    const style = document.createElement("style");
-
-    style.innerHTML = `
-      @keyframes fall {
-        to {
-          transform: translateY(110vh) rotate(360deg);
-          opacity: 0;
-        }
-      }
-    `;
-
-    document.head.appendChild(style);
-
-    const interval = setInterval(() => {
-
-      const name =
-        names[Math.floor(Math.random() * names.length)];
-
-      const city =
-        cities[Math.floor(Math.random() * cities.length)];
-
-      const amt =
-        Math.floor(Math.random() * 50000) + 2000;
-
-      const id = Date.now();
-
-      setFeed(prev => [
-        ...prev,
-        {
-          id,
-          msg: `💰 ${name} from ${city} won ₦${amt}`
-        }
-      ]);
-
-      setTimeout(() => {
-        setFeed(prev =>
-          prev.filter(f => f.id !== id)
-        );
-      }, 3500);
-
-    }, 4000);
-
-    return () => clearInterval(interval);
-
   }, []);
 
   async function loadWallet() {
-
     const u = await account.get();
-
     const res = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
@@ -137,364 +68,186 @@ export default function CasinoWheel() {
     }
   }
 
-  // 🔥 UPDATED ODDS
+  // ✅ FIXED ODDS
   const getResult = () => {
-
     const r = Math.random();
 
-    // 45%
-    if (r < 0.45) {
-      return "LOSE";
-    }
-
-    // 20%
-    if (r < 0.65) {
-      return "LOSE2";
-    }
-
-    // 13%
-    if (r < 0.78) {
-      return "ALMOST";
-    }
-
-    // 8%
-    if (r < 0.86) {
-      return "FREE";
-    }
-
-    // 10%
-    if (r < 0.96) {
-      return "X1";
-    }
-
-    // 2%
-    if (r < 0.98) {
-      return "X2";
-    }
-
-    // 2%
+    if (r < 0.45) return "LOSE";
+    if (r < 0.65) return "LOSE2";
+    if (r < 0.78) return "ALMOST";
+    if (r < 0.86) return "FREE";
+    if (r < 0.96) return "X1";
+    if (r < 0.98) return "X2";
     return "X3";
   };
 
   function spawnFlowers() {
-
-    const items = Array.from({ length: 25 }).map(
-      (_, i) => ({
-        id: i,
-        left: Math.random() * 100
-      })
-    );
-
+    const items = Array.from({ length: 25 }).map((_, i) => ({
+      id: i,
+      left: Math.random() * 100
+    }));
     setFlowers(items);
-
-    setTimeout(() => {
-      setFlowers([]);
-    }, 3000);
+    setTimeout(() => setFlowers([]), 3000);
   }
 
   const spin = async () => {
-
     if (spinning || !wallet) return;
 
     const bet = Number(stake);
-
     if (!bet || bet < 50) return;
-
-    if (wallet.balance < bet) {
-      setResult("❌ INSUFFICIENT BALANCE");
-      return;
-    }
+    if (wallet.balance < bet) return;
 
     setSpinning(true);
     setCanStop(true);
     setGlow(true);
 
-    try {
+    const deducted = wallet.balance - bet;
 
-      // 🔥 DEDUCT PLAYER BALANCE
-      const deducted = wallet.balance - bet;
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      { balance: deducted }
+    );
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: deducted
-        }
-      );
+    setWallet(prev => ({ ...prev, balance: deducted }));
 
-      setWallet(prev => ({
-        ...prev,
-        balance: deducted
-      }));
+    // add to admin reserve
+    const adminWallet = await databases.getDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      ADMIN_WALLET_ID
+    );
 
-      // 🔥 ADD STAKE TO ADMIN RESERVE
-      try {
-
-        const adminWallet =
-          await databases.getDocument(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            ADMIN_WALLET_ID
-          );
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          ADMIN_WALLET_ID,
-          {
-            casinoReserve:
-              (adminWallet.casinoReserve || 0) + bet
-          }
-        );
-
-      } catch (err) {
-        console.log(
-          "Admin reserve update failed",
-          err
-        );
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      ADMIN_WALLET_ID,
+      {
+        casinoReserve: (adminWallet.casinoReserve || 0) + bet
       }
+    );
 
-      // 🎯 OUTCOME
-      const outcome = getResult();
+    const outcome = getResult();
+    const index = segments.findIndex(s => s.type === outcome);
 
-      let index = segments.findIndex(
-        s => s.type === outcome
-      );
+    const centerAngle = index * segmentAngle + segmentAngle / 2;
+    const finalAngle = 360 * 5 + (360 - centerAngle + 90);
 
-      const jackpotIndex = segments.findIndex(
-        s => s.type === "JACKPOT"
-      );
+    spinDataRef.current = { outcome, bet, deducted, index };
 
-      if (
-        index === jackpotIndex ||
-        index === -1
-      ) {
-        index = segments.findIndex(
-          s => s.type === "LOSE"
-        );
-      }
+    setRotation(finalAngle);
 
-      const centerAngle =
-        index * segmentAngle +
-        segmentAngle / 2;
-
-      const pointerOffset = 90;
-
-      const spins = 360 * 5;
-
-      const finalAngle =
-        spins +
-        (360 - centerAngle + pointerOffset);
-
-      spinDataRef.current = {
-        outcome,
-        bet,
-        deducted,
-        index
-      };
-
-      setRotation(finalAngle);
-
-      timeoutRef.current = setTimeout(
-        finishSpin,
-        4000
-      );
-
-    } catch (err) {
-
-      console.log(err);
-
-      setResult("❌ SPIN FAILED");
-
-      setSpinning(false);
-      setCanStop(false);
-      setGlow(false);
-    }
+    timeoutRef.current = setTimeout(finishSpin, 4000);
   };
 
   const finishSpin = async () => {
 
     const data = spinDataRef.current;
-
     if (!data) return;
 
-    const {
-      outcome,
-      bet,
-      deducted,
-      index
-    } = data;
+    const { outcome, bet, deducted, index } = data;
 
     let win = 0;
+    const mult = { X1: 1, X2: 2, X3: 3 }[outcome];
 
-    const mult = {
-      X1: 1,
-      X2: 2,
-      X3: 3
-    }[outcome];
+    const adminWallet = await databases.getDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      ADMIN_WALLET_ID
+    );
 
-    try {
+    if (outcome === "FREE") {
+      win = bet;
+      setResult("🎁 FREE SPIN");
 
-      let adminWallet = null;
+    } else if (outcome === "ALMOST") {
+      setResult("😬 ALMOST!");
 
-      try {
+    } else if (mult) {
+      win = bet * mult;
+      setResult(`🎉 YOU WON ₦${win}`);
 
-        adminWallet =
-          await databases.getDocument(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            ADMIN_WALLET_ID
-          );
-
-      } catch {}
-
-      // 🎁 RESULT LOGIC
-      if (outcome === "FREE") {
-
-        win = bet;
-
-        setResult("🎁 FREE SPIN");
-
-      } else if (outcome === "ALMOST") {
-
-        setResult("😬 ALMOST! TRY AGAIN");
-
-      } else if (mult) {
-
-        win = bet * mult;
-
-        // 🔥 CHECK RESERVE
-        if (
-          adminWallet &&
-          (adminWallet.casinoReserve || 0) < win
-        ) {
-
-          setResult("❌ CASINO BUSY");
-
-          setSpinning(false);
-          setCanStop(false);
-          setGlow(false);
-
-          return;
-        }
-
-        setResult(`🎉 YOU WON ₦${win}`);
-
-        setWon(win);
-
-        if (win > bet) {
-          spawnFlowers();
-        }
-
-      } else {
-
-        setResult("❌ YOU LOST");
-
-        // 🔥 TRACK PROFIT
-        if (adminWallet) {
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            ADMIN_WALLET_ID,
-            {
-              casinoProfit:
-                (adminWallet.casinoProfit || 0) + bet
-            }
-          );
-        }
+      if ((adminWallet.casinoReserve || 0) < win) {
+        setResult("❌ CASINO BUSY");
+        return;
       }
 
-      // 🔥 REMOVE PAYOUT FROM RESERVE
-      if (win > 0 && adminWallet) {
+      spawnFlowers();
 
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          ADMIN_WALLET_ID,
-          {
-            casinoReserve:
-              (adminWallet.casinoReserve || 0) - win
-          }
-        );
-      }
-
-      // 🔥 FINAL PLAYER BALANCE
-      const finalBalance = deducted + win;
+    } else {
+      setResult("❌ YOU LOST");
 
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
-        wallet.$id,
+        ADMIN_WALLET_ID,
         {
-          balance: finalBalance
+          casinoProfit: (adminWallet.casinoProfit || 0) + bet
         }
       );
-
-      setWallet(prev => ({
-        ...prev,
-        balance: finalBalance
-      }));
-
-      // 🔥 SAVE HISTORY
-      try {
-
-        await databases.createDocument(
-          DATABASE_ID,
-          CASINO_COLLECTION,
-          ID.unique(),
-          {
-            userId:
-              wallet.userId || wallet.$id,
-            stake: bet,
-            win,
-            result: outcome,
-            createdAt:
-              new Date().toISOString()
-          }
-        );
-
-      } catch {}
-
-      setFlashIndex(index);
-
-    } catch (err) {
-
-      console.log(err);
-
-      setResult("❌ RESULT FAILED");
     }
 
-    setGlow(false);
+    if (win > 0) {
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        ADMIN_WALLET_ID,
+        {
+          casinoReserve: (adminWallet.casinoReserve || 0) - win
+        }
+      );
+    }
+
+    const finalBalance = deducted + win;
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      { balance: finalBalance }
+    );
+
+    setWallet(prev => ({ ...prev, balance: finalBalance }));
+
+    // ✅ FIXED RECORD SAVE (per user guaranteed)
+    try {
+      await databases.createDocument(
+        DATABASE_ID,
+        CASINO_COLLECTION,
+        ID.unique(),
+        {
+          userId: wallet.userId,
+          stake: bet,
+          win,
+          result: outcome,
+          createdAt: new Date().toISOString()
+        }
+      );
+    } catch (err) {
+      console.log("CASINO SAVE ERROR:", err);
+    }
+
     setSpinning(false);
+    setGlow(false);
     setCanStop(false);
 
     setTimeout(() => {
-
-      setFlashIndex(null);
+      setRotation(0);
       setResult("");
       setWon(0);
-      setRotation(0);
       setStake("");
-
-    }, 4000);
+    }, 3000);
   };
 
   const handleStop = () => {
-
     if (!spinning) return;
-
     clearTimeout(timeoutRef.current);
-
     finishSpin();
   };
 
   return (
-    <div style={{
-      textAlign: "center",
-      paddingTop: 120
-    }}>
+    <div style={{ textAlign: "center", paddingTop: 120 }}>
 
       {/* RETURNS */}
       <div style={{
@@ -503,8 +256,34 @@ export default function CasinoWheel() {
         left: 10,
         background: "#000",
         color: "gold",
-        fontWeight: "bold",
         padding: 10,
         borderRadius: 10,
         border: "1px solid gold"
       }}>
+        🎯 RETURNS
+        <div>x1 → ₦{amount}</div>
+        <div>x2 → ₦{amount * 2}</div>
+        <div>x3 → ₦{amount * 3}</div>
+      </div>
+
+      <h3>💰 ₦{wallet?.balance || 0}</h3>
+
+      <input
+        type="number"
+        value={stake}
+        onChange={e => setStake(e.target.value)}
+        placeholder="Min ₦50"
+      />
+
+      {/* BUTTON */}
+      <button onClick={spin} disabled={spinning}>
+        {spinning ? "SPINNING..." : "SPIN"}
+      </button>
+
+      {spinning && (
+        <button onClick={handleStop}>STOP</button>
+      )}
+
+    </div>
+  );
+}
