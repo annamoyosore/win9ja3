@@ -9,6 +9,7 @@ import {
   ID
 } from "../lib/appwrite";
 
+// 🔥 ADMIN WALLET
 const ADMIN_WALLET_ID = "69f2482600125d496354";
 
 const names = ["Emeka","Tunde","Chioma","Ibrahim","Mary","David","Zainab"];
@@ -25,7 +26,6 @@ export default function CasinoWheel() {
   const [feed, setFeed] = useState([]);
   const [flowers, setFlowers] = useState([]);
   const [glow, setGlow] = useState(false);
-  const [flashIndex, setFlashIndex] = useState(null);
 
   const timeoutRef = useRef(null);
   const spinDataRef = useRef(null);
@@ -96,15 +96,16 @@ export default function CasinoWheel() {
     }
   }
 
-  // 🎯 ODDS (FIXED)
+  // 🎯 ODDS
   const getResult = () => {
     const r = Math.random();
+
     if (r < 0.45) return "LOSE";
     if (r < 0.65) return "LOSE2";
-    if (r < 0.78) return "ALMOST";   // 13%
+    if (r < 0.78) return "ALMOST"; // 13%
     if (r < 0.86) return "FREE";
     if (r < 0.96) return "X1";
-    if (r < 0.98) return "X2";      // 2%
+    if (r < 0.98) return "X2";     // 2%
     return "X3";
   };
 
@@ -129,7 +130,7 @@ export default function CasinoWheel() {
 
     const deducted = wallet.balance - bet;
 
-    // 💸 USER PAYS STAKE
+    // 💸 USER DEDUCT
     await databases.updateDocument(
       DATABASE_ID,
       WALLET_COLLECTION,
@@ -139,21 +140,23 @@ export default function CasinoWheel() {
 
     setWallet(prev => ({ ...prev, balance: deducted }));
 
-    // 💰 ADMIN PROFIT INCREASE
-    const admin = await databases.getDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      ADMIN_WALLET_ID
-    );
+    // 💰 ADMIN PROFIT
+    try {
+      const admin = await databases.getDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        ADMIN_WALLET_ID
+      );
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      ADMIN_WALLET_ID,
-      {
-        casinoProfit: (admin.casinoProfit || 0) + bet
-      }
-    );
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        ADMIN_WALLET_ID,
+        {
+          casinoProfit: (admin.casinoProfit || 0) + bet
+        }
+      );
+    } catch {}
 
     const outcome = getResult();
     const index = segments.findIndex(s => s.type === outcome);
@@ -183,7 +186,6 @@ export default function CasinoWheel() {
       ADMIN_WALLET_ID
     );
 
-    // 🎁 RESULT LOGIC
     if (outcome === "FREE") {
       win = bet;
       setResult("🎁 FREE SPIN");
@@ -195,20 +197,20 @@ export default function CasinoWheel() {
       win = bet * mult;
 
       if ((admin.casinoReserve || 0) < win) {
-        setResult("❌ CASINO EMPTY");
+        setResult("❌ CASINO LOW FUNDS");
         setSpinning(false);
         return;
       }
 
-      setResult(`🎉 WON ₦${win}`);
+      setResult(`🎉 YOU WON ₦${win}`);
       setWon(win);
       spawnFlowers();
 
     } else {
-      setResult("❌ LOST");
+      setResult("❌ YOU LOST");
     }
 
-    // 💸 PAY WIN FROM RESERVE
+    // 💸 PAY FROM RESERVE
     if (win > 0) {
       await databases.updateDocument(
         DATABASE_ID,
@@ -220,7 +222,6 @@ export default function CasinoWheel() {
       );
     }
 
-    // 💰 PLAYER BALANCE UPDATE
     const finalBalance = deducted + win;
 
     await databases.updateDocument(
@@ -232,7 +233,7 @@ export default function CasinoWheel() {
 
     setWallet(prev => ({ ...prev, balance: finalBalance }));
 
-    // 📊 ALWAYS SAVE HISTORY (FIXED RELIABILITY)
+    // 📊 SAVE HISTORY (ALWAYS)
     try {
       await databases.createDocument(
         DATABASE_ID,
@@ -246,9 +247,7 @@ export default function CasinoWheel() {
           createdAt: new Date().toISOString()
         }
       );
-    } catch (e) {
-      console.log("history save failed", e);
-    }
+    } catch {}
 
     setSpinning(false);
     setGlow(false);
@@ -264,8 +263,6 @@ export default function CasinoWheel() {
   return (
     <div style={{ textAlign: "center", paddingTop: 120 }}>
 
-      <h3>💰 ₦{wallet?.balance || 0}</h3>
-
       {/* RETURNS */}
       <div style={{
         position: "fixed",
@@ -275,12 +272,28 @@ export default function CasinoWheel() {
         color: "gold",
         padding: 10,
         borderRadius: 10,
-        border: "1px solid gold"
+        border: "1px solid gold",
+        width: 180
       }}>
         🎯 RETURNS
         <div>x1 → ₦{amount}</div>
         <div>x2 → ₦{amount * 2}</div>
         <div>x3 → ₦{amount * 3}</div>
+
+        <div style={{ marginTop: 6, fontWeight: "bold" }}>
+          💎 JACKPOT → ₦100,000
+        </div>
+
+        <div style={{
+          marginTop: 6,
+          fontSize: 11,
+          color: "#ff4d4d",
+          borderTop: "1px solid #333",
+          paddingTop: 5,
+          fontWeight: "bold"
+        }}>
+          ☠️ JACKPOT: VERY LOW CHANCE
+        </div>
       </div>
 
       {/* FEED */}
@@ -289,7 +302,7 @@ export default function CasinoWheel() {
           <div key={f.id} style={{
             background: "#000",
             color: "gold",
-            padding: 8,
+            padding: 6,
             margin: 4,
             borderRadius: 6
           }}>
@@ -298,7 +311,8 @@ export default function CasinoWheel() {
         ))}
       </div>
 
-      {/* INPUT */}
+      <h3>💰 ₦{wallet?.balance || 0}</h3>
+
       <input
         type="number"
         value={stake}
@@ -308,7 +322,6 @@ export default function CasinoWheel() {
 
       {/* WHEEL */}
       <div style={{ position: "relative", width: 300, margin: "20px auto" }}>
-
         <div style={{
           position: "absolute",
           top: -5,
@@ -329,7 +342,6 @@ export default function CasinoWheel() {
           transition: "transform 4s ease-out",
           boxShadow: glow ? "0 0 25px gold" : ""
         }}>
-
           {segments.map((s, i) => (
             <div key={i} style={{
               position: "absolute",
@@ -341,21 +353,16 @@ export default function CasinoWheel() {
               {s.label}
             </div>
           ))}
-
         </div>
       </div>
 
-      {/* BUTTON */}
       <button onClick={spin} disabled={spinning}>
         {spinning ? "SPINNING..." : "SPIN"}
       </button>
 
-      {/* RESULT */}
       <h2>{result}</h2>
-
       {won > 0 && <h3>₦{won}</h3>}
 
-      {/* FLOWERS */}
       {flowers.map(f => (
         <div key={f.id} style={{
           position: "fixed",
