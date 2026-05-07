@@ -1366,37 +1366,91 @@ async function drawMarket() {
     }
 
     // =========================
-    // 🃏 DRAW CARDS
-    // =========================
-    for (let i = 0; i < drawCount; i++) {
+// 🃏 DRAW CARDS
+// =========================
+let actualDrawn = 0;
 
-      if (!g.deck.length) break;
+for (let i = 0; i < drawCount; i++) {
 
-const drawn = g.deck.shift();
+  // 🏁 MARKET FINISHED
+  if (!g.deck.length) break;
 
-if (drawn) {
-  g.hands[myIdx].push(drawn);
+  const drawn = g.deck.shift();
+
+  if (drawn) {
+
+    g.hands[myIdx].push(drawn);
+
+    actualDrawn++;
+  }
 }
-}
 
-    // =========================
-    // 🔁 RESET STATE
-    // =========================
-    g.pendingPick = 0;
+// =========================
+// 🧠 MARKET ENDED AFTER DRAW
+// =========================
+if (!g.deck.length) {
 
-    g.turn = g.players[oppIdx];
+  const p0 = g.hands[0]?.length || 0;
+  const p1 = g.hands[1]?.length || 0;
 
-    // =========================
-    // 📝 HISTORY
-    // =========================
+  let winnerIdx = null;
+
+  if (p0 < p1) {
+    winnerIdx = 0;
+  } else if (p1 < p0) {
+    winnerIdx = 1;
+  }
+
+  // ⚖️ DRAW ROUND
+  if (winnerIdx === null) {
+
     g.history = pushHistory(
       g,
-      `${myLabel} drew ${drawCount} card${drawCount > 1 ? "s" : ""}`
+      "⚖️ Round draw (market exhausted)"
     );
 
-    // =========================
-    // 💾 SAVE GAME
-    // =========================
+  } else {
+
+    g.scores[winnerIdx]++;
+
+    g.history = pushHistory(
+      g,
+      `🏆 ${
+        winnerIdx === 0
+          ? "Player 1"
+          : "Player 2"
+      } wins round by lowest cards`
+    );
+  }
+
+  // =========================
+  // 🏁 END MATCH AT ROUND 3
+  // =========================
+  if ((g.round || 1) >= 3) {
+
+    let finalWinner = null;
+
+    if (g.scores[0] > g.scores[1]) {
+      finalWinner = g.players[0];
+    }
+
+    if (g.scores[1] > g.scores[0]) {
+      finalWinner = g.players[1];
+    }
+
+    g.status = "finished";
+
+    g.turn = null;
+
+    g.winnerId = finalWinner;
+
+    g.payoutDone = false;
+
+    g.history = pushHistory(
+      g,
+      "🏁 Match finished after Round 3"
+    );
+
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
@@ -1404,6 +1458,68 @@ if (drawn) {
       encodeGame(g)
     );
 
+    return;
+  }
+
+  // =========================
+  // 🔁 NEXT ROUND
+  // =========================
+  const newDeck = createDeck();
+
+  g.hands = [
+    newDeck.splice(0, 6),
+    newDeck.splice(0, 6)
+  ];
+
+  g.discard = newDeck.shift();
+
+  g.deck = newDeck;
+
+  g.pendingPick = 0;
+
+  g.round = (g.round || 1) + 1;
+
+  g.turn = g.players[0];
+
+  g.history = pushHistory(
+    g,
+    `♻️ Round ${g.round} started`
+  );
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    GAME_COLLECTION,
+    gameId,
+    encodeGame(g)
+  );
+
+  return;
+}
+
+// =========================
+// 🔁 NORMAL TURN
+// =========================
+g.pendingPick = 0;
+
+g.turn = g.players[oppIdx];
+
+// =========================
+// 📝 HISTORY
+// =========================
+g.history = pushHistory(
+  g,
+  `${myLabel} drew ${actualDrawn} card${actualDrawn > 1 ? "s" : ""}`
+);
+
+// =========================
+// 💾 SAVE GAME
+// =========================
+await databases.updateDocument(
+  DATABASE_ID,
+  GAME_COLLECTION,
+  gameId,
+  encodeGame(g)
+);
   } catch (err) {
 
     console.error(
