@@ -357,7 +357,77 @@ function parseGame(g) {
   };
 }
 
+// =========================
+// 💾 SAFE GAME ENCODER
+// =========================
+function encodeGame(g) {
+
+  return {
+
+    players:
+      Array.isArray(g.players)
+        ? g.players
+        : [],
+
+    hands:
+      Array.isArray(g.hands)
+        ? g.hands
+            .map(p =>
+              Array.isArray(p)
+                ? p.join(",")
+                : ""
+            )
+            .join("|")
+        : "",
+
+    deck:
+      Array.isArray(g.deck)
+        ? g.deck.join(",")
+        : "",
+
+    discard: g.discard || "",
+
+    turn: g.turn || null,
+
+    pendingPick: String(
+      g.pendingPick || 0
+    ),
+
+    history:
+      Array.isArray(g.history)
+        ? g.history.join("||")
+        : "",
+
+    scores:
+      Array.isArray(g.scores)
+        ? g.scores.join(",")
+        : "0,0",
+
+    round: String(g.round || 1),
+
+    status:
+      g.status || "playing",
+
+    payoutDone:
+      g.payoutDone || false,
+
+    winnerId:
+      g.winnerId || null,
+
+    matchId:
+      g.matchId || null,
+
+    hostName:
+      g.hostName || "Player 1",
+
+    opponentName:
+      g.opponentName || "Player 2"
+  };
+}
+
+// =========================
 // 🧠 SAFE INIT
+// =========================
 function ensureGameReady(g) {
 
   // 🛑 NEVER REBUILD FINISHED / PAID GAME
@@ -414,13 +484,20 @@ function ensureGameReady(g) {
   return g;
 }
 
+// =========================
 // 📝 HISTORY
+// =========================
 function pushHistory(g, text) {
-  return [...(g.history || []), text]
-    .slice(-10);
+
+  return [
+    ...(g.history || []),
+    text
+  ].slice(-10);
 }
 
+// =========================
 // ✅ EMPTY MARKET HANDLER
+// =========================
 function handleEmptyMarket(g) {
 
   // 🛑 NEVER TOUCH FINISHED GAME
@@ -432,13 +509,19 @@ function handleEmptyMarket(g) {
     return g;
   }
 
-  const p0 = g.hands[0].length;
-  const p1 = g.hands[1].length;
+  const p0 =
+    g.hands?.[0]?.length || 0;
+
+  const p1 =
+    g.hands?.[1]?.length || 0;
 
   let winnerIdx = null;
 
-  if (p0 < p1) winnerIdx = 0;
-  else if (p1 < p0) winnerIdx = 1;
+  if (p0 < p1) {
+    winnerIdx = 0;
+  } else if (p1 < p0) {
+    winnerIdx = 1;
+  }
 
   // ⚖️ DRAW
   if (winnerIdx === null) {
@@ -454,7 +537,9 @@ function handleEmptyMarket(g) {
   }
 
   // ✅ SAFE SCORE UPDATE
-  const scores = [...(g.scores || [0, 0])];
+  const scores = [
+    ...(g.scores || [0, 0])
+  ];
 
   scores[winnerIdx]++;
 
@@ -468,7 +553,8 @@ function handleEmptyMarket(g) {
 
       status: "finished",
 
-      winnerId: g.players[winnerIdx],
+      winnerId:
+        g.players?.[winnerIdx] || null,
 
       payoutDone: false,
 
@@ -513,18 +599,25 @@ function handleEmptyMarket(g) {
   };
 }
 
+// =========================
+// 🎮 MAIN COMPONENT
+// =========================
 export default function WhotGame({
   gameId,
   goHome
 }) {
 
-  const [game, setGame] = useState(null);
+  const [game, setGame] =
+    useState(null);
 
-  const [match, setMatch] = useState(null);
+  const [match, setMatch] =
+    useState(null);
 
-  const [userId, setUserId] = useState(null);
+  const [userId, setUserId] =
+    useState(null);
 
-  const [error, setError] = useState("");
+  const [error, setError] =
+    useState("");
 
   const [showWin, setShowWin] =
     useState(false);
