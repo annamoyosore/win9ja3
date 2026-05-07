@@ -1040,48 +1040,31 @@ async function playCard(i) {
   if (
     actionLock.current ||
     game.status === "finished" ||
-    game.payoutDone
-  ) return;
+    game.payoutDone ||
+    game.turn !== userId
+  ) {
+    return invalidMove("Not your turn");
+  }
 
   actionLock.current = true;
 
   try {
 
-    // ✅ ALWAYS LOAD FRESH GAME
-    const freshDoc = await databases.getDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId
+    // ✅ USE LIVE REALTIME STATE
+    const g = JSON.parse(
+      JSON.stringify(game)
     );
 
-    const g = parseGame(freshDoc);
-
-    // 🔒 RECHECK STATUS
-    if (
-      g.status === "finished" ||
-      g.payoutDone
-    ) {
-      actionLock.current = false;
-      return;
-    }
-
-    // 🔒 REAL TURN VALIDATION
-    if (g.turn !== userId) {
-
-      actionLock.current = false;
-
-      return invalidMove("Not your turn");
-    }
-
     // ✅ SAFE INDEX
-    const myIdx = g.players.indexOf(userId);
+    const myIdx =
+      g.players.indexOf(userId);
 
     if (myIdx === -1) {
-      actionLock.current = false;
       return;
     }
 
-    const oppIdx = myIdx === 0 ? 1 : 0;
+    const oppIdx =
+      myIdx === 0 ? 1 : 0;
 
     const myLabel =
       myIdx === 0
@@ -1089,26 +1072,29 @@ async function playCard(i) {
         : "Player 2";
 
     // ✅ SAFE CARD
-    const card = g.hands?.[myIdx]?.[i];
+    const card =
+      g.hands?.[myIdx]?.[i];
 
     if (!card) {
-
-      actionLock.current = false;
-
-      return invalidMove("Invalid card");
+      return invalidMove(
+        "Invalid card"
+      );
     }
 
-    const current = decodeCard(card);
+    const current =
+      decodeCard(card);
 
     const topDecoded =
       decodeCard(g.discard);
 
     // ✅ SAFETY
-    if (!current || !topDecoded) {
-
-      actionLock.current = false;
-
-      return invalidMove("Game error");
+    if (
+      !current ||
+      !topDecoded
+    ) {
+      return invalidMove(
+        "Game error"
+      );
     }
 
     // =========================
@@ -1116,26 +1102,28 @@ async function playCard(i) {
     // =========================
     if (
       g.pendingPick > 0 &&
-      ![2, 14].includes(current.number)
+      ![2, 14].includes(
+        current.number
+      )
     ) {
-
-      actionLock.current = false;
-
-      return invalidMove("Use 2 or 14");
+      return invalidMove(
+        "Use 2 or 14"
+      );
     }
 
     // =========================
     // ❌ INVALID MOVE
     // =========================
     if (
-      current.number !== topDecoded.number &&
-      current.shape !== topDecoded.shape &&
+      current.number !==
+        topDecoded.number &&
+      current.shape !==
+        topDecoded.shape &&
       current.number !== 14
     ) {
-
-      actionLock.current = false;
-
-      return invalidMove("Wrong move");
+      return invalidMove(
+        "Wrong move"
+      );
     }
 
     // =========================
@@ -1156,17 +1144,14 @@ async function playCard(i) {
       current.number === 1 ||
       current.number === 8
     ) {
-
       nextTurn = userId;
     }
 
     if (current.number === 2) {
-
       g.pendingPick += 2;
     }
 
     if (current.number === 14) {
-
       g.pendingPick += 1;
     }
 
@@ -1181,7 +1166,9 @@ async function playCard(i) {
     // =========================
     // 🏆 ROUND WIN
     // =========================
-    if (!g.hands[myIdx].length) {
+    if (
+      !g.hands[myIdx].length
+    ) {
 
       const newScores = [
         ...(g.scores || [0, 0])
@@ -1192,7 +1179,9 @@ async function playCard(i) {
       // =========================
       // 🏁 MATCH FINISH
       // =========================
-      if (newScores[myIdx] >= 2) {
+      if (
+        newScores[myIdx] >= 2
+      ) {
 
         await databases.updateDocument(
           DATABASE_ID,
@@ -1204,7 +1193,8 @@ async function playCard(i) {
               .map(p => p.join(","))
               .join("|"),
 
-            deck: g.deck.join(","),
+            deck:
+              g.deck.join(","),
 
             discard: card,
 
@@ -1240,7 +1230,8 @@ async function playCard(i) {
       // =========================
       // 🔁 NEXT ROUND
       // =========================
-      const deck = createDeck();
+      const deck =
+        createDeck();
 
       g.hands = [
         deck.splice(0, 6),
@@ -1258,8 +1249,7 @@ async function playCard(i) {
 
       g.scores = newScores;
 
-      // ✅ IMPORTANT FIX
-      // RESET TURN PROPERLY
+      // ✅ RESET TURN
       g.turn = g.players[0];
 
       g.history = pushHistory(
@@ -1311,49 +1301,28 @@ async function drawMarket() {
   if (
     actionLock.current ||
     game.status === "finished" ||
-    game.payoutDone
-  ) return;
+    game.payoutDone ||
+    game.turn !== userId
+  ) {
+    return invalidMove(
+      "Not your turn"
+    );
+  }
 
   actionLock.current = true;
 
   try {
 
-    // ✅ ALWAYS LOAD FRESH GAME
-    const freshDoc = await databases.getDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      gameId
+    // ✅ USE LIVE REALTIME STATE
+    const g = JSON.parse(
+      JSON.stringify(game)
     );
-
-    const g = parseGame(freshDoc);
-
-    // 🔒 RECHECK STATUS
-    if (
-      g.status === "finished" ||
-      g.payoutDone
-    ) {
-
-      actionLock.current = false;
-
-      return;
-    }
-
-    // 🔒 REAL TURN VALIDATION
-    if (g.turn !== userId) {
-
-      actionLock.current = false;
-
-      return invalidMove("Not your turn");
-    }
 
     // ✅ SAFE INDEX
     const myIdx =
       g.players.indexOf(userId);
 
     if (myIdx === -1) {
-
-      actionLock.current = false;
-
       return;
     }
 
@@ -1379,7 +1348,8 @@ async function drawMarket() {
         handleEmptyMarket(g);
 
       if (
-        updated.status === "finished"
+        updated.status ===
+        "finished"
       ) {
 
         await databases.updateDocument(
@@ -1387,7 +1357,9 @@ async function drawMarket() {
           GAME_COLLECTION,
           gameId,
           {
-            ...encodeGame(updated),
+            ...encodeGame(
+              updated
+            ),
 
             status: "finished",
 
@@ -1421,7 +1393,8 @@ async function drawMarket() {
       i++
     ) {
 
-      if (!g.deck.length) break;
+      if (!g.deck.length)
+        break;
 
       const newCard =
         g.deck.pop();
@@ -1440,9 +1413,6 @@ async function drawMarket() {
     // 🔒 NO CARD DRAWN FIX
     // =========================
     if (drawn <= 0) {
-
-      actionLock.current = false;
-
       return invalidMove(
         "Market empty"
       );
@@ -1487,16 +1457,17 @@ async function drawMarket() {
   }
 }
 
-
 // =========================
 // 🧠 DERIVED STATE
 // =========================
-if (!game || !userId) return null;
+if (!game || !userId)
+  return null;
 
 const myIdx =
   game.players.indexOf(userId);
 
-if (myIdx === -1) return null;
+if (myIdx === -1)
+  return null;
 
 const oppIdx =
   myIdx === 0 ? 1 : 0;
@@ -1505,7 +1476,8 @@ const hand =
   game.hands?.[myIdx] || [];
 
 const oppCards =
-  game.hands?.[oppIdx]?.length || 0;
+  game.hands?.[oppIdx]
+    ?.length || 0;
 
 const top =
   decodeCard(game.discard);
@@ -1523,9 +1495,9 @@ const oppLabel =
 // ✅ REAL TURN CHECK
 const isMyTurn =
   game.turn === userId &&
-  game.status !== "finished" &&
+  game.status !==
+    "finished" &&
   !game.payoutDone;
-
 
 // =====================
 // 🎨 UI RENDER
