@@ -10,10 +10,15 @@ export default defineConfig({
   },
 
   preview: {
-    port: 5173
+    port: 5173,
+    strictPort: true
   },
 
   build: {
-    outDir: "dist"
-  }
+    outDir: "dist",
+    sourcemap: false
+  },
+
+  // 🔥 IMPORTANT FOR PWA SERVICE WORKER PATH FIXES
+  base: "/"
 });
