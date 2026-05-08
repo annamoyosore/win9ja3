@@ -8,6 +8,8 @@ import {
   Query
 } from "../lib/appwrite";
 
+import InstallButton from "../components/InstallButton";
+
 const PROMO_COLLECTION = "promocodes";
 
 export default function Auth({ onLogin }) {
@@ -92,14 +94,27 @@ export default function Auth({ onLogin }) {
           return;
         }
 
-        // Check duplicate phone
-        const existing = await databases.listDocuments(
+        // 🔐 UNIQUE NAME CHECK (NEW)
+        const existingName = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("name", name.trim())]
+        );
+
+        if (existingName.documents.length > 0) {
+          alert("This name is already taken. Please choose another.");
+          setLoading(false);
+          return;
+        }
+
+        // 🔐 PHONE CHECK
+        const existingPhone = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
           [Query.equal("phone", formattedPhone)]
         );
 
-        if (existing.documents.length > 0) {
+        if (existingPhone.documents.length > 0) {
           alert("This phone number is already registered");
           setLoading(false);
           return;
@@ -118,7 +133,7 @@ export default function Auth({ onLogin }) {
 
         const currentUser = await account.get();
 
-        // ================= PROMO USED =================
+        // ================= PROMO =================
         let promoUsed = false;
         let savedPromoCode = null;
 
@@ -152,17 +167,15 @@ export default function Auth({ onLogin }) {
               );
 
               alert("Promo code accepted ✅");
-
             } else {
               alert("Invalid promo code. Continuing without it.");
             }
-
           } catch (err) {
             console.log("Promo error:", err.message);
           }
         }
 
-        // ================= CREATE USER PROMO =================
+        // ================= USER PROMO =================
         let userPromo = null;
 
         try {
@@ -179,7 +192,6 @@ export default function Auth({ onLogin }) {
               isActive: true
             }
           );
-
         } catch (err) {
           console.log("Promo create failed, retrying...");
           userPromo = generatePromoCode(name + Date.now());
@@ -198,7 +210,7 @@ export default function Auth({ onLogin }) {
             locked: 0,
             promoUsed: promoUsed,
             promoCode: savedPromoCode,
-            promoOwned: userPromo // ✅ user's own code
+            promoOwned: userPromo
           }
         );
       }
@@ -222,7 +234,14 @@ export default function Auth({ onLogin }) {
   return (
     <div style={styles.container}>
       <div style={styles.box}>
+
+        {/* 🔥 LOGO */}
         <h1 style={styles.logo}>🎮 Win9ja</h1>
+
+        {/* 📲 INSTALL BUTTON */}
+        <div style={styles.installWrap}>
+          <InstallButton />
+        </div>
 
         <h2>{isLogin ? "Login" : "Register"}</h2>
 
@@ -266,12 +285,19 @@ export default function Auth({ onLogin }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <span style={styles.eye} onClick={() => setShowPassword(!showPassword)}>
+          <span
+            style={styles.eye}
+            onClick={() => setShowPassword(!showPassword)}
+          >
             {showPassword ? "🙈" : "👁️"}
           </span>
         </div>
 
-        <button style={styles.button} onClick={handle} disabled={loading}>
+        <button
+          style={styles.button}
+          onClick={handle}
+          disabled={loading}
+        >
           {loading ? "Please wait..." : isLogin ? "Login" : "Register"}
         </button>
 
@@ -286,11 +312,13 @@ export default function Auth({ onLogin }) {
         <p style={styles.license}>
           © {new Date().getFullYear()} Win9ja. All rights reserved.
         </p>
+
       </div>
     </div>
   );
 }
 
+// ===================== STYLES =====================
 const styles = {
   container: {
     minHeight: "100vh",
@@ -300,14 +328,24 @@ const styles = {
     background: "#0f172a",
     color: "#fff"
   },
+
   box: {
     padding: 20,
     background: "#111827",
     borderRadius: 10,
     width: 300,
-    textAlign: "center"
+    textAlign: "center",
+    position: "relative"
   },
+
   logo: { color: "gold" },
+
+  installWrap: {
+    position: "absolute",
+    top: 10,
+    right: 10
+  },
+
   input: {
     width: "100%",
     padding: 10,
@@ -315,7 +353,9 @@ const styles = {
     borderRadius: 6,
     border: "none"
   },
+
   passwordWrapper: { position: "relative" },
+
   passwordInput: {
     width: "100%",
     padding: 10,
@@ -323,6 +363,7 @@ const styles = {
     borderRadius: 6,
     border: "none"
   },
+
   eye: {
     position: "absolute",
     right: 10,
@@ -330,6 +371,7 @@ const styles = {
     transform: "translateY(-50%)",
     cursor: "pointer"
   },
+
   button: {
     width: "100%",
     padding: 12,
@@ -337,7 +379,13 @@ const styles = {
     border: "none",
     borderRadius: 8
   },
-  switch: { marginTop: 10, cursor: "pointer", color: "lightblue" },
+
+  switch: {
+    marginTop: 10,
+    cursor: "pointer",
+    color: "lightblue"
+  },
+
   supportBtn: {
     marginTop: 15,
     width: "100%",
@@ -347,5 +395,9 @@ const styles = {
     borderRadius: 8,
     color: "#fff"
   },
-  license: { marginTop: 10, fontSize: 12 }
+
+  license: {
+    marginTop: 10,
+    fontSize: 12
+  }
 };
