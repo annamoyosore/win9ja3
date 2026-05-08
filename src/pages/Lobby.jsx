@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   account,
   databases,
@@ -11,6 +11,36 @@ import {
 
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
+
+// =========================
+// 🎵 WIN9JA TURN SOUND
+// =========================
+function playTurnSound() {
+  try {
+    const ctx =
+      new (window.AudioContext || window.webkitAudioContext)();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "triangle";
+
+    osc.frequency.setValueAtTime(740, ctx.currentTime);
+    osc.frequency.setValueAtTime(980, ctx.currentTime + 0.15);
+    osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.45);
+
+  } catch (err) {
+    console.log("Sound failed");
+  }
+}
 
 // =========================
 // CREATE GAME
@@ -41,12 +71,21 @@ export default function Lobby({ goGame, back }) {
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
 
+  // 🔔 TURN ALERT TRACKER
+  const notifiedTurns = useRef({});
+
   useEffect(() => {
     init();
   }, []);
 
   async function init() {
     const u = await account.get();
+
+    // 🔔 notification permission
+    if ("Notification" in window) {
+      Notification.requestPermission();
+    }
+
     setUser(u);
 
     const w = await databases.listDocuments(
@@ -71,6 +110,54 @@ export default function Lobby({ goGame, back }) {
 
     return () => unsub();
   }, [user]);
+
+  // =========================
+  // 🔔 TURN ALERT
+  // =========================
+  useEffect(() => {
+    if (!user) return;
+
+    activeMatches.forEach((m) => {
+      const game = gameMap[m.gameId];
+
+      if (!game) return;
+
+      if (game.status === "finished") return;
+
+      // 🎯 user's turn
+      if (game.turn === user.$id) {
+
+        // prevent repeat spam
+        if (notifiedTurns.current[m.gameId]) return;
+
+        notifiedTurns.current[m.gameId] = true;
+
+        // 🔊 sound
+        playTurnSound();
+
+        // 📳 vibrate
+        if (navigator.vibrate) {
+          navigator.vibrate([300, 120, 300]);
+        }
+
+        // 🔔 notification
+        if (
+          document.hidden &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
+          new Notification("🎮 Win9ja", {
+            body: "It's your turn to play!",
+            icon: "/icon192.png"
+          });
+        }
+
+      } else {
+        notifiedTurns.current[m.gameId] = false;
+      }
+    });
+
+  }, [activeMatches, gameMap, user]);
 
   async function refresh(userId) {
     await Promise.all([
@@ -105,7 +192,6 @@ export default function Lobby({ goGame, back }) {
 
         if (diff < 78) continue;
 
-        // 🔒 mark first
         await databases.updateDocument(
           DATABASE_ID,
           MATCH_COLLECTION,
@@ -116,7 +202,6 @@ export default function Lobby({ goGame, back }) {
           }
         );
 
-        // 💰 refund
         const walletRes = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -235,7 +320,6 @@ export default function Lobby({ goGame, back }) {
         throw new Error("Insufficient balance");
       }
 
-      // 💰 deduct opponent
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -249,7 +333,6 @@ export default function Lobby({ goGame, back }) {
       const adminCut = Math.floor(total * 0.1);
       const finalPot = total - adminCut;
 
-      // 🏦 admin
       const adminRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -269,7 +352,6 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
-      // update match
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -322,7 +404,6 @@ export default function Lobby({ goGame, back }) {
     setCreating(true);
 
     try {
-      // 💰 deduct host immediately
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -442,33 +523,50 @@ export default function Lobby({ goGame, back }) {
 // STYLES
 // =========================
 const styles = {
-  container: { padding: 20, background: "#020617", color: "#fff" },
+  container: {
+    padding: 20,
+    background: "#020617",
+    color: "#fff",
+    minHeight: "100vh"
+  },
+
   card: {
     background: "#111827",
-    padding: 10,
+    padding: 12,
     margin: "10px 0",
     display: "flex",
     justifyContent: "space-between",
-    borderRadius: 10
+    alignItems: "center",
+    borderRadius: 12
   },
+
   joinBtn: {
     background: "gold",
-    padding: "8px 14px",
-    borderRadius: 8,
-    border: "none"
+    padding: "10px 18px",
+    borderRadius: 10,
+    border: "none",
+    fontWeight: "bold",
+    cursor: "pointer"
   },
+
+  // ✅ updated rectangle shape
   resumeBtn: {
-    background: "green",
-    padding: "8px 14px",
-    borderRadius: 8,
+    background: "#16a34a",
+    padding: "10px 20px",
+    borderRadius: 12,
     color: "#fff",
-    border: "none"
+    border: "none",
+    fontWeight: "bold",
+    cursor: "pointer",
+    minWidth: 110
   },
+
   finishedBtn: {
     background: "#16a34a",
-    padding: "8px 14px",
-    borderRadius: 8,
+    padding: "10px 18px",
+    borderRadius: 10,
     color: "#fff",
-    border: "none"
+    border: "none",
+    fontWeight: "bold"
   }
 };
