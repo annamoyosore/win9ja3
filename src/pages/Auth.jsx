@@ -8,7 +8,7 @@ import {
   Query
 } from "../lib/appwrite";
 
-import InstallButton from "../components/InstallButton";
+import InstallBanner from "../components/InstallBanner";
 
 const PROMO_COLLECTION = "promocodes";
 
@@ -82,7 +82,6 @@ export default function Auth({ onLogin }) {
             }
           }
         }
-
       } else {
         // ================= REGISTER =================
 
@@ -94,7 +93,7 @@ export default function Auth({ onLogin }) {
           return;
         }
 
-        // 🔐 UNIQUE NAME CHECK (NEW)
+        // 🔐 UNIQUE NAME CHECK
         const existingName = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
@@ -208,7 +207,7 @@ export default function Auth({ onLogin }) {
             phone: formattedPhone,
             balance: 200,
             locked: 0,
-            promoUsed: promoUsed,
+            promoUsed,
             promoCode: savedPromoCode,
             promoOwned: userPromo
           }
@@ -216,7 +215,6 @@ export default function Auth({ onLogin }) {
       }
 
       onLogin();
-
     } catch (e) {
       console.error(e);
       alert(e.message || "Something went wrong");
@@ -238,10 +236,8 @@ export default function Auth({ onLogin }) {
         {/* 🔥 LOGO */}
         <h1 style={styles.logo}>🎮 Win9ja</h1>
 
-        {/* 📲 INSTALL BUTTON */}
-        <div style={styles.installWrap}>
-          <InstallButton />
-        </div>
+        {/* 📲 FLOATING INSTALL BANNER */}
+        <InstallBanner />
 
         <h2>{isLogin ? "Login" : "Register"}</h2>
 
@@ -339,12 +335,6 @@ const styles = {
   },
 
   logo: { color: "gold" },
-
-  installWrap: {
-    position: "absolute",
-    top: 10,
-    right: 10
-  },
 
   input: {
     width: "100%",
