@@ -1,7 +1,7 @@
 import usePWAInstall from "../hooks/usePWAInstall";
 import { useEffect, useState } from "react";
 
-export default function InstallBanner() {
+export default function InstallButton() {
   const { isInstallable, installApp } = usePWAInstall();
   const [visible, setVisible] = useState(false);
 
@@ -15,9 +15,7 @@ export default function InstallBanner() {
 
   return (
     <div style={styles.banner}>
-      <div style={styles.text}>
-        📲 Install Win9ja for better experience
-      </div>
+      <div style={styles.text}>📲 Install Win9ja App</div>
 
       <div style={styles.actions}>
         <button style={styles.btn} onClick={installApp}>
