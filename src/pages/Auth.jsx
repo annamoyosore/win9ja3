@@ -8,7 +8,7 @@ import {
   Query
 } from "../lib/appwrite";
 
-import InstallBanner from "../components/InstallBanner";
+import InstallButton from "../components/InstallButton";
 
 const PROMO_COLLECTION = "promocodes";
 
@@ -82,6 +82,7 @@ export default function Auth({ onLogin }) {
             }
           }
         }
+
       } else {
         // ================= REGISTER =================
 
@@ -215,6 +216,7 @@ export default function Auth({ onLogin }) {
       }
 
       onLogin();
+
     } catch (e) {
       console.error(e);
       alert(e.message || "Something went wrong");
@@ -236,8 +238,10 @@ export default function Auth({ onLogin }) {
         {/* 🔥 LOGO */}
         <h1 style={styles.logo}>🎮 Win9ja</h1>
 
-        {/* 📲 FLOATING INSTALL BANNER */}
-        <InstallBanner />
+        {/* 📲 INSTALL BUTTON (FLOATING) */}
+        <div style={styles.installWrap}>
+          <InstallButton />
+        </div>
 
         <h2>{isLogin ? "Login" : "Register"}</h2>
 
@@ -335,6 +339,12 @@ const styles = {
   },
 
   logo: { color: "gold" },
+
+  installWrap: {
+    position: "absolute",
+    top: 10,
+    right: 10
+  },
 
   input: {
     width: "100%",
