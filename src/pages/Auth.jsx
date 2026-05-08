@@ -233,15 +233,14 @@ export default function Auth({ onLogin }) {
 
   return (
     <div style={styles.container}>
+
+      {/* 📲 INSTALL BUTTON ALWAYS AVAILABLE */}
+      <InstallButton />
+
       <div style={styles.box}>
 
         {/* 🔥 LOGO */}
         <h1 style={styles.logo}>🎮 Win9ja</h1>
-
-        {/* 📲 INSTALL BUTTON (FLOATING) */}
-        <div style={styles.installWrap}>
-          <InstallButton />
-        </div>
 
         <h2>{isLogin ? "Login" : "Register"}</h2>
 
@@ -285,6 +284,7 @@ export default function Auth({ onLogin }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+
           <span
             style={styles.eye}
             onClick={() => setShowPassword(!showPassword)}
@@ -298,14 +298,24 @@ export default function Auth({ onLogin }) {
           onClick={handle}
           disabled={loading}
         >
-          {loading ? "Please wait..." : isLogin ? "Login" : "Register"}
+          {loading
+            ? "Please wait..."
+            : isLogin
+            ? "Login"
+            : "Register"}
         </button>
 
-        <p style={styles.switch} onClick={() => setIsLogin(!isLogin)}>
+        <p
+          style={styles.switch}
+          onClick={() => setIsLogin(!isLogin)}
+        >
           {isLogin ? "Create account" : "Login instead"}
         </p>
 
-        <button style={styles.supportBtn} onClick={openSupport}>
+        <button
+          style={styles.supportBtn}
+          onClick={openSupport}
+        >
           💬 Contact Support
         </button>
 
@@ -326,7 +336,8 @@ const styles = {
     justifyContent: "center",
     alignItems: "center",
     background: "#0f172a",
-    color: "#fff"
+    color: "#fff",
+    position: "relative"
   },
 
   box: {
@@ -334,16 +345,12 @@ const styles = {
     background: "#111827",
     borderRadius: 10,
     width: 300,
-    textAlign: "center",
-    position: "relative"
+    textAlign: "center"
   },
 
-  logo: { color: "gold" },
-
-  installWrap: {
-    position: "absolute",
-    top: 10,
-    right: 10
+  logo: {
+    color: "gold",
+    marginBottom: 10
   },
 
   input: {
@@ -351,17 +358,23 @@ const styles = {
     padding: 10,
     margin: "10px 0",
     borderRadius: 6,
-    border: "none"
+    border: "none",
+    outline: "none",
+    boxSizing: "border-box"
   },
 
-  passwordWrapper: { position: "relative" },
+  passwordWrapper: {
+    position: "relative"
+  },
 
   passwordInput: {
     width: "100%",
     padding: 10,
     paddingRight: 40,
     borderRadius: 6,
-    border: "none"
+    border: "none",
+    outline: "none",
+    boxSizing: "border-box"
   },
 
   eye: {
@@ -369,7 +382,8 @@ const styles = {
     right: 10,
     top: "50%",
     transform: "translateY(-50%)",
-    cursor: "pointer"
+    cursor: "pointer",
+    userSelect: "none"
   },
 
   button: {
@@ -377,11 +391,14 @@ const styles = {
     padding: 12,
     background: "gold",
     border: "none",
-    borderRadius: 8
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: "bold",
+    marginTop: 10
   },
 
   switch: {
-    marginTop: 10,
+    marginTop: 12,
     cursor: "pointer",
     color: "lightblue"
   },
@@ -393,11 +410,14 @@ const styles = {
     background: "#25D366",
     border: "none",
     borderRadius: 8,
-    color: "#fff"
+    color: "#fff",
+    cursor: "pointer",
+    fontWeight: "bold"
   },
 
   license: {
-    marginTop: 10,
-    fontSize: 12
+    marginTop: 12,
+    fontSize: 12,
+    opacity: 0.8
   }
 };
