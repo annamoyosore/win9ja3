@@ -5,12 +5,13 @@ export default function usePWAInstall() {
   const [isInstallable, setIsInstallable] = useState(false);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     const handler = (e) => {
+      // IMPORTANT: only prevent default when install is actually available
       e.preventDefault();
 
-      // store event in ref (NOT state)
       deferredPromptRef.current = e;
-
       setIsInstallable(true);
     };
 
@@ -25,19 +26,23 @@ export default function usePWAInstall() {
     const promptEvent = deferredPromptRef.current;
 
     if (!promptEvent) {
-      console.log("📲 Install prompt not available");
+      console.log("📲 Install prompt not available yet");
       return;
     }
 
-    promptEvent.prompt();
+    try {
+      promptEvent.prompt();
 
-    const result = await promptEvent.userChoice;
+      const result = await promptEvent.userChoice;
 
-    if (result.outcome === "accepted") {
-      console.log("✅ App installed");
-      setIsInstallable(false);
-    } else {
-      console.log("❌ User dismissed install");
+      if (result.outcome === "accepted") {
+        console.log("✅ App installed");
+        setIsInstallable(false);
+      } else {
+        console.log("❌ User dismissed install");
+      }
+    } catch (err) {
+      console.log("⚠️ Install failed:", err);
     }
 
     deferredPromptRef.current = null;
