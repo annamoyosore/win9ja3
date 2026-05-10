@@ -7,39 +7,51 @@ import {
   Query
 } from "../lib/appwrite";
 
-// 🐍 SNAKE CLEAN COLLECTIONS
+// 🐍 COLLECTIONS
 const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
 const WALLET_COLLECTION = "wallets";
 
 const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
 
-// 👉 2 PLAYER GAME ONLY
 const MAX_PLAYERS = 2;
+
+// 💰 ADMIN CUT
+const ADMIN_PERCENT = 0.15;
 
 export default function SnakeLobby({ onEnterGame }) {
   const [loading, setLoading] = useState(false);
   const [stake, setStake] = useState(200);
   const [message, setMessage] = useState("");
   const [rooms, setRooms] = useState([]);
+  const [userId, setUserId] = useState(null);
 
   useEffect(() => {
+    init();
     loadRooms();
 
-    const interval = setInterval(() => {
-      checkExpiredRooms();
-    }, 60000);
-
+    const interval = setInterval(loadRooms, 5000);
     return () => clearInterval(interval);
   }, []);
 
-  // 📡 LOAD ROOMS
+  async function init() {
+    try {
+      const user = await account.get();
+      setUserId(user.$id);
+    } catch (e) {
+      console.log(e);
+    }
+  }
+
+  // 📡 LOAD ONLY ACTIVE ROOMS
   async function loadRooms() {
     try {
       const res = await databases.listDocuments(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
-        [Query.equal("status", "waiting")]
+        [
+          Query.equal("status", "waiting")
+        ]
       );
       setRooms(res.documents);
     } catch (err) {
@@ -47,27 +59,18 @@ export default function SnakeLobby({ onEnterGame }) {
     }
   }
 
-  // 👛 GET WALLET
-  async function getWallet(userId) {
+  // 👛 WALLET
+  async function getWallet(uid) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
-      [Query.equal("userId", userId)]
+      [Query.equal("userId", uid)]
     );
     return res.documents[0];
   }
 
-  async function deductWallet(wallet, amount) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      { balance: wallet.balance - amount }
-    );
-  }
-
-  async function creditAdmin(wallet, amount) {
-    await databases.updateDocument(
+  async function updateWallet(wallet, amount) {
+    return databases.updateDocument(
       DATABASE_ID,
       WALLET_COLLECTION,
       wallet.$id,
@@ -75,22 +78,31 @@ export default function SnakeLobby({ onEnterGame }) {
     );
   }
 
+  async function deductWallet(wallet, amount) {
+    return databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      { balance: wallet.balance - amount }
+    );
+  }
+
   // 🎮 CREATE ROOM
   async function createRoom() {
     try {
+      setLoading(true);
+      setMessage("");
+
       if (stake < 200) {
         setMessage("Minimum stake is ₦200");
         return;
       }
-
-      setLoading(true);
 
       const user = await account.get();
       const wallet = await getWallet(user.$id);
 
       if (!wallet || wallet.balance < stake) {
         setMessage("Insufficient balance");
-        setLoading(false);
         return;
       }
 
@@ -102,22 +114,21 @@ export default function SnakeLobby({ onEnterGame }) {
         ID.unique(),
         {
           hostId: user.$id,
-          players: ["A"],
-          joinedUsers: { A: user.$id },
+          players: [user.$id],
           playerCount: 1,
+          joinedUsers: { A: user.$id },
           stake,
           status: "waiting",
-          gameStarted: false,
           createdAt: new Date().toISOString()
         }
       );
 
-      setMessage("Room created");
+      setMessage("Room created successfully ✅");
       loadRooms();
 
     } catch (err) {
       console.log(err);
-      setMessage("Error creating room");
+      setMessage("Failed to create room");
     }
 
     setLoading(false);
@@ -127,33 +138,41 @@ export default function SnakeLobby({ onEnterGame }) {
   async function joinRoom(room) {
     try {
       setLoading(true);
+      setMessage("");
+
+      // ❌ BLOCK FINISHED GAME
+      if (room.status !== "waiting") {
+        setMessage("This room is already finished");
+        return;
+      }
 
       const user = await account.get();
       const wallet = await getWallet(user.$id);
 
       if (!wallet || wallet.balance < room.stake) {
         setMessage("Insufficient balance");
-        setLoading(false);
         return;
       }
 
       let players = room.players || [];
       let joinedUsers = room.joinedUsers || {};
 
-      if (players.length >= MAX_PLAYERS) {
-        setMessage("Room full");
-        setLoading(false);
+      if (players.includes(user.$id)) {
+        setMessage("You already joined this room");
         return;
       }
 
-      const nextPlayer = players.length === 1 ? "B" : "A2";
+      if (players.length >= MAX_PLAYERS) {
+        setMessage("Room is full");
+        return;
+      }
 
       await deductWallet(wallet, room.stake);
 
-      players.push(nextPlayer);
-      joinedUsers[nextPlayer] = user.$id;
+      players.push(user.$id);
+      joinedUsers[`P${players.length}`] = user.$id;
 
-      const gameStarted = players.length === MAX_PLAYERS;
+      const gameReady = players.length === MAX_PLAYERS;
 
       await databases.updateDocument(
         DATABASE_ID,
@@ -163,45 +182,35 @@ export default function SnakeLobby({ onEnterGame }) {
           players,
           joinedUsers,
           playerCount: players.length,
-          status: gameStarted ? "playing" : "waiting",
-          gameStarted
+          status: gameReady ? "playing" : "waiting"
         }
       );
 
       // 🎯 START GAME
-      if (gameStarted) {
+      if (gameReady) {
         const totalPot = room.stake * MAX_PLAYERS;
-        const adminCut = totalPot * 0.15;
+        const adminCut = totalPot * ADMIN_PERCENT;
         const gamePot = totalPot - adminCut;
 
-        const adminRes = await databases.listDocuments(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          [Query.equal("userId", ADMIN_USER_ID)]
-        );
-
-        const adminWallet = adminRes.documents[0];
+        const adminWallet = await getWallet(ADMIN_USER_ID);
 
         if (adminWallet) {
-          await creditAdmin(adminWallet, adminCut);
+          await updateWallet(adminWallet, adminCut);
         }
 
-        const snakeGame = await databases.createDocument(
+        const game = await databases.createDocument(
           DATABASE_ID,
           SNAKE_GAME_COLLECTION,
           ID.unique(),
           {
             lobbyId: room.$id,
             players,
-            positions: JSON.stringify({ A: 1, B: 1 }),
-            ranking: [],
-            history: JSON.stringify([]),
-            winner: "",
-            turn: "A",
+            positions: JSON.stringify({}),
+            turn: players[0],
             status: "playing",
             pot: gamePot,
-            payoutDone: false,
-            payouts: JSON.stringify({})
+            winner: "",
+            payoutDone: false
           }
         );
 
@@ -209,13 +218,17 @@ export default function SnakeLobby({ onEnterGame }) {
           DATABASE_ID,
           SNAKE_LOBBY_COLLECTION,
           room.$id,
-          { gameId: snakeGame.$id }
+          {
+            gameId: game.$id
+          }
         );
 
-        if (onEnterGame) onEnterGame(snakeGame.$id);
+        setMessage("Game started 🎮");
+        onEnterGame?.(game.$id);
+      } else {
+        setMessage("Joined room ⏳ waiting for opponent");
       }
 
-      setMessage("Joined room");
       loadRooms();
 
     } catch (err) {
@@ -226,95 +239,49 @@ export default function SnakeLobby({ onEnterGame }) {
     setLoading(false);
   }
 
-  // 🕒 REFUND SYSTEM
-  async function checkExpiredRooms() {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        [Query.equal("status", "waiting")]
-      );
-
-      const now = Date.now();
-
-      for (const room of res.documents) {
-        const created = new Date(room.createdAt).getTime();
-        const hours = (now - created) / (1000 * 60 * 60);
-
-        if (hours >= 78) {
-          await refundRoom(room);
-        }
-      }
-    } catch (err) {
-      console.log(err);
-    }
-  }
-
-  // 💸 REFUND
-  async function refundRoom(room) {
-    try {
-      const stake = room.stake;
-      const users = room.joinedUsers || {};
-
-      for (const key in users) {
-        const userId = users[key];
-
-        const wallet = await getWallet(userId);
-
-        if (wallet) {
-          await databases.updateDocument(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            wallet.$id,
-            { balance: wallet.balance + stake }
-          );
-        }
-      }
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        room.$id,
-        { status: "expired" }
-      );
-
-    } catch (err) {
-      console.log("Refund error:", err);
-    }
-  }
-
   return (
     <div style={styles.container}>
-      <h1>🐍 Snake Lobby (2 Players)</h1>
+      <h1>🐍 Snake Lobby</h1>
 
+      {/* CREATE ROOM */}
       <div style={styles.card}>
-        <h3>Stake</h3>
+        <h3>Stake Amount</h3>
+
         <input
-          type="number"
-          min="200"
           value={stake}
           onChange={(e) => setStake(Number(e.target.value))}
           style={styles.input}
+          type="number"
+          min="200"
         />
 
-        <button onClick={createRoom} disabled={loading}>
-          Create Room
+        <button
+          onClick={createRoom}
+          disabled={loading}
+          style={styles.createBtn}
+        >
+          🎮 Create Room
         </button>
 
-        <p>Min ₦200</p>
+        <p style={{ color: "orange" }}>{message}</p>
       </div>
 
-      {message && <p>{message}</p>}
+      {/* ROOMS */}
+      <h3>Available Rooms</h3>
 
-      <h3>Rooms</h3>
+      {rooms.length === 0 && <p>No active rooms</p>}
 
       {rooms.map((r) => (
         <div key={r.$id} style={styles.room}>
-          <p>Stake: ₦{r.stake}</p>
-          <p>Players: {r.playerCount}/{MAX_PLAYERS}</p>
+          <p>💰 Stake: ₦{r.stake}</p>
+          <p>👥 Players: {r.playerCount}/{MAX_PLAYERS}</p>
 
-          <button onClick={() => joinRoom(r)} disabled={loading}>
-            Join
+          <button
+            onClick={() => joinRoom(r)}
+            disabled={loading || r.status !== "waiting"}
+            style={styles.joinBtn}
+          >
+            Join Room
           </button>
         </div>
       ))}
@@ -322,6 +289,9 @@ export default function SnakeLobby({ onEnterGame }) {
   );
 }
 
+// =========================
+// STYLES
+// =========================
 const styles = {
   container: {
     background: "#0f172a",
@@ -329,17 +299,38 @@ const styles = {
     minHeight: "100vh",
     padding: 20
   },
+
   card: {
     background: "#1e293b",
     padding: 15,
     borderRadius: 10,
-    maxWidth: 300
+    marginBottom: 20
   },
+
   input: {
     width: "100%",
     padding: 10,
     marginBottom: 10
   },
+
+  createBtn: {
+    width: "100%",
+    padding: 12,
+    background: "orange",
+    color: "black",
+    fontWeight: "bold",
+    border: "none",
+    borderRadius: 8
+  },
+
+  joinBtn: {
+    padding: 10,
+    background: "#22c55e",
+    color: "white",
+    border: "none",
+    borderRadius: 8
+  },
+
   room: {
     background: "#111827",
     padding: 10,
