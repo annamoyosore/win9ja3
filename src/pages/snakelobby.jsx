@@ -5,13 +5,17 @@ import {
   DATABASE_ID,
   ID,
   Query
-} from "../lib/appwrite"; // ✅ FIXED PATH
+} from "../lib/appwrite";
 
-const LOBBY_COLLECTION = "snakelobby";
-const GAME_COLLECTION = "snakegame";
+// 🐍 SNAKE CLEAN COLLECTIONS
+const SNAKE_LOBBY_COLLECTION = "snakelobby";
+const SNAKE_GAME_COLLECTION = "snakegame";
 const WALLET_COLLECTION = "wallets";
 
 const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
+
+// 👉 2 PLAYER GAME ONLY
+const MAX_PLAYERS = 2;
 
 export default function SnakeLobby({ onEnterGame }) {
   const [loading, setLoading] = useState(false);
@@ -29,12 +33,12 @@ export default function SnakeLobby({ onEnterGame }) {
     return () => clearInterval(interval);
   }, []);
 
-  // 📡 Load rooms
+  // 📡 LOAD ROOMS
   async function loadRooms() {
     try {
       const res = await databases.listDocuments(
         DATABASE_ID,
-        LOBBY_COLLECTION,
+        SNAKE_LOBBY_COLLECTION,
         [Query.equal("status", "waiting")]
       );
       setRooms(res.documents);
@@ -43,7 +47,7 @@ export default function SnakeLobby({ onEnterGame }) {
     }
   }
 
-  // 👛 Wallet
+  // 👛 GET WALLET
   async function getWallet(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -94,7 +98,7 @@ export default function SnakeLobby({ onEnterGame }) {
 
       await databases.createDocument(
         DATABASE_ID,
-        LOBBY_COLLECTION,
+        SNAKE_LOBBY_COLLECTION,
         ID.unique(),
         {
           hostId: user.$id,
@@ -136,24 +140,24 @@ export default function SnakeLobby({ onEnterGame }) {
       let players = room.players || [];
       let joinedUsers = room.joinedUsers || {};
 
-      if (players.length >= 3) {
+      if (players.length >= MAX_PLAYERS) {
         setMessage("Room full");
         setLoading(false);
         return;
       }
 
-      let nextPlayer = players.length === 1 ? "B" : "C";
+      const nextPlayer = players.length === 1 ? "B" : "A2";
 
       await deductWallet(wallet, room.stake);
 
       players.push(nextPlayer);
       joinedUsers[nextPlayer] = user.$id;
 
-      const gameStarted = players.length === 3;
+      const gameStarted = players.length === MAX_PLAYERS;
 
       await databases.updateDocument(
         DATABASE_ID,
-        LOBBY_COLLECTION,
+        SNAKE_LOBBY_COLLECTION,
         room.$id,
         {
           players,
@@ -166,7 +170,7 @@ export default function SnakeLobby({ onEnterGame }) {
 
       // 🎯 START GAME
       if (gameStarted) {
-        const totalPot = room.stake * 3;
+        const totalPot = room.stake * MAX_PLAYERS;
         const adminCut = totalPot * 0.15;
         const gamePot = totalPot - adminCut;
 
@@ -184,12 +188,12 @@ export default function SnakeLobby({ onEnterGame }) {
 
         const snakeGame = await databases.createDocument(
           DATABASE_ID,
-          GAME_COLLECTION,
+          SNAKE_GAME_COLLECTION,
           ID.unique(),
           {
             lobbyId: room.$id,
             players,
-            positions: JSON.stringify({ A: 1, B: 1, C: 1 }),
+            positions: JSON.stringify({ A: 1, B: 1 }),
             ranking: [],
             history: JSON.stringify([]),
             winner: "",
@@ -203,7 +207,7 @@ export default function SnakeLobby({ onEnterGame }) {
 
         await databases.updateDocument(
           DATABASE_ID,
-          LOBBY_COLLECTION,
+          SNAKE_LOBBY_COLLECTION,
           room.$id,
           { gameId: snakeGame.$id }
         );
@@ -227,7 +231,7 @@ export default function SnakeLobby({ onEnterGame }) {
     try {
       const res = await databases.listDocuments(
         DATABASE_ID,
-        LOBBY_COLLECTION,
+        SNAKE_LOBBY_COLLECTION,
         [Query.equal("status", "waiting")]
       );
 
@@ -246,6 +250,7 @@ export default function SnakeLobby({ onEnterGame }) {
     }
   }
 
+  // 💸 REFUND
   async function refundRoom(room) {
     try {
       const stake = room.stake;
@@ -268,7 +273,7 @@ export default function SnakeLobby({ onEnterGame }) {
 
       await databases.updateDocument(
         DATABASE_ID,
-        LOBBY_COLLECTION,
+        SNAKE_LOBBY_COLLECTION,
         room.$id,
         { status: "expired" }
       );
@@ -280,7 +285,7 @@ export default function SnakeLobby({ onEnterGame }) {
 
   return (
     <div style={styles.container}>
-      <h1>🐍 Snake Lobby</h1>
+      <h1>🐍 Snake Lobby (2 Players)</h1>
 
       <div style={styles.card}>
         <h3>Stake</h3>
@@ -291,9 +296,11 @@ export default function SnakeLobby({ onEnterGame }) {
           onChange={(e) => setStake(Number(e.target.value))}
           style={styles.input}
         />
+
         <button onClick={createRoom} disabled={loading}>
           Create Room
         </button>
+
         <p>Min ₦200</p>
       </div>
 
@@ -304,7 +311,8 @@ export default function SnakeLobby({ onEnterGame }) {
       {rooms.map((r) => (
         <div key={r.$id} style={styles.room}>
           <p>Stake: ₦{r.stake}</p>
-          <p>Players: {r.playerCount}/3</p>
+          <p>Players: {r.playerCount}/{MAX_PLAYERS}</p>
+
           <button onClick={() => joinRoom(r)} disabled={loading}>
             Join
           </button>
