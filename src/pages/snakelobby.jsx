@@ -2,175 +2,349 @@ import { useEffect, useState } from "react";
 import {
   account,
   databases,
-  DATABASE_ID
+  DATABASE_ID,
+  ID,
+  Query
 } from "../lib/appwrite";
 
-// =========================
-// COLLECTION
-// =========================
+const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
+const WALLET_COLLECTION = "wallets";
 
-// =========================
-// SAFE PARSE
-// =========================
-function safeParse(data, fallback) {
-  if (!data) return fallback;
-  if (typeof data === "object") return data;
-  try {
-    return JSON.parse(data);
-  } catch {
-    return fallback;
-  }
-}
+const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
+const MAX_PLAYERS = 2;
+const MAX_ACTIVE_GAMES = 5;
+const ADMIN_CUT_PERCENT = 0.1;
 
-// =========================
-// BOARD COORDS
-// =========================
-function getCoords(pos = 1) {
-  const index = pos - 1;
-  const row = Math.floor(index / 10);
-  let col = index % 10;
-
-  if (row % 2 === 1) col = 9 - col;
-
-  return {
-    left: `${col * 10 + 5}%`,
-    top: `${(9 - row) * 10 + 5}%`
-  };
-}
-
-// =========================
-// MAIN GAME
-// =========================
-export default function SnakeGame({ gameId }) {
-  const [game, setGame] = useState(null);
+export default function SnakeLobby({ goGame, back }) {
   const [user, setUser] = useState(null);
-  const [error, setError] = useState("");
+  const [wallet, setWallet] = useState(null);
+
+  const [stake, setStake] = useState(200);
+  const [rooms, setRooms] = useState([]);
+  const [activeGames, setActiveGames] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (!gameId) return;
+    init();
+    const interval = setInterval(loadAll, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
-    loadGame();
-  }, [gameId]);
+  async function init() {
+    const u = await account.get();
+    setUser(u);
 
-  async function loadGame() {
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id)]
+    );
+
+    if (w.documents.length) setWallet(w.documents[0]);
+
+    await loadAll();
+  }
+
+  // =========================
+  // LOAD EVERYTHING
+  // =========================
+  async function loadAll() {
+    await loadRooms();
+    await loadActiveGames();
+  }
+
+  // =========================
+  // ACTIVE GAMES (USER ONLY)
+  // =========================
+  async function loadActiveGames() {
+    if (!user) return;
+
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      SNAKE_GAME_COLLECTION,
+      [Query.limit(50)]
+    );
+
+    const mine = res.documents.filter((g) => {
+      try {
+        const players = JSON.parse(g.players || "[]");
+        return players.includes(user.$id);
+      } catch {
+        return false;
+      }
+    });
+
+    setActiveGames(mine);
+  }
+
+  // =========================
+  // AVAILABLE ROOMS
+  // =========================
+  async function loadRooms() {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      SNAKE_LOBBY_COLLECTION,
+      [Query.limit(50)]
+    );
+
+    const filtered = res.documents.filter((r) => {
+      try {
+        const players = JSON.parse(r.players || "[]");
+
+        return (
+          r.status !== "finished" &&
+          players.length < MAX_PLAYERS
+        );
+      } catch {
+        return false;
+      }
+    });
+
+    setRooms(filtered);
+  }
+
+  // =========================
+  // LIMIT CHECK
+  // =========================
+  function canPlayMore() {
+    const running = activeGames.filter(
+      (g) => g.status !== "finished"
+    );
+    return running.length < MAX_ACTIVE_GAMES;
+  }
+
+  // =========================
+  // CREATE ROOM
+  // =========================
+  async function createRoom() {
     try {
-      const u = await account.get();
-      setUser(u);
+      if (!canPlayMore()) {
+        return setMessage("Finish current games (max 5 active)");
+      }
 
-      const res = await databases.getDocument(
+      if (stake < 200) {
+        return setMessage("Minimum stake is ₦200");
+      }
+
+      if (wallet.balance < stake) {
+        return setMessage("Insufficient balance");
+      }
+
+      const u = await account.get();
+
+      const players = [u.$id];
+      const joinedUsers = { [u.$id]: true };
+
+      await databases.updateDocument(
         DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
-        gameId
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: wallet.balance - stake
+        }
       );
 
-      setGame(res);
+      await databases.createDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        ID.unique(),
+        {
+          hostId: u.$id,
+          stake,
+          status: "waiting",
+          players: JSON.stringify(players),
+          joinedUsers: JSON.stringify(joinedUsers),
+          playerCount: 1,
+          gameId: ""
+        }
+      );
+
+      setMessage("Room created");
+      loadRooms();
+
     } catch (err) {
       console.log(err);
-      setError("Failed to load game");
+      setMessage("Failed to create room");
     }
   }
 
   // =========================
-  // ROLE DETECTION (A / B ONLY)
+  // JOIN ROOM
   // =========================
-  function getRole() {
-    if (!game || !user) return null;
+  async function joinRoom(room) {
+    try {
+      if (!canPlayMore()) {
+        return setMessage("Finish a game first (max 5 active)");
+      }
 
-    const players = safeParse(game.players, []);
+      const u = await account.get();
 
-    if (players[0] === user.$id) return "A";
-    if (players[1] === user.$id) return "B";
+      if (room.hostId === u.$id) {
+        return setMessage("You cannot join your own room");
+      }
 
-    return null;
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        room.$id
+      );
+
+      let players = JSON.parse(fresh.players || "[]");
+      let joinedUsers = JSON.parse(fresh.joinedUsers || "{}");
+
+      if (players.includes(u.$id)) {
+        return setMessage("Already joined");
+      }
+
+      if (players.length >= MAX_PLAYERS) {
+        return setMessage("Room full");
+      }
+
+      if (wallet.balance < fresh.stake) {
+        return setMessage("Insufficient balance");
+      }
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: wallet.balance - fresh.stake
+        }
+      );
+
+      players.push(u.$id);
+      joinedUsers[u.$id] = true;
+
+      const gameStart = players.length === MAX_PLAYERS;
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        fresh.$id,
+        {
+          players: JSON.stringify(players),
+          joinedUsers: JSON.stringify(joinedUsers),
+          playerCount: players.length,
+          status: gameStart ? "playing" : "waiting"
+        }
+      );
+
+      if (gameStart) {
+        const total = fresh.stake * MAX_PLAYERS;
+        const adminCut = total * ADMIN_CUT_PERCENT;
+        const pot = total - adminCut;
+
+        const adminRes = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", ADMIN_USER_ID)]
+        );
+
+        if (adminRes.documents.length) {
+          const adminWallet = adminRes.documents[0];
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            adminWallet.$id,
+            {
+              balance: adminWallet.balance + adminCut
+            }
+          );
+        }
+
+        const game = await databases.createDocument(
+          DATABASE_ID,
+          SNAKE_GAME_COLLECTION,
+          ID.unique(),
+          {
+            lobbyId: fresh.$id,
+            players: JSON.stringify(players),
+            positions: JSON.stringify({ A: 1, B: 1 }),
+            turn: players[0],
+            status: "playing",
+            pot,
+            winner: "",
+            payoutDone: false
+          }
+        );
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          SNAKE_LOBBY_COLLECTION,
+          fresh.$id,
+          {
+            gameId: game.$id,
+            status: "playing"
+          }
+        );
+
+        goGame(game.$id);
+      }
+
+      setMessage("Joined successfully");
+      loadAll();
+
+    } catch (err) {
+      console.log(err);
+      setMessage("Join failed");
+    }
   }
 
-  const role = getRole();
-
-  if (error) {
-    return (
-      <div style={{ color: "red", padding: 20 }}>
-        {error}
-      </div>
-    );
-  }
-
-  if (!game) {
-    return (
-      <div style={{ color: "white", padding: 20 }}>
-        Loading Snake Game...
-      </div>
-    );
-  }
-
-  const positions = safeParse(game.positions, {
-    A: 1,
-    B: 1
-  });
-
-  const isMyTurn = game.turn === role;
-
+  // =========================
+  // UI
+  // =========================
   return (
     <div style={styles.container}>
-      <h2>🐍 Snake Game</h2>
+      <h2>🐍 Snake Lobby</h2>
 
-      {/* =========================
-          TURN INDICATOR
-      ========================= */}
-      <div
-        style={{
-          ...styles.turnBox,
-          background: isMyTurn ? "#22c55e" : "#3b82f6"
-        }}
-      >
-        {isMyTurn ? "🟢 YOUR TURN" : "🔵 OPPONENT TURN"}
+      <p>{message}</p>
+
+      <div style={styles.card}>
+        <input
+          type="number"
+          value={stake}
+          onChange={(e) => setStake(Number(e.target.value))}
+        />
+
+        <button style={styles.createBtn} onClick={createRoom}>
+          Create Room
+        </button>
       </div>
 
-      {/* =========================
-          BOARD
-      ========================= */}
-      <div style={styles.boardWrapper}>
-        {/* 🔥 FIXED IMAGE PATH */}
-        <img src="/board.png" style={styles.board} />
+      <h3>🔥 Your Active Games</h3>
+      {activeGames.map((g) => (
+        <div key={g.$id} style={styles.room}>
+          <p>Status: {g.status}</p>
+          {g.status !== "finished" && (
+            <button onClick={() => goGame(g.$id)}>
+              ▶ Resume
+            </button>
+          )}
+        </div>
+      ))}
 
-        {["A", "B"].map((p) => (
-          <div
-            key={p}
-            style={{
-              ...styles.token,
-              ...getCoords(positions[p]),
-              background: p === "A" ? "#ef4444" : "#3b82f6",
-              transform:
-                game.turn === p
-                  ? "translate(-50%, -50%) scale(1.4)"
-                  : "translate(-50%, -50%)"
-            }}
-          >
-            {p}
+      <h3>Available Rooms</h3>
+
+      {rooms.map((r) => {
+        const players = JSON.parse(r.players || "[]");
+
+        return (
+          <div key={r.$id} style={styles.room}>
+            <p>Stake: ₦{r.stake}</p>
+            <p>Players: {players.length}/{MAX_PLAYERS}</p>
+
+            <button onClick={() => joinRoom(r)}>
+              Join
+            </button>
           </div>
-        ))}
-      </div>
+        );
+      })}
 
-      {/* =========================
-          STATUS
-      ========================= */}
-      <div style={styles.info}>
-        Turn: {game.turn} <br />
-        Status: {game.status}
-      </div>
-
-      {/* =========================
-          BUTTON
-      ========================= */}
-      <button
-        disabled={!isMyTurn}
-        style={{
-          ...styles.button,
-          opacity: isMyTurn ? 1 : 0.5
-        }}
-      >
-        🎲 Roll Dice
-      </button>
+      <button onClick={back}>Back</button>
     </div>
   );
 }
@@ -180,58 +354,27 @@ export default function SnakeGame({ gameId }) {
 // =========================
 const styles = {
   container: {
-    textAlign: "center",
+    padding: 20,
     background: "#0f172a",
     color: "white",
-    minHeight: "100vh",
-    padding: 20
+    minHeight: "100vh"
   },
-
-  turnBox: {
+  card: {
+    background: "#1e293b",
+    padding: 15,
+    borderRadius: 10
+  },
+  createBtn: {
+    background: "orange",
     padding: 10,
-    borderRadius: 10,
-    fontWeight: "bold",
-    marginBottom: 10,
-    transition: "0.3s"
-  },
-
-  boardWrapper: {
-    position: "relative",
-    width: 360,
-    height: 360,
-    margin: "20px auto"
-  },
-
-  board: {
+    border: "none",
     width: "100%",
-    height: "100%",
-    objectFit: "contain"
-  },
-
-  token: {
-    position: "absolute",
-    width: 28,
-    height: 28,
-    borderRadius: "50%",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    fontWeight: "bold",
-    color: "white",
-    border: "2px solid white",
-    transition: "0.3s"
-  },
-
-  info: {
     marginTop: 10
   },
-
-  button: {
-    marginTop: 20,
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    background: "#f59e0b",
-    fontWeight: "bold"
+  room: {
+    background: "#111827",
+    padding: 10,
+    marginTop: 10,
+    borderRadius: 8
   }
 };
