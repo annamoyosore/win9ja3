@@ -2,15 +2,11 @@ import { useEffect, useState } from "react";
 import {
   databases,
   DATABASE_ID,
-  Query
 } from "../lib/appwrite";
 
 import boardImg from "./board.png";
 
-const SNAKE_GAME_COLLECTION = "snakegame";
-const SNAKE_LOBBY_COLLECTION = "snakelobby";
-const WALLET_COLLECTION = "wallets";
-
+const GAME = "snakegame";
 const SIZE = 100;
 
 // =========================
@@ -36,9 +32,9 @@ const ladders = {
 };
 
 // =========================
-// BOARD POSITION
+// HELPERS
 // =========================
-function getCoords(pos = 1) {
+function getCoords(pos) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
   let col = index % 10;
@@ -51,16 +47,7 @@ function getCoords(pos = 1) {
   };
 }
 
-// =========================
-// HELPERS
-// =========================
-function rollDice() {
-  return Math.floor(Math.random() * 6) + 1;
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function safeParse(data, fallback) {
   if (!data) return fallback;
@@ -72,13 +59,28 @@ function safeParse(data, fallback) {
   }
 }
 
+function rollDice() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+// keep last 3 moves
+function keepLast3(arr, value) {
+  const updated = [...(arr || []), value];
+  return updated.slice(-3);
+}
+
 // =========================
-// MAIN GAME
+// GAME COMPONENT
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
+  const [positions, setPositions] = useState({
+    A: [1],
+    B: [1],
+  });
+
+  const [turn, setTurn] = useState("A");
   const [dice, setDice] = useState(1);
-  const [rolling, setRolling] = useState(false);
   const [moving, setMoving] = useState(false);
 
   // =========================
@@ -91,20 +93,25 @@ export default function SnakeGame({ gameId }) {
   }, [gameId]);
 
   async function loadGame() {
-    try {
-      const res = await databases.getDocument(
-        DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
-        gameId
-      );
-      setGame(res);
-    } catch (err) {
-      console.log(err);
-    }
+    const res = await databases.getDocument(
+      DATABASE_ID,
+      GAME,
+      gameId
+    );
+
+    setGame(res);
+
+    const parsed = safeParse(res.positions, {
+      A: [1],
+      B: [1],
+    });
+
+    setPositions(parsed);
+    setTurn(res.turn || "A");
   }
 
   // =========================
-  // APPLY EFFECTS
+  // SNAKE / LADDER APPLY
   // =========================
   function applyEffects(pos) {
     if (snakes[pos]) return snakes[pos];
@@ -112,177 +119,85 @@ export default function SnakeGame({ gameId }) {
     return pos;
   }
 
-  function nextTurn(turn) {
-    return turn === "A" ? "B" : "A";
-  }
-
   // =========================
-  // MOVE ANIMATION
-  // =========================
-  async function movePiece(start, steps) {
-    let current = start;
-
-    for (let i = 0; i < steps; i++) {
-      await sleep(120);
-      current++;
-      if (current > SIZE) current = SIZE;
-      setTempPositions((prev) => ({ ...prev }));
-    }
-
-    return applyEffects(current);
-  }
-
-  // temporary UI sync fix
-  const [tempPositions, setTempPositions] = useState({ A: 1, B: 1 });
-
-  // =========================
-  // PLAY TURN
+  // PLAY TURN (FIXED CORE LOGIC)
   // =========================
   async function playTurn() {
-    if (!game || rolling || moving) return;
-    if (game.status === "finished") return;
+    if (!game || moving) return;
 
     setMoving(true);
-    setRolling(true);
 
-    // 🎲 dice animation
-    for (let i = 0; i < 10; i++) {
-      setDice(Math.floor(Math.random() * 6) + 1);
-      await sleep(80);
-    }
+    const diceValue = rollDice();
+    setDice(diceValue);
 
-    const d = rollDice();
-    setDice(d);
-    setRolling(false);
+    const player = turn;
 
-    const player = game.turn;
-    const positions = safeParse(game.positions, { A: 1, B: 1 });
+    const current =
+      positions[player][positions[player].length - 1];
 
-    const from = positions[player];
+    let next = current + diceValue;
 
-    const to = await movePiece(from, d);
-    const updatedPos = { ...positions, [player]: to };
+    if (next > SIZE) next = SIZE;
 
-    const winner = to >= SIZE ? player : "";
+    next = applyEffects(next);
 
-    const history = safeParse(game.history, []);
+    const updatedHistory = keepLast3(
+      positions[player],
+      next
+    );
 
-    const updatedHistory = [
-      {
-        player: player === "A" ? "Player A" : "Player B",
-        dice: d,
-        from,
-        to,
-        time: Date.now(),
-      },
-      ...history
-    ].slice(0, 6); // ✅ ONLY LAST 6 MOVES
+    const updatedPositions = {
+      ...positions,
+      [player]: updatedHistory,
+    };
+
+    const winner = next >= SIZE ? player : "";
 
     const updatedGame = {
       ...game,
-      positions: updatedPos,
-      turn: winner ? game.turn : nextTurn(game.turn),
-      winner,
+      positions: JSON.stringify(updatedPositions),
+      turn: player === "A" ? "B" : "A",
       status: winner ? "finished" : "playing",
-      history: updatedHistory
+      winner,
     };
 
     await databases.updateDocument(
       DATABASE_ID,
-      SNAKE_GAME_COLLECTION,
+      GAME,
       gameId,
       updatedGame
     );
 
     setGame(updatedGame);
-
-    // =========================
-    // PAYOUT
-    // =========================
-    if (winner) {
-      await payoutWinner(updatedGame, winner);
-    }
+    setPositions(updatedPositions);
+    setTurn(updatedGame.turn);
 
     setMoving(false);
   }
 
   // =========================
-  // PAYOUT SYSTEM
+  // GET CURRENT POSITION
   // =========================
-  async function payoutWinner(gameData, winner) {
-    try {
-      const players = safeParse(gameData.players, ["A", "B"]);
+  const getPos = (p) =>
+    positions[p]?.[positions[p].length - 1] || 1;
 
-      const winnerIndex = winner === "A" ? 0 : 1;
-      const winnerId = players[winnerIndex];
-
-      const walletRes = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", winnerId)]
-      );
-
-      if (walletRes.documents.length) {
-        const wallet = walletRes.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          wallet.$id,
-          {
-            balance: Number(wallet.balance) + Number(gameData.pot)
-          }
-        );
-      }
-
-      // optional: set pot to zero
-      await databases.updateDocument(
-        DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
-        gameId,
-        {
-          pot: 0,
-          payoutDone: true,
-          status: "finished"
-        }
-      );
-
-    } catch (err) {
-      console.log("Payout error:", err);
-    }
-  }
-
+  // =========================
+  // UI
+  // =========================
   if (!game) return <div style={{ color: "white" }}>Loading...</div>;
-
-  const positions = safeParse(game.positions, { A: 1, B: 1 });
 
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN INDICATOR */}
-      <div style={styles.turnBox}>
-        <span
-          style={{
-            color: game.turn === "A" ? "lime" : "gray",
-            fontWeight: "bold"
-          }}
-        >
-          Player A
-        </span>
-        {"  VS  "}
-        <span
-          style={{
-            color: game.turn === "B" ? "deepskyblue" : "gray",
-            fontWeight: "bold"
-          }}
-        >
-          Player B
-        </span>
+      {/* TURN */}
+      <div style={styles.info}>
+        🎲 Dice: {dice} <br />
+        Turn:{" "}
+        <b style={{ color: turn === "A" ? "lime" : "deepskyblue" }}>
+          Player {turn}
+        </b>
       </div>
-
-      {/* DICE */}
-      <div style={styles.dice}>{dice}</div>
 
       {/* BOARD */}
       <div style={styles.boardWrapper}>
@@ -293,8 +208,9 @@ export default function SnakeGame({ gameId }) {
             key={p}
             style={{
               ...styles.token,
-              ...getCoords(positions[p]),
+              ...getCoords(getPos(p)),
               background: p === "A" ? "red" : "blue",
+              transform: "translate(-50%, -50%)",
             }}
           >
             {p}
@@ -302,29 +218,28 @@ export default function SnakeGame({ gameId }) {
         ))}
       </div>
 
-      {/* HISTORY */}
-      <div style={styles.history}>
-        {safeParse(game.history, []).map((h, i) => (
-          <div key={i}>
-            {h.player} 🎲{h.dice}: {h.from} → {h.to}
-          </div>
-        ))}
-      </div>
-
       {/* BUTTON */}
       <button
         onClick={playTurn}
-        disabled={rolling || moving || game.status === "finished"}
+        disabled={moving || game.status === "finished"}
         style={styles.button}
       >
         🎲 Roll Dice
       </button>
 
+      {/* WINNER */}
       {game.winner && (
         <h3 style={{ color: "gold" }}>
           🏆 Winner: Player {game.winner}
         </h3>
       )}
+
+      {/* LAST 3 MOVES */}
+      <div style={styles.history}>
+        <h4>Last Moves (A / B)</h4>
+        <div>A: {positions.A.join(" → ")}</div>
+        <div>B: {positions.B.join(" → ")}</div>
+      </div>
     </div>
   );
 }
@@ -338,51 +253,55 @@ const styles = {
     background: "#0f172a",
     color: "white",
     minHeight: "100vh",
-    padding: 20
+    padding: 20,
   },
+
   boardWrapper: {
     position: "relative",
     width: 360,
     height: 360,
-    margin: "20px auto"
+    margin: "20px auto",
   },
+
   board: {
     width: "100%",
-    height: "100%"
+    height: "100%",
   },
+
   token: {
     position: "absolute",
     width: 28,
     height: 28,
     borderRadius: "50%",
-    transform: "translate(-50%, -50%)",
     display: "flex",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     fontWeight: "bold",
-    color: "white"
+    color: "white",
+    border: "2px solid white",
+    transition: "0.25s linear",
   },
-  turnBox: {
+
+  info: {
     marginBottom: 10,
-    fontSize: 18
   },
-  dice: {
-    fontSize: 40,
-    marginBottom: 10
-  },
-  history: {
-    background: "#111827",
-    padding: 10,
-    borderRadius: 10,
-    maxWidth: 300,
-    margin: "10px auto",
-    textAlign: "left"
-  },
+
   button: {
     padding: 12,
     borderRadius: 10,
     background: "gold",
     border: "none",
-    fontWeight: "bold"
-  }
+    fontWeight: "bold",
+    cursor: "pointer",
+  },
+
+  history: {
+    marginTop: 15,
+    background: "#111827",
+    padding: 10,
+    borderRadius: 10,
+    maxWidth: 320,
+    margin: "10px auto",
+    textAlign: "left",
+  },
 };
