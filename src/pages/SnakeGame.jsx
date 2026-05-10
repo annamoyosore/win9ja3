@@ -1,15 +1,8 @@
-import { useEffect, useState } from "react";
-import {
-  databases,
-  DATABASE_ID,
-  Query,
-  account,
-} from "../lib/appwrite";
-
+import { useEffect, useRef, useState } from "react";
+import { databases, DATABASE_ID } from "../lib/appwrite";
 import boardImg from "./board.png";
 
 const GAME = "snakegame";
-const WALLET = "wallets";
 const SIZE = 100;
 
 // =========================
@@ -35,8 +28,19 @@ const ladders = {
 };
 
 // =========================
-// HELPERS
-// =========================
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function rollDice() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+// keep last 6 moves
+function keepLast6(arr, value) {
+  const updated = [...(arr || []), value];
+  return updated.slice(-6);
+}
+
+// board position → screen position
 function getCoords(pos) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
@@ -50,61 +54,44 @@ function getCoords(pos) {
   };
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function safeParse(data, fallback) {
-  try {
-    return typeof data === "string" ? JSON.parse(data) : data || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function rollDice() {
-  return Math.floor(Math.random() * 6) + 1;
-}
-
-function keepLast6(arr, val) {
-  return [...(arr || []), val].slice(-6);
-}
-
 // =========================
-// GAME COMPONENT
+// MAIN COMPONENT
 // =========================
-export default function SnakeGame({ gameId }) {
+export default function SnakeGame({ gameId, userId }) {
   const [game, setGame] = useState(null);
-
-  const [positions, setPositions] = useState({ A: 1, B: 1 });
-  const [history, setHistory] = useState([]);
-
-  const [turn, setTurn] = useState("A");
-
+  const [positions, setPositions] = useState({ A: [1], B: [1] });
+  const [turn, setTurn] = useState(null);
   const [dice, setDice] = useState(1);
-  const [rolling, setRolling] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  const pot = Number(game?.pot || 0);
+  const lock = useRef(false);
 
   // =========================
   // LOAD GAME
   // =========================
   useEffect(() => {
     if (!gameId) return;
-    loadGame();
+
+    async function load() {
+      const res = await databases.getDocument(
+        DATABASE_ID,
+        GAME,
+        gameId
+      );
+
+      setGame(res);
+      setTurn(res.turn);
+
+      setPositions(
+        res.positions
+          ? JSON.parse(res.positions)
+          : { A: [1], B: [1] }
+      );
+    }
+
+    load();
   }, [gameId]);
-
-  async function loadGame() {
-    const res = await databases.getDocument(
-      DATABASE_ID,
-      GAME,
-      gameId
-    );
-
-    setGame(res);
-    setPositions(safeParse(res.positions, { A: 1, B: 1 }));
-    setHistory(safeParse(res.history, []).slice(-6));
-    setTurn(res.turn || "A");
-  }
 
   // =========================
   // EFFECTS
@@ -116,179 +103,110 @@ export default function SnakeGame({ gameId }) {
   }
 
   // =========================
-  // DICE ANIMATION
+  // MOVE ANIMATION
   // =========================
-  async function rollDiceAnim() {
-    setRolling(true);
+  async function move(player, steps) {
+    let current = positions[player].slice(-1)[0];
 
-    let count = 0;
+    for (let i = 0; i < steps; i++) {
+      await sleep(150);
 
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        setDice(Math.floor(Math.random() * 6) + 1);
-        count++;
-
-        if (count > 10) {
-          clearInterval(interval);
-          const final = rollDice();
-          setDice(final);
-          setRolling(false);
-          resolve(final);
-        }
-      }, 70);
-    });
-  }
-
-  // =========================
-  // PAYOUT
-  // =========================
-  async function handleWin(winner, data) {
-    let countdown = 5;
-
-    const timer = setInterval(async () => {
-      countdown--;
-
-      setGame((prev) => ({
-        ...prev,
-        countdown,
-        status: "ending",
-      }));
-
-      if (countdown <= 0) {
-        clearInterval(timer);
-
-        try {
-          const wallet = await databases.listDocuments(
-            DATABASE_ID,
-            WALLET,
-            [Query.equal("userId", winner)]
-          );
-
-          if (wallet.documents.length) {
-            const w = wallet.documents[0];
-
-            await databases.updateDocument(
-              DATABASE_ID,
-              WALLET,
-              w.$id,
-              {
-                balance:
-                  Number(w.balance || 0) + Number(data.pot || 0),
-              }
-            );
-          }
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            GAME,
-            gameId,
-            {
-              status: "finished",
-              pot: 0,
-            }
-          );
-        } catch (e) {
-          console.log(e);
-        }
-      }
-    }, 1000);
-  }
-
-  // =========================
-  // PLAY TURN (LOCKED)
-  // =========================
-  async function playTurn() {
-    if (!game || moving || rolling) return;
-    if (game.status !== "playing") return;
-
-    setMoving(true);
-
-    const fresh = await databases.getDocument(
-      DATABASE_ID,
-      GAME,
-      gameId
-    );
-
-    const player = fresh.turn;
-
-    const diceValue = await rollDiceAnim();
-
-    let pos = safeParse(fresh.positions, { A: 1, B: 1 });
-
-    let current = pos[player];
-
-    for (let i = 0; i < diceValue; i++) {
-      await sleep(120);
       current++;
       if (current > SIZE) current = SIZE;
 
-      setPositions((p) => ({
-        ...p,
-        [player]: current,
+      setPositions((prev) => ({
+        ...prev,
+        [player]: keepLast6(prev[player], current),
       }));
     }
 
     const finalPos = applyEffects(current);
-    pos[player] = finalPos;
 
-    const winner = finalPos >= SIZE ? player : "";
-    const nextTurn = player === "A" ? "B" : "A";
+    setPositions((prev) => ({
+      ...prev,
+      [player]: keepLast6(prev[player], finalPos),
+    }));
 
-    const newHistory = keepLast6(
-      safeParse(fresh.history, []),
-      {
-        player: player === "A" ? "Player A" : "Player B",
-        dice: diceValue,
-        from: current,
-        to: finalPos,
-      }
-    );
+    return finalPos;
+  }
 
-    const updated = {
-      ...fresh,
-      positions: JSON.stringify(pos),
+  // =========================
+  // PLAY TURN (FULL LOCK)
+  // =========================
+  async function playTurn() {
+    if (!game || moving || lock.current) return;
+
+    // 🔒 TURN CHECK (SECURE)
+    if (game.turn !== userId) {
+      setMsg("❌ Not your turn");
+      return;
+    }
+
+    if (game.status === "finished") return;
+
+    lock.current = true;
+    setMoving(true);
+
+    const d = rollDice();
+    setDice(d);
+
+    const player = userId === game.playerA ? "A" : "B";
+
+    const newPos = await move(player, d);
+
+    const winner = newPos >= SIZE ? userId : "";
+
+    const updatedPositions = {
+      ...positions,
+      [player]: keepLast6(positions[player], newPos),
+    };
+
+    const nextTurn =
+      game.turn === game.playerA
+        ? game.playerB
+        : game.playerA;
+
+    const updatedGame = {
+      ...game,
+      positions: JSON.stringify(updatedPositions),
       turn: nextTurn,
-      history: JSON.stringify(newHistory),
-      status: winner ? "ending" : "playing",
+      status: winner ? "finished" : "playing",
       winner,
+      history: [
+        `Player ${player} rolled ${d}`,
+        ...(game.history || []),
+      ].slice(0, 6),
     };
 
     await databases.updateDocument(
       DATABASE_ID,
       GAME,
       gameId,
-      updated
+      updatedGame
     );
 
-    setGame(updated);
-    setPositions(pos);
+    setGame(updatedGame);
+    setPositions(updatedPositions);
     setTurn(nextTurn);
-    setHistory(newHistory);
-
-    if (winner) {
-      await handleWin(winner, updated);
-    }
 
     setMoving(false);
+    lock.current = false;
   }
 
-  const getPos = (p) => positions[p] || 1;
-
+  // =========================
   if (!game) return <div style={{ color: "white" }}>Loading...</div>;
+
+  const isMyTurn = game.turn === userId;
 
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* INFO */}
+      {/* TURN + POT (NO IDS SHOWN) */}
       <div style={styles.info}>
         🎲 Dice: {dice} <br />
-        Turn:{" "}
-        <b style={{ color: turn === "A" ? "lime" : "deepskyblue" }}>
-          Player {turn}
-        </b>
-        <br />
-        💰 Pot: ₦{pot}
+        {isMyTurn ? "🟢 Your Turn" : "🔴 Opponent Turn"} <br />
+        💰 Pot: ₦{game.pot || 0}
       </div>
 
       {/* BOARD */}
@@ -300,8 +218,10 @@ export default function SnakeGame({ gameId }) {
             key={p}
             style={{
               ...styles.token,
-              ...getCoords(getPos(p)),
-              background: p === "A" ? "#ef4444" : "#3b82f6",
+              ...getCoords(
+                positions[p]?.slice(-1)[0] || 1
+              ),
+              background: p === "A" ? "green" : "blue",
             }}
           >
             {p}
@@ -309,46 +229,30 @@ export default function SnakeGame({ gameId }) {
         ))}
       </div>
 
-      {/* CONTROLS */}
-      <div style={styles.controls}>
-        <div
-          style={{
-            ...styles.dice,
-            transform: rolling ? "rotate(360deg)" : "rotate(0deg)",
-          }}
-        >
-          🎲 {dice}
-        </div>
+      {/* DICE BUTTON */}
+      <button
+        onClick={playTurn}
+        disabled={!isMyTurn || moving || game.status === "finished"}
+        style={styles.button}
+      >
+        {isMyTurn ? "🎲 Roll Dice" : "⛔ Not your turn"}
+      </button>
 
-        <button
-          onClick={playTurn}
-          disabled={moving || rolling || game.status !== "playing"}
-          style={styles.button}
-        >
-          {rolling ? "Rolling..." : "Roll Dice"}
-        </button>
-      </div>
+      {/* MESSAGE */}
+      {msg && <div style={{ color: "red" }}>{msg}</div>}
 
-      {/* HISTORY */}
+      {/* HISTORY (LAST 6 ONLY) */}
       <div style={styles.history}>
-        <h4>Last 6 Moves</h4>
-        {history.map((h, i) => (
-          <div key={i}>
-            {h.player} 🎲{h.dice}: {h.from} → {h.to}
-          </div>
+        {(game.history || []).map((h, i) => (
+          <div key={i}>{h}</div>
         ))}
       </div>
 
-      {game.status === "ending" && (
-        <div style={{ color: "gold" }}>
-          ⏳ Paying winner...
-        </div>
-      )}
-
-      {game.status === "finished" && (
-        <div style={{ color: "lime" }}>
-          🏆 Winner: Player {game.winner}
-        </div>
+      {/* WINNER */}
+      {game.winner && (
+        <h3 style={{ color: "gold" }}>
+          🏆 Winner: Player {game.winner === game.playerA ? "A" : "B"}
+        </h3>
       )}
     </div>
   );
@@ -390,29 +294,7 @@ const styles = {
     fontWeight: "bold",
     color: "white",
     border: "2px solid white",
-    transition: "0.25s linear",
-  },
-
-  info: { marginBottom: 10 },
-
-  controls: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 15,
-  },
-
-  dice: {
-    width: 55,
-    height: 55,
-    background: "#1e293b",
-    border: "2px solid gold",
-    borderRadius: 10,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 20,
-    transition: "0.4s",
+    transition: "0.25s",
   },
 
   button: {
@@ -424,13 +306,15 @@ const styles = {
     cursor: "pointer",
   },
 
+  info: {
+    marginBottom: 10,
+  },
+
   history: {
-    marginTop: 15,
-    background: "#111827",
+    marginTop: 10,
+    fontSize: 12,
+    background: "#111",
     padding: 10,
     borderRadius: 10,
-    maxWidth: 320,
-    margin: "10px auto",
-    textAlign: "left",
   },
 };
