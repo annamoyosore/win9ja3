@@ -5,13 +5,13 @@ import {
   DATABASE_ID
 } from "../lib/appwrite";
 
-import boardImg from "./board.png";
-
+// =========================
+// COLLECTION
+// =========================
 const SNAKE_GAME_COLLECTION = "snakegame";
-const SIZE = 100;
 
 // =========================
-// HELPERS
+// SAFE PARSE
 // =========================
 function safeParse(data, fallback) {
   if (!data) return fallback;
@@ -23,6 +23,9 @@ function safeParse(data, fallback) {
   }
 }
 
+// =========================
+// BOARD COORDS
+// =========================
 function getCoords(pos = 1) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
@@ -42,76 +45,94 @@ function getCoords(pos = 1) {
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
   const [user, setUser] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    init();
+    if (!gameId) return;
+
+    loadGame();
   }, [gameId]);
 
-  async function init() {
-    const u = await account.get();
-    setUser(u);
+  async function loadGame() {
+    try {
+      const u = await account.get();
+      setUser(u);
 
-    const res = await databases.getDocument(
-      DATABASE_ID,
-      SNAKE_GAME_COLLECTION,
-      gameId
-    );
+      const res = await databases.getDocument(
+        DATABASE_ID,
+        SNAKE_GAME_COLLECTION,
+        gameId
+      );
 
-    setGame(res);
+      setGame(res);
+    } catch (err) {
+      console.log(err);
+      setError("Failed to load game");
+    }
   }
 
   // =========================
-  // TURN LABEL LOGIC
+  // ROLE DETECTION (A / B ONLY)
   // =========================
-  function getPlayerRole() {
+  function getRole() {
     if (!game || !user) return null;
 
     const players = safeParse(game.players, []);
-    const index = players.indexOf(user.$id);
 
-    if (index === 0) return "A";
-    if (index === 1) return "B";
+    if (players[0] === user.$id) return "A";
+    if (players[1] === user.$id) return "B";
 
     return null;
   }
 
-  const myRole = getPlayerRole();
+  const role = getRole();
 
-  const positions = safeParse(game?.positions, { A: 1, B: 1 });
+  if (error) {
+    return (
+      <div style={{ color: "red", padding: 20 }}>
+        {error}
+      </div>
+    );
+  }
 
-  const isMyTurn = game?.turn === myRole;
-  const isOpponentTurn = game?.turn && game.turn !== myRole;
+  if (!game) {
+    return (
+      <div style={{ color: "white", padding: 20 }}>
+        Loading Snake Game...
+      </div>
+    );
+  }
 
-  // =========================
-  // UI
-  // =========================
-  if (!game) return <div>Loading...</div>;
+  const positions = safeParse(game.positions, {
+    A: 1,
+    B: 1
+  });
+
+  const isMyTurn = game.turn === role;
 
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
       {/* =========================
-          TURN INDICATOR (FIXED)
+          TURN INDICATOR
       ========================= */}
-      <div style={styles.turnBox}>
-        <div
-          style={{
-            ...styles.turnIndicator,
-            background: isMyTurn ? "#22c55e" : "#1e3a8a",
-            boxShadow: isMyTurn
-              ? "0 0 20px #22c55e"
-              : "0 0 20px #3b82f6"
-          }}
-        >
-          {isMyTurn ? "🟢 YOUR TURN" : "🔵 OPPONENT TURN"}
-        </div>
+      <div
+        style={{
+          ...styles.turnBox,
+          background: isMyTurn ? "#22c55e" : "#3b82f6"
+        }}
+      >
+        {isMyTurn ? "🟢 YOUR TURN" : "🔵 OPPONENT TURN"}
       </div>
 
+      {/* =========================
+          BOARD
+      ========================= */}
       <div style={styles.boardWrapper}>
-        <img src={boardImg} style={styles.board} />
+        {/* 🔥 FIXED IMAGE PATH */}
+        <img src="/board.png" style={styles.board} />
 
-        {/* PLAYER TOKENS */}
         {["A", "B"].map((p) => (
           <div
             key={p}
@@ -122,11 +143,7 @@ export default function SnakeGame({ gameId }) {
               transform:
                 game.turn === p
                   ? "translate(-50%, -50%) scale(1.4)"
-                  : "translate(-50%, -50%)",
-              boxShadow:
-                game.turn === p
-                  ? "0 0 15px white"
-                  : "none"
+                  : "translate(-50%, -50%)"
             }}
           >
             {p}
@@ -134,13 +151,23 @@ export default function SnakeGame({ gameId }) {
         ))}
       </div>
 
+      {/* =========================
+          STATUS
+      ========================= */}
+      <div style={styles.info}>
+        Turn: {game.turn} <br />
+        Status: {game.status}
+      </div>
+
+      {/* =========================
+          BUTTON
+      ========================= */}
       <button
+        disabled={!isMyTurn}
         style={{
           ...styles.button,
-          opacity: isMyTurn ? 1 : 0.4,
-          cursor: isMyTurn ? "pointer" : "not-allowed"
+          opacity: isMyTurn ? 1 : 0.5
         }}
-        disabled={!isMyTurn}
       >
         🎲 Roll Dice
       </button>
@@ -161,13 +188,10 @@ const styles = {
   },
 
   turnBox: {
-    marginBottom: 10
-  },
-
-  turnIndicator: {
     padding: 10,
     borderRadius: 10,
     fontWeight: "bold",
+    marginBottom: 10,
     transition: "0.3s"
   },
 
@@ -180,7 +204,8 @@ const styles = {
 
   board: {
     width: "100%",
-    height: "100%"
+    height: "100%",
+    objectFit: "contain"
   },
 
   token: {
@@ -197,12 +222,16 @@ const styles = {
     transition: "0.3s"
   },
 
+  info: {
+    marginTop: 10
+  },
+
   button: {
     marginTop: 20,
     padding: 12,
     borderRadius: 10,
     border: "none",
-    fontWeight: "bold",
-    background: "#f59e0b"
+    background: "#f59e0b",
+    fontWeight: "bold"
   }
 };
