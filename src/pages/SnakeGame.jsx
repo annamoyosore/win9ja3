@@ -1,17 +1,24 @@
 import { useEffect, useState } from "react";
 import {
   databases,
-  DATABASE_ID
+  DATABASE_ID,
+  Query
 } from "../lib/appwrite";
 
 import boardImg from "./board.png";
 
-// 🐍 Dedicated Snake Collection (DO NOT reuse Whot)
+// =========================
+// COLLECTIONS (CLEAN)
+// =========================
 const SNAKE_GAME_COLLECTION = "snakegame";
+const SNAKE_LOBBY_COLLECTION = "snakelobby";
+const WALLET_COLLECTION = "wallets";
 
 const SIZE = 100;
 
-// 🐍 Snakes
+// =========================
+// SNAKES & LADDERS
+// =========================
 const snakes = {
   50: 5,
   43: 17,
@@ -22,7 +29,6 @@ const snakes = {
   98: 40,
 };
 
-// 🪜 Ladders
 const ladders = {
   2: 23,
   6: 45,
@@ -33,7 +39,7 @@ const ladders = {
 };
 
 // =========================
-// BOARD CALC
+// HELPERS
 // =========================
 function getCoords(pos = 1) {
   const index = pos - 1;
@@ -56,8 +62,18 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function safeParse(data, fallback) {
+  if (!data) return fallback;
+  if (typeof data === "object") return data;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return fallback;
+  }
+}
+
 // =========================
-// GAME
+// MAIN GAME
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
@@ -80,7 +96,7 @@ export default function SnakeGame({ gameId }) {
         );
         setGame(res);
       } catch (err) {
-        console.log("Load error:", err);
+        console.log(err);
       }
     }
 
@@ -88,7 +104,7 @@ export default function SnakeGame({ gameId }) {
   }, [gameId]);
 
   // =========================
-  // LOGIC
+  // GAME LOGIC
   // =========================
   function applyEffects(pos) {
     if (snakes[pos]) return snakes[pos];
@@ -96,7 +112,6 @@ export default function SnakeGame({ gameId }) {
     return pos;
   }
 
-  // ✅ FIXED: 2 PLAYERS ONLY
   function nextTurn(turn) {
     return turn === "A" ? "B" : "A";
   }
@@ -105,12 +120,73 @@ export default function SnakeGame({ gameId }) {
     let current = positions?.[player] || 1;
 
     for (let i = 0; i < steps; i++) {
-      await sleep(120);
+      await sleep(100);
       current++;
       if (current > SIZE) current = SIZE;
     }
 
     return applyEffects(current);
+  }
+
+  // =========================
+  // PAYOUT SYSTEM
+  // =========================
+  async function handlePayout(gameData) {
+    if (gameData.payoutDone) return;
+
+    const winner = gameData.winner;
+    if (!winner) return;
+
+    const winnerUserId = gameData.joinedUsers?.[winner];
+
+    try {
+      // 💰 GET WALLET
+      const walletRes = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", winnerUserId)]
+      );
+
+      const wallet = walletRes.documents[0];
+
+      // 💸 PAY WINNER
+      if (wallet) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          wallet.$id,
+          {
+            balance: wallet.balance + gameData.pot
+          }
+        );
+      }
+
+      // 🔒 MARK GAME PAID
+      await databases.updateDocument(
+        DATABASE_ID,
+        SNAKE_GAME_COLLECTION,
+        gameData.$id,
+        {
+          payoutDone: true
+        }
+      );
+
+      // 🏠 CLOSE LOBBY
+      if (gameData.lobbyId) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          SNAKE_LOBBY_COLLECTION,
+          gameData.lobbyId,
+          {
+            status: "finished",
+            finishedAt: new Date().toISOString()
+          }
+        );
+      }
+
+    } catch (err) {
+      console.log("Payout error:", err);
+    }
   }
 
   // =========================
@@ -125,7 +201,6 @@ export default function SnakeGame({ gameId }) {
 
     const player = game.turn;
 
-    // 🎲 animation
     let spin = 0;
     const interval = setInterval(() => {
       setDice(Math.floor(Math.random() * 6) + 1);
@@ -139,7 +214,7 @@ export default function SnakeGame({ gameId }) {
     setDice(d);
     setRolling(false);
 
-    const positions = game.positions || { A: 1, B: 1 };
+    const positions = safeParse(game.positions, { A: 1, B: 1 });
 
     const newPos = await move(player, d, positions);
 
@@ -148,16 +223,14 @@ export default function SnakeGame({ gameId }) {
       [player]: newPos,
     };
 
-    // 🏆 WIN CONDITION
     let winner = "";
     if (newPos >= SIZE) {
       winner = player;
     }
 
-    // 📜 HISTORY
-    let history = game.history || [];
+    const history = safeParse(game.history, []);
 
-    history = [
+    const updatedHistory = [
       {
         player,
         dice: d,
@@ -168,32 +241,43 @@ export default function SnakeGame({ gameId }) {
       ...history,
     ].slice(0, 12);
 
+    const updatedGame = {
+      ...game,
+      positions: updatedPositions,
+      turn: nextTurn(player),
+      winner,
+      status: winner ? "finished" : "playing",
+      history: updatedHistory
+    };
+
     await databases.updateDocument(
       DATABASE_ID,
       SNAKE_GAME_COLLECTION,
       gameId,
-      {
-        positions: updatedPositions,
-        turn: nextTurn(player),
-        winner,
-        status: winner ? "finished" : "playing",
-        history,
-      }
+      updatedGame
     );
+
+    // 💰 RUN PAYOUT IF WINNER
+    if (winner) {
+      await handlePayout({
+        ...updatedGame,
+        $id: gameId
+      });
+    }
 
     setMoving(false);
   }
 
   // =========================
-  // UI SAFE GUARD
+  // UI GUARD
   // =========================
   if (!game) return <div>Loading Snake Game...</div>;
 
-  const positions = game.positions || { A: 1, B: 1 };
+  const positions = safeParse(game.positions, { A: 1, B: 1 });
 
   return (
     <div style={styles.container}>
-      <h2>🐍 Snake & Ladder (2 Players)</h2>
+      <h2>🐍 Snake Game (2 Players)</h2>
 
       <div style={styles.info}>
         🎲 Dice: {dice} <br />
@@ -231,7 +315,7 @@ export default function SnakeGame({ gameId }) {
 
       <div style={styles.history}>
         <h4>Last Moves</h4>
-        {(game.history || []).map((h, i) => (
+        {(safeParse(game.history, [])).map((h, i) => (
           <div key={i}>
             {h.player} 🎲{h.dice}: {h.from} → {h.to}
           </div>
