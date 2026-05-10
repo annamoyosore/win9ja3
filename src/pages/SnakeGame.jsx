@@ -3,6 +3,7 @@ import {
   databases,
   DATABASE_ID,
   Query,
+  account,
 } from "../lib/appwrite";
 
 import boardImg from "./board.png";
@@ -63,8 +64,8 @@ function rollDice() {
   return Math.floor(Math.random() * 6) + 1;
 }
 
-function keepLast6(arr, value) {
-  return [...(arr || []), value].slice(-6);
+function keepLast6(arr, val) {
+  return [...(arr || []), val].slice(-6);
 }
 
 // =========================
@@ -72,16 +73,16 @@ function keepLast6(arr, value) {
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
+
   const [positions, setPositions] = useState({ A: 1, B: 1 });
   const [history, setHistory] = useState([]);
+
   const [turn, setTurn] = useState("A");
 
   const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
   const [moving, setMoving] = useState(false);
-  const [error, setError] = useState("");
 
-  // 💰 POT
   const pot = Number(game?.pot || 0);
 
   // =========================
@@ -106,7 +107,7 @@ export default function SnakeGame({ gameId }) {
   }
 
   // =========================
-  // APPLY SNAKES/LADDERS
+  // EFFECTS
   // =========================
   function applyEffects(pos) {
     if (snakes[pos]) return snakes[pos];
@@ -120,14 +121,14 @@ export default function SnakeGame({ gameId }) {
   async function rollDiceAnim() {
     setRolling(true);
 
-    return new Promise((resolve) => {
-      let count = 0;
+    let count = 0;
 
+    return new Promise((resolve) => {
       const interval = setInterval(() => {
         setDice(Math.floor(Math.random() * 6) + 1);
         count++;
 
-        if (count > 12) {
+        if (count > 10) {
           clearInterval(interval);
           const final = rollDice();
           setDice(final);
@@ -139,20 +140,9 @@ export default function SnakeGame({ gameId }) {
   }
 
   // =========================
-  // PAYOUT SYSTEM
+  // PAYOUT
   // =========================
-  async function handleWin(winner, gameData) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      GAME,
-      gameId,
-      {
-        status: "ending",
-        winner,
-        pot: gameData.pot,
-      }
-    );
-
+  async function handleWin(winner, data) {
     let countdown = 5;
 
     const timer = setInterval(async () => {
@@ -168,14 +158,14 @@ export default function SnakeGame({ gameId }) {
         clearInterval(timer);
 
         try {
-          const walletRes = await databases.listDocuments(
+          const wallet = await databases.listDocuments(
             DATABASE_ID,
             WALLET,
             [Query.equal("userId", winner)]
           );
 
-          if (walletRes.documents.length) {
-            const w = walletRes.documents[0];
+          if (wallet.documents.length) {
+            const w = wallet.documents[0];
 
             await databases.updateDocument(
               DATABASE_ID,
@@ -183,7 +173,7 @@ export default function SnakeGame({ gameId }) {
               w.$id,
               {
                 balance:
-                  Number(w.balance || 0) + Number(gameData.pot || 0),
+                  Number(w.balance || 0) + Number(data.pot || 0),
               }
             );
           }
@@ -195,16 +185,10 @@ export default function SnakeGame({ gameId }) {
             {
               status: "finished",
               pot: 0,
-              payoutDone: true,
             }
           );
-
-          setGame((prev) => ({
-            ...prev,
-            status: "finished",
-          }));
-        } catch (err) {
-          console.log(err);
+        } catch (e) {
+          console.log(e);
         }
       }
     }, 1000);
@@ -218,7 +202,6 @@ export default function SnakeGame({ gameId }) {
     if (game.status !== "playing") return;
 
     setMoving(true);
-    setError("");
 
     const fresh = await databases.getDocument(
       DATABASE_ID,
@@ -228,22 +211,21 @@ export default function SnakeGame({ gameId }) {
 
     const player = fresh.turn;
 
-    // 🔒 TURN LOCK CHECK
-    if (!player) {
-      setMoving(false);
-      return;
-    }
-
     const diceValue = await rollDiceAnim();
 
     let pos = safeParse(fresh.positions, { A: 1, B: 1 });
+
     let current = pos[player];
 
     for (let i = 0; i < diceValue; i++) {
       await sleep(120);
       current++;
       if (current > SIZE) current = SIZE;
-      setPositions((p) => ({ ...p, [player]: current }));
+
+      setPositions((p) => ({
+        ...p,
+        [player]: current,
+      }));
     }
 
     const finalPos = applyEffects(current);
@@ -262,11 +244,11 @@ export default function SnakeGame({ gameId }) {
       }
     );
 
-    const updatedGame = {
+    const updated = {
       ...fresh,
       positions: JSON.stringify(pos),
-      history: JSON.stringify(newHistory),
       turn: nextTurn,
+      history: JSON.stringify(newHistory),
       status: winner ? "ending" : "playing",
       winner,
     };
@@ -275,16 +257,16 @@ export default function SnakeGame({ gameId }) {
       DATABASE_ID,
       GAME,
       gameId,
-      updatedGame
+      updated
     );
 
-    setGame(updatedGame);
+    setGame(updated);
     setPositions(pos);
     setTurn(nextTurn);
     setHistory(newHistory);
 
     if (winner) {
-      await handleWin(winner, updatedGame);
+      await handleWin(winner, updated);
     }
 
     setMoving(false);
@@ -298,32 +280,16 @@ export default function SnakeGame({ gameId }) {
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN + DICE */}
+      {/* INFO */}
       <div style={styles.info}>
         🎲 Dice: {dice} <br />
         Turn:{" "}
         <b style={{ color: turn === "A" ? "lime" : "deepskyblue" }}>
           Player {turn}
         </b>
-      </div>
-
-      {/* 💰 POT */}
-      <div style={styles.pot}>
+        <br />
         💰 Pot: ₦{pot}
       </div>
-
-      {/* STATUS */}
-      {game.status === "ending" && (
-        <div style={{ color: "gold" }}>
-          ⏳ Paying winner... {game.countdown || 5}
-        </div>
-      )}
-
-      {game.status === "finished" && (
-        <div style={{ color: "lime", fontSize: 18 }}>
-          🏆 YOU WON: Player {game.winner}
-        </div>
-      )}
 
       {/* BOARD */}
       <div style={styles.boardWrapper}>
@@ -343,14 +309,25 @@ export default function SnakeGame({ gameId }) {
         ))}
       </div>
 
-      {/* BUTTON */}
-      <button
-        onClick={playTurn}
-        disabled={moving || rolling || game.status !== "playing"}
-        style={styles.button}
-      >
-        {rolling ? "Rolling..." : "🎲 Roll Dice"}
-      </button>
+      {/* CONTROLS */}
+      <div style={styles.controls}>
+        <div
+          style={{
+            ...styles.dice,
+            transform: rolling ? "rotate(360deg)" : "rotate(0deg)",
+          }}
+        >
+          🎲 {dice}
+        </div>
+
+        <button
+          onClick={playTurn}
+          disabled={moving || rolling || game.status !== "playing"}
+          style={styles.button}
+        >
+          {rolling ? "Rolling..." : "Roll Dice"}
+        </button>
+      </div>
 
       {/* HISTORY */}
       <div style={styles.history}>
@@ -361,6 +338,18 @@ export default function SnakeGame({ gameId }) {
           </div>
         ))}
       </div>
+
+      {game.status === "ending" && (
+        <div style={{ color: "gold" }}>
+          ⏳ Paying winner...
+        </div>
+      )}
+
+      {game.status === "finished" && (
+        <div style={{ color: "lime" }}>
+          🏆 Winner: Player {game.winner}
+        </div>
+      )}
     </div>
   );
 }
@@ -406,10 +395,24 @@ const styles = {
 
   info: { marginBottom: 10 },
 
-  pot: {
-    marginBottom: 10,
-    color: "#facc15",
-    fontWeight: "bold",
+  controls: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 15,
+  },
+
+  dice: {
+    width: 55,
+    height: 55,
+    background: "#1e293b",
+    border: "2px solid gold",
+    borderRadius: 10,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 20,
+    transition: "0.4s",
   },
 
   button: {
