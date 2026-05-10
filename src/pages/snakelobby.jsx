@@ -13,22 +13,40 @@ const WALLET_COLLECTION = "wallets";
 
 const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
 const MAX_PLAYERS = 2;
-const ADMIN_CUT = 0.15;
+const ADMIN_CUT_PERCENT = 0.1;
 
-export default function SnakeLobby({ onEnterGame }) {
+export default function SnakeLobby({ goGame, back }) {
+  const [user, setUser] = useState(null);
+  const [wallet, setWallet] = useState(null);
+
   const [stake, setStake] = useState(200);
   const [rooms, setRooms] = useState([]);
-  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    loadRooms();
-    const t = setInterval(loadRooms, 5000);
-    return () => clearInterval(t);
+    init();
+    const interval = setInterval(loadRooms, 5000);
+    return () => clearInterval(interval);
   }, []);
 
+  async function init() {
+    const u = await account.get();
+    setUser(u);
+
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id), Query.limit(1)]
+    );
+
+    if (w.documents.length) setWallet(w.documents[0]);
+
+    await loadRooms();
+  }
+
   // =========================
-  // LOAD ONLY ACTIVE ROOMS
+  // LOAD ROOMS (ONLY WAITING)
   // =========================
   async function loadRooms() {
     try {
@@ -42,69 +60,70 @@ export default function SnakeLobby({ onEnterGame }) {
 
       setRooms(res.documents);
     } catch (err) {
-      console.log("loadRooms error", err);
+      console.log(err);
     }
   }
 
   // =========================
   // WALLET HELPERS
   // =========================
-  async function getWallet(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", userId)]
-    );
-    return res.documents[0];
-  }
-
-  async function updateWallet(wallet, amount) {
+  async function updateWallet(amount) {
     await databases.updateDocument(
       DATABASE_ID,
       WALLET_COLLECTION,
       wallet.$id,
-      { balance: wallet.balance + amount }
+      {
+        balance: Number(wallet.balance) + amount
+      }
     );
   }
 
-  async function deductWallet(wallet, amount) {
+  async function deductWallet(amount) {
     await databases.updateDocument(
       DATABASE_ID,
       WALLET_COLLECTION,
       wallet.$id,
-      { balance: wallet.balance - amount }
+      {
+        balance: Number(wallet.balance) - amount
+      }
     );
   }
 
   // =========================
-  // CREATE ROOM (HOST)
+  // CREATE ROOM
   // =========================
   async function createRoom() {
     try {
       setLoading(true);
       setMessage("");
 
-      const user = await account.get();
-      const wallet = await getWallet(user.$id);
+      if (!stake || stake < 200) {
+        setMessage("Minimum stake is ₦200");
+        setLoading(false);
+        return;
+      }
 
-      if (!wallet || wallet.balance < stake) {
+      const balance = Number(wallet?.balance || 0);
+      if (balance < stake) {
         setMessage("Insufficient balance");
         setLoading(false);
         return;
       }
 
-      await deductWallet(wallet, stake);
+      const u = await account.get();
+
+      await deductWallet(stake);
 
       await databases.createDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         ID.unique(),
         {
-          hostId: user.$id,
+          hostId: u.$id,
           stake,
           status: "waiting",
-          players: JSON.stringify(["A"]),
-          joinedUsers: JSON.stringify({ A: user.$id }),
+          players: JSON.stringify([u.$id]),
+          joinedUsers: JSON.stringify({ [u.$id]: true }),
           playerCount: 1,
           gameId: ""
         }
@@ -128,17 +147,36 @@ export default function SnakeLobby({ onEnterGame }) {
     try {
       setLoading(true);
 
-      const user = await account.get();
-      const wallet = await getWallet(user.$id);
+      const u = await account.get();
 
-      if (!wallet || wallet.balance < room.stake) {
+      // 🚫 prevent self join
+      if (room.hostId === u.$id) {
+        setMessage("You cannot join your own room");
+        setLoading(false);
+        return;
+      }
+
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        room.$id
+      );
+
+      if (fresh.status !== "waiting") {
+        setMessage("Room already started");
+        setLoading(false);
+        return;
+      }
+
+      const balance = Number(wallet?.balance || 0);
+      if (balance < fresh.stake) {
         setMessage("Insufficient balance");
         setLoading(false);
         return;
       }
 
-      let players = JSON.parse(room.players || "[]");
-      let joinedUsers = JSON.parse(room.joinedUsers || "{}");
+      let players = JSON.parse(fresh.players || "[]");
+      let joinedUsers = JSON.parse(fresh.joinedUsers || "{}");
 
       if (players.length >= MAX_PLAYERS) {
         setMessage("Room full");
@@ -146,20 +184,19 @@ export default function SnakeLobby({ onEnterGame }) {
         return;
       }
 
-      if (joinedUsers[user.$id]) {
+      if (joinedUsers[u.$id]) {
         setMessage("Already joined");
         setLoading(false);
         return;
       }
 
-      await deductWallet(wallet, room.stake);
+      // 💰 deduct ONLY AFTER validation
+      await deductWallet(fresh.stake);
 
-      const next = "B";
+      players.push(u.$id);
+      joinedUsers[u.$id] = true;
 
-      players.push(next);
-      joinedUsers[user.$id] = user.$id;
-
-      const gameReady = players.length === MAX_PLAYERS;
+      const gameStart = players.length === MAX_PLAYERS;
 
       // =========================
       // UPDATE LOBBY FIRST
@@ -167,31 +204,40 @@ export default function SnakeLobby({ onEnterGame }) {
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
-        room.$id,
+        fresh.$id,
         {
           players: JSON.stringify(players),
           joinedUsers: JSON.stringify(joinedUsers),
           playerCount: players.length,
-          status: gameReady ? "finished" : "waiting"
+          status: gameStart ? "matched" : "waiting"
         }
       );
 
       // =========================
-      // START GAME WHEN FULL
+      // START GAME
       // =========================
-      if (gameReady) {
-        const totalPot = room.stake * MAX_PLAYERS;
-        const adminCut = totalPot * ADMIN_CUT;
+      if (gameStart) {
+        const totalPot = fresh.stake * MAX_PLAYERS;
+        const adminCut = totalPot * ADMIN_CUT_PERCENT;
         const gamePot = totalPot - adminCut;
 
-        const adminRes = await databases.listDocuments(
+        const admin = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
-          [Query.equal("userId", ADMIN_USER_ID)]
+          [Query.equal("userId", ADMIN_USER_ID), Query.limit(1)]
         );
 
-        if (adminRes.documents[0]) {
-          await updateWallet(adminRes.documents[0], adminCut);
+        if (admin.documents.length) {
+          const adminWallet = admin.documents[0];
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            adminWallet.$id,
+            {
+              balance: Number(adminWallet.balance) + adminCut
+            }
+          );
         }
 
         const game = await databases.createDocument(
@@ -199,10 +245,10 @@ export default function SnakeLobby({ onEnterGame }) {
           SNAKE_GAME_COLLECTION,
           ID.unique(),
           {
-            lobbyId: room.$id,
+            lobbyId: fresh.$id,
             players: JSON.stringify(players),
-            positions: JSON.stringify({ A: 1, B: 1 }),
-            turn: "A",
+            positions: JSON.stringify({}),
+            turn: players[0],
             status: "playing",
             pot: gamePot,
             winner: "",
@@ -213,21 +259,17 @@ export default function SnakeLobby({ onEnterGame }) {
         await databases.updateDocument(
           DATABASE_ID,
           SNAKE_LOBBY_COLLECTION,
-          room.$id,
+          fresh.$id,
           {
-            gameId: game.$id
+            gameId: game.$id,
+            status: "finished"
           }
         );
 
-        setMessage("Game started!");
-
-        if (onEnterGame) {
-          onEnterGame(game.$id);
-        }
-      } else {
-        setMessage("Joined room. Waiting for opponent...");
+        goGame(game.$id);
       }
 
+      setMessage("Joined successfully");
       loadRooms();
 
     } catch (err) {
@@ -275,7 +317,7 @@ export default function SnakeLobby({ onEnterGame }) {
             <p>Players: {players.length}/{MAX_PLAYERS}</p>
 
             <button onClick={() => joinRoom(r)}>
-              Join / Resume
+              Join
             </button>
           </div>
         );
