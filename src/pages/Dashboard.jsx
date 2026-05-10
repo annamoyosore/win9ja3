@@ -15,14 +15,15 @@ export default function Dashboard({
   goCasino,
   goWallet,
   goTransactions,
-  goSnakeLadder,
   goAdmin,
   logout
 }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
-  const [activeTab, setActiveTab] = useState("games");
   const [loading, setLoading] = useState(true);
+
+  // menu state
+  const [openMenu, setOpenMenu] = useState("games");
 
   useEffect(() => {
     load();
@@ -43,17 +44,21 @@ export default function Dashboard({
         setWallet(res.documents[0]);
       }
     } catch (e) {
-      console.error("Dashboard error:", e);
+      console.error(e);
     } finally {
       setLoading(false);
     }
   }
 
+  function openWhatsApp() {
+    const url = `https://wa.me/18622726355?text=Hello%20Support%2C%20I%20need%20help%20with%20my%20account`;
+    window.open(url, "_blank");
+  }
+
   if (loading) {
     return (
       <div style={styles.loading}>
-        <h2>🎮 Win9ja</h2>
-        <p>Loading...</p>
+        Loading...
       </div>
     );
   }
@@ -61,363 +66,185 @@ export default function Dashboard({
   return (
     <div style={styles.container}>
 
-      {/* ================= HEADER ================= */}
+      {/* HEADER */}
       <div style={styles.header}>
-        <div>
-          <h2 style={{ margin: 0 }}>🎮 Win9ja</h2>
-          <small style={{ opacity: 0.7 }}>
-            Welcome {user?.name || "Player"}
-          </small>
-        </div>
-
-        <div style={styles.balanceBox}>
-          ₦{Number(wallet?.balance || 0).toLocaleString()}
-        </div>
+        <h2 style={styles.title}>🎮 Win9ja Dashboard</h2>
+        <p style={styles.balance}>
+          Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}
+        </p>
       </div>
 
-      {/* ================= CONTENT ================= */}
-      <div style={styles.content}>
+      {/* MENU */}
+      <div style={styles.menu}>
 
-        {/* ================= GAMES ================= */}
-        {activeTab === "games" && (
-          <>
-            <h3 style={styles.sectionTitle}>🔥 Popular Games</h3>
-
-            <div style={styles.scrollRow}>
-
-              <div style={styles.gameCard} onClick={goLobby}>
-                <div style={styles.gameEmoji}>🃏</div>
-                <div>WHOT GAME</div>
-                <small style={styles.small}>Play Multiplayer</small>
-              </div>
-
-              <div style={styles.gameCard} onClick={goCasino}>
-                <div style={styles.gameEmoji}>🎰</div>
-                <div>CASINO</div>
-                <small style={styles.small}>Jackpot Spin</small>
-              </div>
-
-              <div style={styles.gameCard} onClick={goSnakeLadder}>
-                <div style={styles.gameEmoji}>🐍</div>
-                <div>SNAKE & LADDER</div>
-                <small style={styles.small}>Race To Win</small>
-              </div>
-
-            </div>
-          </>
-        )}
-
-        {/* ================= WALLET ================= */}
-        {activeTab === "wallet" && (
-          <>
-            <h3 style={styles.sectionTitle}>💰 Wallet</h3>
-
-            <div style={styles.scrollRow}>
-
-              <div style={styles.walletCard}>
-                <div style={{ fontSize: 14, opacity: 0.7 }}>
-                  AVAILABLE BALANCE
-                </div>
-
-                <h2>
-                  ₦{Number(wallet?.balance || 0).toLocaleString()}
-                </h2>
-              </div>
-
-              <div
-                style={styles.walletCard}
-                onClick={goTransactions}
-              >
-                📊 TRANSACTIONS
-              </div>
-
-              <div
-                style={styles.walletCard}
-                onClick={goWallet}
-              >
-                💼 FUND / WITHDRAW
-              </div>
-
-            </div>
-          </>
-        )}
-
-        {/* ================= SUPPORT ================= */}
-        {activeTab === "support" && (
-          <div style={styles.page}>
-            <h3>💬 Support</h3>
-
-            <p>
-              Need help with deposits, withdrawals or gameplay?
-            </p>
-
-            <p>
-              Contact admin support directly inside the app.
-            </p>
-          </div>
-        )}
-
-        {/* ================= ABOUT ================= */}
-        {activeTab === "about" && (
-          <div style={styles.page}>
-            <h3>ℹ️ About Win9ja</h3>
-
-            <p>
-              Win9ja is a multiplayer gaming platform where
-              users can play games and win rewards instantly.
-            </p>
-          </div>
-        )}
-
-        {/* ================= INSTRUCTIONS ================= */}
-        {activeTab === "instructions" && (
-          <div style={styles.page}>
-            <h3>📘 Instructions</h3>
-
-            <p>1. Select a game</p>
-            <p>2. Join a room</p>
-            <p>3. Play and compete</p>
-            <p>4. Winners receive payouts instantly</p>
-          </div>
-        )}
-
-      </div>
-
-      {/* ================= ADMIN ================= */}
-      {user?.$id === ADMIN_ID && (
+        {/* GAMES */}
         <button
-          style={styles.adminBtn}
-          onClick={goAdmin}
+          style={styles.menuBtn}
+          onClick={() => setOpenMenu(openMenu === "games" ? "" : "games")}
         >
-          🛠 Admin Panel
+          🎮 Games
         </button>
-      )}
 
-      {/* ================= LOGOUT ================= */}
-      <button
-        style={styles.logoutBtn}
-        onClick={logout}
-      >
+        {openMenu === "games" && (
+          <div style={styles.dropdown}>
+            <div style={styles.card} onClick={goLobby}>
+              🎲 Play WHOT
+            </div>
+
+            <div style={styles.card} onClick={goCasino}>
+              🎰 Casino Jackpot
+            </div>
+
+            <div style={styles.card} onClick={() => alert("Snake & Ladder lobby coming soon UI ready")}>
+              🐍 Snake & Ladder
+            </div>
+          </div>
+        )}
+
+        {/* WALLET */}
+        <button
+          style={styles.menuBtn}
+          onClick={() => setOpenMenu(openMenu === "wallet" ? "" : "wallet")}
+        >
+          💰 Wallet
+        </button>
+
+        {openMenu === "wallet" && (
+          <div style={styles.dropdown}>
+            <div style={styles.card} onClick={goWallet}>
+              💳 Fund Wallet
+            </div>
+
+            <div style={styles.card} onClick={goTransactions}>
+              📊 Transactions
+            </div>
+          </div>
+        )}
+
+        {/* SUPPORT */}
+        <button
+          style={styles.menuBtn}
+          onClick={() => setOpenMenu(openMenu === "support" ? "" : "support")}
+        >
+          💬 Support
+        </button>
+
+        {openMenu === "support" && (
+          <div style={styles.dropdown}>
+            <div style={styles.card} onClick={openWhatsApp}>
+              📞 Chat on WhatsApp
+            </div>
+          </div>
+        )}
+
+        {/* ABOUT */}
+        <button style={styles.menuBtn}>
+          ℹ️ About (Coming soon)
+        </button>
+
+        {/* INSTRUCTIONS */}
+        <button style={styles.menuBtn}>
+          📘 Instructions (Coming soon)
+        </button>
+
+        {/* ADMIN */}
+        {user?.$id === ADMIN_ID && (
+          <button style={styles.adminBtn} onClick={goAdmin}>
+            🛠 Admin Panel
+          </button>
+        )}
+      </div>
+
+      {/* LOGOUT (BOTTOM FIXED STYLE) */}
+      <button style={styles.logout} onClick={logout}>
         🚪 Logout
       </button>
-
-      {/* ================= BOTTOM NAV ================= */}
-      <div style={styles.bottomNav}>
-
-        <button
-          style={
-            activeTab === "games"
-              ? styles.navActive
-              : styles.navBtn
-          }
-          onClick={() => setActiveTab("games")}
-        >
-          🎮
-          <span style={styles.navText}>Games</span>
-        </button>
-
-        <button
-          style={
-            activeTab === "wallet"
-              ? styles.navActive
-              : styles.navBtn
-          }
-          onClick={() => setActiveTab("wallet")}
-        >
-          💰
-          <span style={styles.navText}>Wallet</span>
-        </button>
-
-        <button
-          style={
-            activeTab === "support"
-              ? styles.navActive
-              : styles.navBtn
-          }
-          onClick={() => setActiveTab("support")}
-        >
-          💬
-          <span style={styles.navText}>Support</span>
-        </button>
-
-        <button
-          style={
-            activeTab === "about"
-              ? styles.navActive
-              : styles.navBtn
-          }
-          onClick={() => setActiveTab("about")}
-        >
-          ℹ️
-          <span style={styles.navText}>More</span>
-        </button>
-
-      </div>
 
     </div>
   );
 }
 
 // =========================
-// STYLES
+// STYLES (BET9JA STYLE)
 // =========================
 const styles = {
   container: {
     minHeight: "100vh",
     background: "#0b1220",
     color: "white",
-    paddingBottom: 100
+    padding: 15,
+    display: "flex",
+    flexDirection: "column"
   },
 
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 15,
-    background: "#111827",
-    borderBottom: "1px solid #1f2937"
+    marginBottom: 15
   },
 
-  balanceBox: {
-    background: "gold",
-    color: "#000",
-    padding: "8px 12px",
-    borderRadius: 10,
-    fontWeight: "bold",
-    fontSize: 14
+  title: {
+    margin: 0,
+    color: "gold"
   },
 
-  content: {
-    padding: 15
+  balance: {
+    opacity: 0.8
   },
 
-  sectionTitle: {
-    marginBottom: 10
-  },
-
-  scrollRow: {
-    display: "flex",
-    overflowX: "auto",
-    gap: 15,
-    paddingBottom: 10
-  },
-
-  gameCard: {
-    minWidth: 170,
-    height: 150,
-    background: "linear-gradient(145deg,#111827,#1f2937)",
-    borderRadius: 18,
-    padding: 15,
+  menu: {
+    flex: 1,
     display: "flex",
     flexDirection: "column",
-    justifyContent: "center",
-    alignItems: "center",
-    textAlign: "center",
-    cursor: "pointer",
-    color: "gold",
-    fontWeight: "bold",
-    boxShadow: "0 0 12px rgba(0,0,0,0.4)"
+    gap: 10
   },
 
-  gameEmoji: {
-    fontSize: 40,
-    marginBottom: 10
-  },
-
-  small: {
-    marginTop: 5,
-    opacity: 0.7,
-    color: "#fff"
-  },
-
-  walletCard: {
-    minWidth: 170,
+  menuBtn: {
+    padding: 14,
     background: "#111827",
-    borderRadius: 16,
-    padding: 20,
-    cursor: "pointer",
-    boxShadow: "0 0 10px rgba(0,0,0,0.3)"
+    border: "1px solid #1f2937",
+    borderRadius: 10,
+    color: "white",
+    textAlign: "left",
+    fontWeight: "bold"
   },
 
-  page: {
-    background: "#111827",
-    borderRadius: 16,
-    padding: 20,
-    lineHeight: 1.7
+  dropdown: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    paddingLeft: 10
+  },
+
+  card: {
+    background: "#1f2937",
+    padding: 12,
+    borderRadius: 10,
+    cursor: "pointer"
   },
 
   adminBtn: {
-    width: "90%",
-    margin: "15px auto 0",
-    display: "block",
     padding: 14,
-    border: "none",
-    borderRadius: 12,
     background: "purple",
+    border: "none",
+    borderRadius: 10,
     color: "white",
-    fontWeight: "bold"
+    marginTop: 10
   },
 
-  logoutBtn: {
-    width: "90%",
-    margin: "10px auto 0",
-    display: "block",
+  logout: {
     padding: 14,
+    background: "red",
     border: "none",
-    borderRadius: 12,
-    background: "#dc2626",
+    borderRadius: 10,
     color: "white",
-    fontWeight: "bold"
-  },
-
-  bottomNav: {
-    position: "fixed",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    background: "#111827",
-    display: "flex",
-    justifyContent: "space-around",
-    alignItems: "center",
-    padding: "10px 0",
-    borderTop: "1px solid #1f2937"
-  },
-
-  navBtn: {
-    background: "transparent",
-    border: "none",
-    color: "white",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    fontSize: 20
-  },
-
-  navActive: {
-    background: "gold",
-    border: "none",
-    color: "black",
-    borderRadius: 12,
-    padding: "8px 14px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    fontSize: 20,
-    fontWeight: "bold"
-  },
-
-  navText: {
-    fontSize: 11,
-    marginTop: 2
+    marginTop: 20
   },
 
   loading: {
     minHeight: "100vh",
-    background: "#0b1220",
-    color: "white",
     display: "flex",
-    flexDirection: "column",
     justifyContent: "center",
-    alignItems: "center"
+    alignItems: "center",
+    color: "white",
+    background: "#0b1220"
   }
 };
