@@ -38,7 +38,7 @@ export default function SnakeLobby({ goGame, back }) {
       [{ method: "equal", attribute: "userId", values: [u.$id] }]
     );
 
-    if (w.documents.length) setWallet(w.documents[0]);
+    if (w.documents?.length) setWallet(w.documents[0]);
 
     await loadAll();
   }
@@ -62,7 +62,7 @@ export default function SnakeLobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD ROOMS
+  // LOAD ROOMS (FIXED VISIBILITY)
   // =========================
   async function loadRooms() {
     const res = await databases.listDocuments(
@@ -70,11 +70,23 @@ export default function SnakeLobby({ goGame, back }) {
       SNAKE_LOBBY_COLLECTION
     );
 
-    setRooms(res.documents || []);
+    const filtered = (res.documents || []).filter((r) => {
+      const players = safeJSON(r.players, []);
+
+      // ✅ ONLY:
+      // - public waiting rooms
+      // - OR rooms user is inside
+      return (
+        r.status === "waiting" ||
+        players.includes(user?.$id)
+      );
+    });
+
+    setRooms(filtered);
   }
 
   // =========================
-  // LOAD USER GAMES
+  // LOAD GAMES (PRIVATE ONLY)
   // =========================
   async function loadGames() {
     const res = await databases.listDocuments(
@@ -84,7 +96,11 @@ export default function SnakeLobby({ goGame, back }) {
 
     const mine = (res.documents || []).filter((g) => {
       const players = safeJSON(g.players, []);
-      return players.includes(user?.$id);
+
+      return (
+        g.status !== "finished" &&
+        players.includes(user?.$id)
+      );
     });
 
     setGames(mine);
@@ -194,7 +210,7 @@ export default function SnakeLobby({ goGame, back }) {
 
       <p style={{ color: "yellow" }}>{msg}</p>
 
-      {/* CREATE ROOM */}
+      {/* CREATE */}
       <div style={styles.card}>
         <input
           type="number"
@@ -208,8 +224,8 @@ export default function SnakeLobby({ goGame, back }) {
         </button>
       </div>
 
-      {/* ACTIVE GAMES (RESUME ALWAYS WORKS) */}
-      <h3>🎮 Active Games</h3>
+      {/* ACTIVE GAMES (PRIVATE) */}
+      <h3>🎮 Your Active Games</h3>
 
       {games.map((g) => (
         <div key={g.$id} style={styles.room}>
@@ -219,7 +235,7 @@ export default function SnakeLobby({ goGame, back }) {
             style={styles.resumeBtn}
             onClick={() => goGame?.(g.$id)}
           >
-            ▶ Resume Game
+            ▶ Resume
           </button>
         </div>
       ))}
