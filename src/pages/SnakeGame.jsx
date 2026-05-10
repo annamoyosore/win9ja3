@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   databases,
   DATABASE_ID
-} from "./lib/appwrite";
+} from "../lib/appwrite"; // ✅ FIXED PATH
 
 import boardImg from "./board.png";
 
@@ -30,7 +30,7 @@ const ladders = {
   71: 92,
 };
 
-// 🎯 board position calc
+// 🎯 BOARD POSITION CALC
 function getCoords(pos) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
@@ -58,7 +58,7 @@ export default function SnakeGame({ gameId }) {
   const [rolling, setRolling] = useState(false);
   const [dice, setDice] = useState(1);
 
-  // 📡 Load game from backend
+  // 📡 LOAD GAME
   useEffect(() => {
     async function loadGame() {
       const res = await databases.getDocument(
@@ -106,7 +106,7 @@ export default function SnakeGame({ gameId }) {
 
     const player = game.turn;
 
-    // 🎲 dice spin animation
+    // 🎲 ANIMATION
     let spin = 0;
     const interval = setInterval(() => {
       setDice(Math.floor(Math.random() * 6) + 1);
@@ -127,7 +127,6 @@ export default function SnakeGame({ gameId }) {
       [player]: newPos,
     };
 
-    // 🏁 ranking system
     let ranking = game.ranking || [];
 
     if (!ranking.includes(player) && newPos >= SIZE) {
@@ -136,7 +135,6 @@ export default function SnakeGame({ gameId }) {
 
     const winner = ranking[0] || "";
 
-    // 📜 HISTORY (keep only last 12 moves)
     let history = game.history || [];
 
     history = [
@@ -150,7 +148,6 @@ export default function SnakeGame({ gameId }) {
       ...history,
     ].slice(0, 12);
 
-    // 💾 UPDATE BACKEND
     await databases.updateDocument(
       DATABASE_ID,
       GAME_COLLECTION,
@@ -213,7 +210,6 @@ export default function SnakeGame({ gameId }) {
         </div>
       )}
 
-      {/* 📜 LAST 12 MOVES */}
       <div style={styles.history}>
         <h4>Last Moves</h4>
         {(game.history || []).map((h, i) => (
