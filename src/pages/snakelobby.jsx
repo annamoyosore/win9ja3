@@ -15,12 +15,16 @@ const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
 const MAX_PLAYERS = 2;
 const ADMIN_CUT_PERCENT = 0.1;
 
+// 🔥 max active games per user
+const MAX_ACTIVE_GAMES = 5;
+
 export default function SnakeLobby({ goGame, back }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
   const [stake, setStake] = useState(200);
   const [rooms, setRooms] = useState([]);
+  const [activeGames, setActiveGames] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -43,10 +47,35 @@ export default function SnakeLobby({ goGame, back }) {
     if (w.documents.length) setWallet(w.documents[0]);
 
     await loadRooms();
+    await loadActiveGames(u.$id);
   }
 
   // =========================
-  // LOAD ROOMS (ONLY WAITING)
+  // ACTIVE GAMES LIMIT CHECK
+  // =========================
+  async function loadActiveGames(userId) {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      SNAKE_GAME_COLLECTION,
+      [
+        Query.limit(100)
+      ]
+    );
+
+    const mine = res.documents.filter(g =>
+      g.players?.includes(userId) &&
+      g.status !== "finished"
+    );
+
+    setActiveGames(mine);
+  }
+
+  function canPlayMore() {
+    return activeGames.length < MAX_ACTIVE_GAMES;
+  }
+
+  // =========================
+  // LOAD ROOMS
   // =========================
   async function loadRooms() {
     try {
@@ -54,7 +83,8 @@ export default function SnakeLobby({ goGame, back }) {
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         [
-          Query.equal("status", "waiting")
+          Query.equal("status", "waiting"),
+          Query.limit(50)
         ]
       );
 
@@ -67,17 +97,6 @@ export default function SnakeLobby({ goGame, back }) {
   // =========================
   // WALLET HELPERS
   // =========================
-  async function updateWallet(amount) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      {
-        balance: Number(wallet.balance) + amount
-      }
-    );
-  }
-
   async function deductWallet(amount) {
     await databases.updateDocument(
       DATABASE_ID,
@@ -97,20 +116,25 @@ export default function SnakeLobby({ goGame, back }) {
       setLoading(true);
       setMessage("");
 
+      const u = await account.get();
+
+      if (!canPlayMore()) {
+        setMessage("Finish your current games first (Max 5)");
+        setLoading(false);
+        return;
+      }
+
       if (!stake || stake < 200) {
         setMessage("Minimum stake is ₦200");
         setLoading(false);
         return;
       }
 
-      const balance = Number(wallet?.balance || 0);
-      if (balance < stake) {
+      if (Number(wallet?.balance || 0) < stake) {
         setMessage("Insufficient balance");
         setLoading(false);
         return;
       }
-
-      const u = await account.get();
 
       await deductWallet(stake);
 
@@ -125,11 +149,12 @@ export default function SnakeLobby({ goGame, back }) {
           players: JSON.stringify([u.$id]),
           joinedUsers: JSON.stringify({ [u.$id]: true }),
           playerCount: 1,
-          gameId: ""
+          gameId: "",
+          createdAt: new Date().toISOString()
         }
       );
 
-      setMessage("Room created. Waiting for opponent...");
+      setMessage("Room created");
       loadRooms();
 
     } catch (err) {
@@ -149,7 +174,12 @@ export default function SnakeLobby({ goGame, back }) {
 
       const u = await account.get();
 
-      // 🚫 prevent self join
+      if (!canPlayMore()) {
+        setMessage("Finish current games first (Max 5)");
+        setLoading(false);
+        return;
+      }
+
       if (room.hostId === u.$id) {
         setMessage("You cannot join your own room");
         setLoading(false);
@@ -168,8 +198,7 @@ export default function SnakeLobby({ goGame, back }) {
         return;
       }
 
-      const balance = Number(wallet?.balance || 0);
-      if (balance < fresh.stake) {
+      if (Number(wallet?.balance || 0) < fresh.stake) {
         setMessage("Insufficient balance");
         setLoading(false);
         return;
@@ -178,19 +207,18 @@ export default function SnakeLobby({ goGame, back }) {
       let players = JSON.parse(fresh.players || "[]");
       let joinedUsers = JSON.parse(fresh.joinedUsers || "{}");
 
+      if (players.includes(u.$id)) {
+        setMessage("Already joined");
+        setLoading(false);
+        return;
+      }
+
       if (players.length >= MAX_PLAYERS) {
         setMessage("Room full");
         setLoading(false);
         return;
       }
 
-      if (joinedUsers[u.$id]) {
-        setMessage("Already joined");
-        setLoading(false);
-        return;
-      }
-
-      // 💰 deduct ONLY AFTER validation
       await deductWallet(fresh.stake);
 
       players.push(u.$id);
@@ -198,9 +226,6 @@ export default function SnakeLobby({ goGame, back }) {
 
       const gameStart = players.length === MAX_PLAYERS;
 
-      // =========================
-      // UPDATE LOBBY FIRST
-      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -213,9 +238,6 @@ export default function SnakeLobby({ goGame, back }) {
         }
       );
 
-      // =========================
-      // START GAME
-      // =========================
       if (gameStart) {
         const totalPot = fresh.stake * MAX_PLAYERS;
         const adminCut = totalPot * ADMIN_CUT_PERCENT;
@@ -262,7 +284,7 @@ export default function SnakeLobby({ goGame, back }) {
           fresh.$id,
           {
             gameId: game.$id,
-            status: "finished"
+            status: "playing"
           }
         );
 
@@ -271,6 +293,7 @@ export default function SnakeLobby({ goGame, back }) {
 
       setMessage("Joined successfully");
       loadRooms();
+      loadActiveGames(u.$id);
 
     } catch (err) {
       console.log(err);
@@ -286,6 +309,8 @@ export default function SnakeLobby({ goGame, back }) {
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Lobby</h2>
+
+      <p>Active Games: {activeGames.length}/5</p>
 
       <div style={styles.card}>
         <input
@@ -308,6 +333,8 @@ export default function SnakeLobby({ goGame, back }) {
 
       <h3>Available Rooms</h3>
 
+      {rooms.length === 0 && <p>No rooms available</p>}
+
       {rooms.map((r) => {
         const players = JSON.parse(r.players || "[]");
 
@@ -326,8 +353,6 @@ export default function SnakeLobby({ goGame, back }) {
   );
 }
 
-// =========================
-// STYLES
 // =========================
 const styles = {
   container: {
