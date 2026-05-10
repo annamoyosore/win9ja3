@@ -26,6 +26,8 @@ export const MATCH_COLLECTION = "matches";
 export const GAME_COLLECTION = "games";
 export const CASINO_COLLECTION = "casino_spins";
 export const PROMO_COLLECTION = "promocodes";
+export const LOBBY_COLLECTION = "snakelobby";
+export const GAME_COLLECTION = "snakegame";
 // =========================
 // EXPORT HELPERS
 // =========================
