@@ -11,7 +11,7 @@ const LOBBY_COLLECTION = "snakelobby";
 const GAME_COLLECTION = "snakegame";
 const WALLET_COLLECTION = "wallets";
 
-const ADMIN_USER_ID = "YOUR_ADMIN_USER_ID_HERE";
+const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
 
 export default function SnakeLobby({ onEnterGame }) {
   const [loading, setLoading] = useState(false);
