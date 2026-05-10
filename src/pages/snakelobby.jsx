@@ -6,25 +6,25 @@ import {
   ID
 } from "../lib/appwrite";
 
-const SNAKE_LOBBY_COLLECTION = "snakelobby";
-const SNAKE_GAME_COLLECTION = "snakegame";
+const GAME_COLLECTION = "snakegame";
 const WALLET_COLLECTION = "wallets";
 
-const MAX_PLAYERS = 2;
 const MAX_ACTIVE = 5;
+const MAX_PLAYERS = 2;
 
 export default function SnakeLobby({ goGame, back }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
-  const [rooms, setRooms] = useState([]);
   const [games, setGames] = useState([]);
+  const [activeGame, setActiveGame] = useState(null);
+
   const [stake, setStake] = useState(200);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
     init();
-    const t = setInterval(loadAll, 5000);
+    const t = setInterval(loadGames, 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -40,84 +40,57 @@ export default function SnakeLobby({ goGame, back }) {
 
     if (w.documents?.length) setWallet(w.documents[0]);
 
-    await loadAll();
-  }
-
-  async function loadAll() {
-    await loadRooms();
     await loadGames();
   }
 
   // =========================
   // SAFE PARSER
   // =========================
-  function safeJSON(data, fallback) {
+  function safeJSON(d, fb) {
     try {
-      if (!data) return fallback;
-      if (typeof data === "object") return data;
-      return JSON.parse(data);
+      if (!d) return fb;
+      if (typeof d === "object") return d;
+      return JSON.parse(d);
     } catch {
-      return fallback;
+      return fb;
     }
   }
 
   // =========================
-  // LOAD ROOMS (FIXED VISIBILITY)
-  // =========================
-  async function loadRooms() {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      SNAKE_LOBBY_COLLECTION
-    );
-
-    const filtered = (res.documents || []).filter((r) => {
-      const players = safeJSON(r.players, []);
-
-      // ✅ ONLY:
-      // - public waiting rooms
-      // - OR rooms user is inside
-      return (
-        r.status === "waiting" ||
-        players.includes(user?.$id)
-      );
-    });
-
-    setRooms(filtered);
-  }
-
-  // =========================
-  // LOAD GAMES (PRIVATE ONLY)
+  // LOAD GAMES (ONLY USER-RELATED)
   // =========================
   async function loadGames() {
     const res = await databases.listDocuments(
       DATABASE_ID,
-      SNAKE_GAME_COLLECTION
+      GAME_COLLECTION
     );
 
     const mine = (res.documents || []).filter((g) => {
       const players = safeJSON(g.players, []);
 
-      return (
-        g.status !== "finished" &&
-        players.includes(user?.$id)
-      );
+      return players.includes(user?.$id);
     });
 
     setGames(mine);
+
+    // 👇 find running game
+    const running = mine.find((g) => g.status !== "finished");
+    setActiveGame(running || null);
   }
 
   // =========================
   // LIMIT CHECK
   // =========================
   function canPlayMore() {
-    return games.filter((g) => g.status !== "finished").length < MAX_ACTIVE;
+    const running = games.filter((g) => g.status !== "finished");
+    return running.length < MAX_ACTIVE;
   }
 
   // =========================
-  // CREATE ROOM
+  // CREATE GAME
   // =========================
-  async function createRoom() {
-    if (!canPlayMore()) return setMsg("Finish games first (max 5)");
+  async function createGame() {
+    if (!canPlayMore()) return setMsg("Finish a game first (max 5)");
 
     if (wallet.balance < stake) return setMsg("Insufficient balance");
 
@@ -125,50 +98,47 @@ export default function SnakeLobby({ goGame, back }) {
 
     await databases.createDocument(
       DATABASE_ID,
-      SNAKE_LOBBY_COLLECTION,
+      GAME_COLLECTION,
       ID.unique(),
       {
         hostId: u.$id,
         stake,
         players: JSON.stringify([u.$id]),
-        joinedUsers: JSON.stringify({ [u.$id]: true }),
-        playerCount: 1,
+        positions: JSON.stringify({ A: 1, B: 1 }),
+        turn: "A",
         status: "waiting",
-        gameId: ""
+        winner: ""
       }
     );
 
-    setMsg("Room created");
-    loadAll();
+    setMsg("Game created");
+    loadGames();
   }
 
   // =========================
-  // JOIN ROOM
+  // JOIN GAME
   // =========================
-  async function joinRoom(room) {
-    if (!canPlayMore()) return setMsg("Finish a game first");
-
+  async function joinGame(game) {
     const u = await account.get();
+
+    if (game.hostId === u.$id) {
+      return setMsg("You cannot join your own game");
+    }
 
     const fresh = await databases.getDocument(
       DATABASE_ID,
-      SNAKE_LOBBY_COLLECTION,
-      room.$id
+      GAME_COLLECTION,
+      game.$id
     );
 
     const players = safeJSON(fresh.players, []);
-    const joinedUsers = safeJSON(fresh.joinedUsers, {});
-
-    if (fresh.hostId === u.$id) {
-      return setMsg("Cannot join your own room");
-    }
 
     if (players.includes(u.$id)) {
-      return setMsg("Already joined");
+      return goGame?.(fresh.$id);
     }
 
     if (players.length >= MAX_PLAYERS) {
-      return setMsg("Room full");
+      return setMsg("Game full");
     }
 
     if (wallet.balance < fresh.stake) {
@@ -176,29 +146,18 @@ export default function SnakeLobby({ goGame, back }) {
     }
 
     players.push(u.$id);
-    joinedUsers[u.$id] = true;
-
-    const gameStart = players.length === MAX_PLAYERS;
 
     await databases.updateDocument(
       DATABASE_ID,
-      SNAKE_LOBBY_COLLECTION,
+      GAME_COLLECTION,
       fresh.$id,
       {
         players: JSON.stringify(players),
-        joinedUsers: JSON.stringify(joinedUsers),
-        playerCount: players.length,
-        status: gameStart ? "playing" : "waiting"
+        status: players.length === 2 ? "playing" : "waiting"
       }
     );
 
-    setMsg("Joined successfully");
-
-    if (fresh.gameId) {
-      goGame?.(fresh.gameId);
-    }
-
-    loadAll();
+    goGame?.(fresh.$id);
   }
 
   // =========================
@@ -219,57 +178,45 @@ export default function SnakeLobby({ goGame, back }) {
           style={styles.input}
         />
 
-        <button onClick={createRoom} style={styles.createBtn}>
-          Create Room
+        <button onClick={createGame} style={styles.createBtn}>
+          Create Game
         </button>
       </div>
 
-      {/* ACTIVE GAMES (PRIVATE) */}
-      <h3>🎮 Your Active Games</h3>
-
-      {games.map((g) => (
-        <div key={g.$id} style={styles.room}>
-          <p>Status: {g.status}</p>
+      {/* MY RUNNING GAME (ONLY USER CAN SEE) */}
+      {activeGame && (
+        <div style={styles.active}>
+          <h3>🔥 Your Running Game</h3>
+          <p>Status: {activeGame.status}</p>
 
           <button
             style={styles.resumeBtn}
-            onClick={() => goGame?.(g.$id)}
+            onClick={() => goGame?.(activeGame.$id)}
           >
-            ▶ Resume
+            ▶ Resume Game
           </button>
         </div>
-      ))}
+      )}
 
-      {/* ROOMS */}
-      <h3>Available Rooms</h3>
+      {/* AVAILABLE GAMES */}
+      <h3>🎮 Available Games</h3>
 
-      {rooms.map((r) => {
-        const players = safeJSON(r.players, []);
-        const joined = players.includes(user?.$id);
-        const hasGame = !!r.gameId;
+      {games
+        .filter((g) => g.status === "waiting")
+        .map((g) => {
+          const players = safeJSON(g.players, []);
 
-        const showResume = joined || hasGame;
+          return (
+            <div key={g.$id} style={styles.room}>
+              <p>Stake ₦{g.stake}</p>
+              <p>Players: {players.length}/{MAX_PLAYERS}</p>
 
-        return (
-          <div key={r.$id} style={styles.room}>
-            <p>Stake ₦{r.stake}</p>
-            <p>Players: {players.length}/{MAX_PLAYERS}</p>
-
-            {showResume ? (
-              <button
-                style={styles.resumeBtn}
-                onClick={() => goGame?.(r.gameId)}
-              >
-                ▶ Resume
+              <button onClick={() => joinGame(g)}>
+                Join Game
               </button>
-            ) : (
-              <button onClick={() => joinRoom(r)}>
-                Join
-              </button>
-            )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
 
       <button onClick={back}>Back</button>
     </div>
@@ -286,15 +233,18 @@ const styles = {
     color: "white",
     minHeight: "100vh"
   },
+
   card: {
     background: "#1e293b",
     padding: 15,
     borderRadius: 10
   },
+
   input: {
     width: "100%",
     padding: 10
   },
+
   createBtn: {
     background: "orange",
     padding: 10,
@@ -302,12 +252,21 @@ const styles = {
     marginTop: 10,
     fontWeight: "bold"
   },
+
   room: {
     background: "#111827",
     padding: 10,
     marginTop: 10,
     borderRadius: 10
   },
+
+  active: {
+    background: "#065f46",
+    padding: 15,
+    marginTop: 15,
+    borderRadius: 10
+  },
+
   resumeBtn: {
     background: "#22c55e",
     padding: 10,
