@@ -16,13 +16,13 @@ export default function Dashboard({
   goWallet,
   goTransactions,
   goAdmin,
+  goSnakeLobby, // ✅ ADDED (IMPORTANT FIX)
   logout
 }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // menu state
   const [openMenu, setOpenMenu] = useState("games");
 
   useEffect(() => {
@@ -95,7 +95,8 @@ export default function Dashboard({
               🎰 Casino Jackpot
             </div>
 
-            <div style={styles.card} onClick={() => alert("Snake & Ladder lobby coming soon UI ready")}>
+            {/* ✅ FIXED SNAKE NAVIGATION */}
+            <div style={styles.card} onClick={goSnakeLobby}>
               🐍 Snake & Ladder
             </div>
           </div>
@@ -137,12 +138,12 @@ export default function Dashboard({
           </div>
         )}
 
-        {/* ABOUT */}
+        {/* ABOUT THIS APP*/}
         <button style={styles.menuBtn}>
           ℹ️ About (Coming soon)
         </button>
 
-        {/* INSTRUCTIONS */}
+        {/* GAME  INSTRUCTIONS */}
         <button style={styles.menuBtn}>
           📘 Instructions (Coming soon)
         </button>
@@ -155,7 +156,7 @@ export default function Dashboard({
         )}
       </div>
 
-      {/* LOGOUT (BOTTOM FIXED STYLE) */}
+      {/* LOGOUT */}
       <button style={styles.logout} onClick={logout}>
         🚪 Logout
       </button>
@@ -165,7 +166,7 @@ export default function Dashboard({
 }
 
 // =========================
-// STYLES (BET9JA STYLE)
+// STYLES
 // =========================
 const styles = {
   container: {
