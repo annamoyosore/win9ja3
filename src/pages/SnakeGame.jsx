@@ -57,15 +57,24 @@ function rollDice() {
   return Math.floor(Math.random() * 6) + 1;
 }
 
+function keepLast6(arr, value) {
+  return [...(arr || []), value].slice(-6);
+}
+
 // =========================
-// MAIN GAME
+// GAME COMPONENT
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
   const [positions, setPositions] = useState({ A: 1, B: 1 });
+  const [history, setHistory] = useState([]);
   const [turn, setTurn] = useState("A");
   const [dice, setDice] = useState(1);
   const [moving, setMoving] = useState(false);
+  const [error, setError] = useState("");
+
+  // 💰 POT DISPLAY
+  const pot = Number(game?.pot || 0);
 
   // =========================
   // LOAD GAME
@@ -83,44 +92,41 @@ export default function SnakeGame({ gameId }) {
     );
 
     const parsedPos = safeParse(res.positions, { A: 1, B: 1 });
+    const parsedHist = safeParse(res.history, []);
 
     setGame(res);
     setPositions(parsedPos);
+    setHistory(parsedHist.slice(-6));
     setTurn(res.turn || "A");
   }
 
   // =========================
-  // EFFECTS (SNAKE / LADDER)
+  // EFFECTS
   // =========================
   function applyEffects(pos) {
-    let current = pos;
-
-    while (snakes[current] || ladders[current]) {
-      if (snakes[current]) current = snakes[current];
-      if (ladders[current]) current = ladders[current];
-    }
-
-    return current;
+    if (snakes[pos]) return snakes[pos];
+    if (ladders[pos]) return ladders[pos];
+    return pos;
   }
 
   // =========================
-  // MAIN TURN LOGIC (FIXED SECURITY + SYNC)
+  // TURN SYSTEM
   // =========================
   async function playTurn() {
     if (!game || moving || game.status === "finished") return;
 
+    setError("");
     setMoving(true);
 
-    // 🔥 ALWAYS FETCH LATEST GAME (CRITICAL FIX)
     const fresh = await databases.getDocument(
       DATABASE_ID,
       GAME,
       gameId
     );
 
-    // 🔒 TURN VALIDATION (NO CHEATING)
     if (fresh.turn !== turn) {
-      alert("Not your turn");
+      setError("🚫 Not your turn");
+      setTimeout(() => setError(""), 2000);
       setMoving(false);
       return;
     }
@@ -131,7 +137,6 @@ export default function SnakeGame({ gameId }) {
 
     let current = safeParse(fresh.positions, { A: 1, B: 1 })[player];
 
-    // 🎮 ANIMATE MOVEMENT FIRST
     for (let i = 0; i < diceValue; i++) {
       await sleep(120);
       current += 1;
@@ -143,7 +148,6 @@ export default function SnakeGame({ gameId }) {
       }));
     }
 
-    // 🐍 APPLY SNAKES/LADDERS
     const finalPos = applyEffects(current);
 
     const updatedPositions = {
@@ -151,15 +155,25 @@ export default function SnakeGame({ gameId }) {
       [player]: finalPos,
     };
 
-    // 🏁 CHECK WINNER
-    const winner = finalPos >= SIZE ? player : "";
+    const moveEntry = {
+      player: player === "A" ? "Player A" : "Player B",
+      dice: diceValue,
+      from: current,
+      to: finalPos,
+    };
 
+    const updatedHistory = keepLast6(
+      safeParse(fresh.history, []),
+      moveEntry
+    );
+
+    const winner = finalPos >= SIZE ? player : "";
     const nextTurn = player === "A" ? "B" : "A";
 
-    // 💾 SAVE TO BACKEND (SOURCE OF TRUTH)
     const updatedGame = {
       ...fresh,
       positions: JSON.stringify(updatedPositions),
+      history: JSON.stringify(updatedHistory),
       turn: nextTurn,
       status: winner ? "finished" : "playing",
       winner,
@@ -172,28 +186,23 @@ export default function SnakeGame({ gameId }) {
       updatedGame
     );
 
-    // 🔄 UPDATE LOCAL STATE
     setGame(updatedGame);
     setPositions(updatedPositions);
+    setHistory(updatedHistory);
     setTurn(nextTurn);
 
     setMoving(false);
   }
 
-  // =========================
-  // GET POSITION
-  // =========================
   const getPos = (p) => positions[p] || 1;
 
-  // =========================
-  // UI
-  // =========================
   if (!game) return <div style={{ color: "white" }}>Loading...</div>;
 
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
+      {/* TURN + DICE */}
       <div style={styles.info}>
         🎲 Dice: {dice} <br />
         Turn:{" "}
@@ -202,6 +211,16 @@ export default function SnakeGame({ gameId }) {
         </b>
       </div>
 
+      {/* 💰 POT DISPLAY */}
+      <div style={styles.potBox}>
+        💰 Pot: ₦{pot.toLocaleString()} <br />
+        🏆 Winner Gets: ₦{pot.toLocaleString()}
+      </div>
+
+      {/* ERROR */}
+      {error && <div style={styles.popup}>{error}</div>}
+
+      {/* BOARD */}
       <div style={styles.boardWrapper}>
         <img src={boardImg} style={styles.board} />
 
@@ -219,19 +238,34 @@ export default function SnakeGame({ gameId }) {
         ))}
       </div>
 
+      {/* BUTTON */}
       <button
         onClick={playTurn}
-        disabled={moving || game.status === "finished"}
-        style={styles.button}
+        disabled={moving || game.status === "finished" || game.turn !== turn}
+        style={{
+          ...styles.button,
+          opacity: moving || game.turn !== turn ? 0.5 : 1,
+        }}
       >
-        🎲 Roll Dice
+        {game.turn !== turn ? "🚫 Not Your Turn" : "🎲 Roll Dice"}
       </button>
 
+      {/* WINNER */}
       {game.winner && (
         <h3 style={{ color: "gold" }}>
           🏆 Winner: Player {game.winner}
         </h3>
       )}
+
+      {/* HISTORY */}
+      <div style={styles.history}>
+        <h4>Last 6 Moves</h4>
+        {history.map((h, i) => (
+          <div key={i}>
+            {h.player} 🎲{h.dice}: {h.from} → {h.to}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -247,16 +281,19 @@ const styles = {
     minHeight: "100vh",
     padding: 20,
   },
+
   boardWrapper: {
     position: "relative",
     width: 360,
     height: 360,
     margin: "20px auto",
   },
+
   board: {
     width: "100%",
     height: "100%",
   },
+
   token: {
     position: "absolute",
     width: 28,
@@ -271,9 +308,24 @@ const styles = {
     transform: "translate(-50%, -50%)",
     transition: "0.25s linear",
   },
+
   info: {
     marginBottom: 10,
   },
+
+  potBox: {
+    marginTop: 10,
+    marginBottom: 10,
+    padding: 10,
+    background: "#1e293b",
+    borderRadius: 10,
+    fontWeight: "bold",
+    color: "#facc15",
+    width: 260,
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+
   button: {
     padding: 12,
     borderRadius: 10,
@@ -281,5 +333,27 @@ const styles = {
     border: "none",
     fontWeight: "bold",
     cursor: "pointer",
+  },
+
+  history: {
+    marginTop: 15,
+    background: "#111827",
+    padding: 10,
+    borderRadius: 10,
+    maxWidth: 320,
+    margin: "10px auto",
+    textAlign: "left",
+  },
+
+  popup: {
+    position: "fixed",
+    top: 20,
+    left: "50%",
+    transform: "translateX(-50%)",
+    background: "#ef4444",
+    padding: "10px 20px",
+    borderRadius: 10,
+    fontWeight: "bold",
+    zIndex: 9999,
   },
 };
