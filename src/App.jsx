@@ -25,7 +25,7 @@ import AdminDashboard from "./pages/aaa";
 // CASINO
 import CasinoWheel from "./pages/CasinoWheel";
 
-// 🐍 SNAKE GAME SYSTEM
+// 🐍 SNAKE
 import SnakeLobby from "./pages/snakelobby";
 import SnakeGame from "./pages/SnakeGame";
 
@@ -72,7 +72,6 @@ function useUser() {
 // =========================
 function ProtectedRoute({ children }) {
   const { loading, authed } = useAuth();
-
   if (loading) return <p style={{ color: "white" }}>Loading...</p>;
   return authed ? children : <Navigate to="/auth" replace />;
 }
@@ -155,8 +154,8 @@ function AppRoutes() {
               goTransactions={() => navigate("/transactions")}
               goCasino={() => navigate("/casino")}
 
-              // 🐍 FIXED: now goes to snake lobby
-              goSnakeLadder={() => navigate("/snake-lobby")}
+              // ✅ FIXED SNAKE NAVIGATION
+              goSnakeLobby={() => navigate("/snake-lobby")}
 
               goAdmin={() => navigate("/admin")}
               logout={async () => {
@@ -204,7 +203,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Lobby
-              goGame={(id, stake) => navigate(`/game/${id}/${stake}`)}
+              goGame={(id, stake) =>
+                navigate(`/game/${id}/${stake}`)
+              }
               back={() => navigate("/dashboard")}
             />
           </ProtectedRoute>
@@ -227,6 +228,7 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SnakeLobby
+              // ✅ THIS FIX IS IMPORTANT
               goGame={(gameId) =>
                 navigate(`/snake-game/${gameId}`)
               }
