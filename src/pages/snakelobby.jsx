@@ -2,387 +2,207 @@ import { useEffect, useState } from "react";
 import {
   account,
   databases,
-  DATABASE_ID,
-  ID,
-  Query
+  DATABASE_ID
 } from "../lib/appwrite";
 
-const SNAKE_LOBBY_COLLECTION = "snakelobby";
+import boardImg from "./board.png";
+
 const SNAKE_GAME_COLLECTION = "snakegame";
-const WALLET_COLLECTION = "wallets";
+const SIZE = 100;
 
-const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
-const MAX_PLAYERS = 2;
-const ADMIN_CUT_PERCENT = 0.1;
+// =========================
+// HELPERS
+// =========================
+function safeParse(data, fallback) {
+  if (!data) return fallback;
+  if (typeof data === "object") return data;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return fallback;
+  }
+}
 
-// 🔥 max active games per user
-const MAX_ACTIVE_GAMES = 5;
+function getCoords(pos = 1) {
+  const index = pos - 1;
+  const row = Math.floor(index / 10);
+  let col = index % 10;
 
-export default function SnakeLobby({ goGame, back }) {
+  if (row % 2 === 1) col = 9 - col;
+
+  return {
+    left: `${col * 10 + 5}%`,
+    top: `${(9 - row) * 10 + 5}%`
+  };
+}
+
+// =========================
+// MAIN GAME
+// =========================
+export default function SnakeGame({ gameId }) {
+  const [game, setGame] = useState(null);
   const [user, setUser] = useState(null);
-  const [wallet, setWallet] = useState(null);
-
-  const [stake, setStake] = useState(200);
-  const [rooms, setRooms] = useState([]);
-  const [activeGames, setActiveGames] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
     init();
-    const interval = setInterval(loadRooms, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  }, [gameId]);
 
   async function init() {
     const u = await account.get();
     setUser(u);
 
-    const w = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", u.$id), Query.limit(1)]
-    );
-
-    if (w.documents.length) setWallet(w.documents[0]);
-
-    await loadRooms();
-    await loadActiveGames(u.$id);
-  }
-
-  // =========================
-  // ACTIVE GAMES LIMIT CHECK
-  // =========================
-  async function loadActiveGames(userId) {
-    const res = await databases.listDocuments(
+    const res = await databases.getDocument(
       DATABASE_ID,
       SNAKE_GAME_COLLECTION,
-      [
-        Query.limit(100)
-      ]
+      gameId
     );
 
-    const mine = res.documents.filter(g =>
-      g.players?.includes(userId) &&
-      g.status !== "finished"
-    );
-
-    setActiveGames(mine);
-  }
-
-  function canPlayMore() {
-    return activeGames.length < MAX_ACTIVE_GAMES;
+    setGame(res);
   }
 
   // =========================
-  // LOAD ROOMS
+  // TURN LABEL LOGIC
   // =========================
-  async function loadRooms() {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        [
-          Query.equal("status", "waiting"),
-          Query.limit(50)
-        ]
-      );
+  function getPlayerRole() {
+    if (!game || !user) return null;
 
-      setRooms(res.documents);
-    } catch (err) {
-      console.log(err);
-    }
+    const players = safeParse(game.players, []);
+    const index = players.indexOf(user.$id);
+
+    if (index === 0) return "A";
+    if (index === 1) return "B";
+
+    return null;
   }
 
-  // =========================
-  // WALLET HELPERS
-  // =========================
-  async function deductWallet(amount) {
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      {
-        balance: Number(wallet.balance) - amount
-      }
-    );
-  }
+  const myRole = getPlayerRole();
 
-  // =========================
-  // CREATE ROOM
-  // =========================
-  async function createRoom() {
-    try {
-      setLoading(true);
-      setMessage("");
+  const positions = safeParse(game?.positions, { A: 1, B: 1 });
 
-      const u = await account.get();
-
-      if (!canPlayMore()) {
-        setMessage("Finish your current games first (Max 5)");
-        setLoading(false);
-        return;
-      }
-
-      if (!stake || stake < 200) {
-        setMessage("Minimum stake is ₦200");
-        setLoading(false);
-        return;
-      }
-
-      if (Number(wallet?.balance || 0) < stake) {
-        setMessage("Insufficient balance");
-        setLoading(false);
-        return;
-      }
-
-      await deductWallet(stake);
-
-      await databases.createDocument(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        ID.unique(),
-        {
-          hostId: u.$id,
-          stake,
-          status: "waiting",
-          players: JSON.stringify([u.$id]),
-          joinedUsers: JSON.stringify({ [u.$id]: true }),
-          playerCount: 1,
-          gameId: "",
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      setMessage("Room created");
-      loadRooms();
-
-    } catch (err) {
-      console.log(err);
-      setMessage("Failed to create room");
-    }
-
-    setLoading(false);
-  }
-
-  // =========================
-  // JOIN ROOM
-  // =========================
-  async function joinRoom(room) {
-    try {
-      setLoading(true);
-
-      const u = await account.get();
-
-      if (!canPlayMore()) {
-        setMessage("Finish current games first (Max 5)");
-        setLoading(false);
-        return;
-      }
-
-      if (room.hostId === u.$id) {
-        setMessage("You cannot join your own room");
-        setLoading(false);
-        return;
-      }
-
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        room.$id
-      );
-
-      if (fresh.status !== "waiting") {
-        setMessage("Room already started");
-        setLoading(false);
-        return;
-      }
-
-      if (Number(wallet?.balance || 0) < fresh.stake) {
-        setMessage("Insufficient balance");
-        setLoading(false);
-        return;
-      }
-
-      let players = JSON.parse(fresh.players || "[]");
-      let joinedUsers = JSON.parse(fresh.joinedUsers || "{}");
-
-      if (players.includes(u.$id)) {
-        setMessage("Already joined");
-        setLoading(false);
-        return;
-      }
-
-      if (players.length >= MAX_PLAYERS) {
-        setMessage("Room full");
-        setLoading(false);
-        return;
-      }
-
-      await deductWallet(fresh.stake);
-
-      players.push(u.$id);
-      joinedUsers[u.$id] = true;
-
-      const gameStart = players.length === MAX_PLAYERS;
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        fresh.$id,
-        {
-          players: JSON.stringify(players),
-          joinedUsers: JSON.stringify(joinedUsers),
-          playerCount: players.length,
-          status: gameStart ? "matched" : "waiting"
-        }
-      );
-
-      if (gameStart) {
-        const totalPot = fresh.stake * MAX_PLAYERS;
-        const adminCut = totalPot * ADMIN_CUT_PERCENT;
-        const gamePot = totalPot - adminCut;
-
-        const admin = await databases.listDocuments(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          [Query.equal("userId", ADMIN_USER_ID), Query.limit(1)]
-        );
-
-        if (admin.documents.length) {
-          const adminWallet = admin.documents[0];
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            WALLET_COLLECTION,
-            adminWallet.$id,
-            {
-              balance: Number(adminWallet.balance) + adminCut
-            }
-          );
-        }
-
-        const game = await databases.createDocument(
-          DATABASE_ID,
-          SNAKE_GAME_COLLECTION,
-          ID.unique(),
-          {
-            lobbyId: fresh.$id,
-            players: JSON.stringify(players),
-            positions: JSON.stringify({}),
-            turn: players[0],
-            status: "playing",
-            pot: gamePot,
-            winner: "",
-            payoutDone: false
-          }
-        );
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          SNAKE_LOBBY_COLLECTION,
-          fresh.$id,
-          {
-            gameId: game.$id,
-            status: "playing"
-          }
-        );
-
-        goGame(game.$id);
-      }
-
-      setMessage("Joined successfully");
-      loadRooms();
-      loadActiveGames(u.$id);
-
-    } catch (err) {
-      console.log(err);
-      setMessage("Join failed");
-    }
-
-    setLoading(false);
-  }
+  const isMyTurn = game?.turn === myRole;
+  const isOpponentTurn = game?.turn && game.turn !== myRole;
 
   // =========================
   // UI
   // =========================
+  if (!game) return <div>Loading...</div>;
+
   return (
     <div style={styles.container}>
-      <h2>🐍 Snake Lobby</h2>
+      <h2>🐍 Snake Game</h2>
 
-      <p>Active Games: {activeGames.length}/5</p>
-
-      <div style={styles.card}>
-        <input
-          type="number"
-          value={stake}
-          onChange={(e) => setStake(Number(e.target.value))}
-          style={styles.input}
-        />
-
-        <button
-          onClick={createRoom}
-          disabled={loading}
-          style={styles.createBtn}
+      {/* =========================
+          TURN INDICATOR (FIXED)
+      ========================= */}
+      <div style={styles.turnBox}>
+        <div
+          style={{
+            ...styles.turnIndicator,
+            background: isMyTurn ? "#22c55e" : "#1e3a8a",
+            boxShadow: isMyTurn
+              ? "0 0 20px #22c55e"
+              : "0 0 20px #3b82f6"
+          }}
         >
-          Create Room
-        </button>
-
-        <p>{message}</p>
+          {isMyTurn ? "🟢 YOUR TURN" : "🔵 OPPONENT TURN"}
+        </div>
       </div>
 
-      <h3>Available Rooms</h3>
+      <div style={styles.boardWrapper}>
+        <img src={boardImg} style={styles.board} />
 
-      {rooms.length === 0 && <p>No rooms available</p>}
-
-      {rooms.map((r) => {
-        const players = JSON.parse(r.players || "[]");
-
-        return (
-          <div key={r.$id} style={styles.room}>
-            <p>Stake: ₦{r.stake}</p>
-            <p>Players: {players.length}/{MAX_PLAYERS}</p>
-
-            <button onClick={() => joinRoom(r)}>
-              Join
-            </button>
+        {/* PLAYER TOKENS */}
+        {["A", "B"].map((p) => (
+          <div
+            key={p}
+            style={{
+              ...styles.token,
+              ...getCoords(positions[p]),
+              background: p === "A" ? "#ef4444" : "#3b82f6",
+              transform:
+                game.turn === p
+                  ? "translate(-50%, -50%) scale(1.4)"
+                  : "translate(-50%, -50%)",
+              boxShadow:
+                game.turn === p
+                  ? "0 0 15px white"
+                  : "none"
+            }}
+          >
+            {p}
           </div>
-        );
-      })}
+        ))}
+      </div>
+
+      <button
+        style={{
+          ...styles.button,
+          opacity: isMyTurn ? 1 : 0.4,
+          cursor: isMyTurn ? "pointer" : "not-allowed"
+        }}
+        disabled={!isMyTurn}
+      >
+        🎲 Roll Dice
+      </button>
     </div>
   );
 }
 
 // =========================
+// STYLES
+// =========================
 const styles = {
   container: {
-    padding: 20,
+    textAlign: "center",
     background: "#0f172a",
     color: "white",
-    minHeight: "100vh"
+    minHeight: "100vh",
+    padding: 20
   },
-  card: {
-    background: "#1e293b",
-    padding: 15,
-    borderRadius: 10
-  },
-  input: {
-    width: "100%",
-    padding: 10,
+
+  turnBox: {
     marginBottom: 10
   },
-  createBtn: {
-    background: "orange",
+
+  turnIndicator: {
     padding: 10,
-    border: "none",
-    borderRadius: 8,
-    width: "100%",
-    fontWeight: "bold"
+    borderRadius: 10,
+    fontWeight: "bold",
+    transition: "0.3s"
   },
-  room: {
-    background: "#111827",
-    padding: 10,
-    marginTop: 10,
-    borderRadius: 8
+
+  boardWrapper: {
+    position: "relative",
+    width: 360,
+    height: 360,
+    margin: "20px auto"
+  },
+
+  board: {
+    width: "100%",
+    height: "100%"
+  },
+
+  token: {
+    position: "absolute",
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    fontWeight: "bold",
+    color: "white",
+    border: "2px solid white",
+    transition: "0.3s"
+  },
+
+  button: {
+    marginTop: 20,
+    padding: 12,
+    borderRadius: 10,
+    border: "none",
+    fontWeight: "bold",
+    background: "#f59e0b"
   }
 };
