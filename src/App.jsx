@@ -1,239 +1,151 @@
-// =========================
-// IMPORTS
-// =========================
-import { useEffect, useState } from "react";
-import {
-  HashRouter,
-  Routes,
-  Route,
-  Navigate,
-  useNavigate,
-  useParams
-} from "react-router-dom";
+// ========================= // IMPORTS // ========================= import { useEffect, useState } from "react"; import { HashRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { account } from "./lib/appwrite";
 
-import Auth from "./pages/Auth";
-import Dashboard from "./pages/Dashboard";
-import Wallet from "./pages/Wallet";
-import Lobby from "./pages/Lobby";
-import Transactions from "./pages/Transactions";
-import WhotGame from "./WhotGame";
-import AdminDashboard from "./pages/aaa";
+import Auth from "./pages/Auth"; import Dashboard from "./pages/Dashboard"; import Wallet from "./pages/Wallet"; import Lobby from "./pages/Lobby"; import Transactions from "./pages/Transactions"; import WhotGame from "./WhotGame"; import AdminDashboard from "./pages/aaa";
 
-// ✅ CASINO IMPORT
-import CasinoWheel from "./pages/CasinoWheel";
+// ✅ CASINO import CasinoWheel from "./pages/CasinoWheel";
 
-// 🔒 ADMIN ID
-const ADMIN_ID = "69ef9fe863a02a7490b4";
+// 🐍 SNAKE & LADDER (LOBBY FIRST) import SnakeLadderLobby from "./pages/SnakeLadderLobby"; import SnakeLadder from "./pages/SnakeLadder";
 
-// =========================
-// AUTH HOOK
-// =========================
-function useAuth() {
-  const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState(false);
+// 🔒 ADMIN ID const ADMIN_ID = "69ef9fe863a02a7490b4";
 
-  useEffect(() => {
-    account.get()
-      .then(() => setAuthed(true))
-      .catch(() => setAuthed(false))
-      .finally(() => setLoading(false));
-  }, []);
+// ========================= // AUTH HOOK // ========================= function useAuth() { const [loading, setLoading] = useState(true); const [authed, setAuthed] = useState(false);
 
-  return { loading, authed };
-}
+useEffect(() => { account.get() .then(() => setAuthed(true)) .catch(() => setAuthed(false)) .finally(() => setLoading(false)); }, []);
 
-// =========================
-// GET USER HOOK
-// =========================
-function useUser() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+return { loading, authed }; }
 
-  useEffect(() => {
-    account.get()
-      .then(setUser)
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
-  }, []);
+// ========================= // USER HOOK // ========================= function useUser() { const [user, setUser] = useState(null); const [loading, setLoading] = useState(true);
 
-  return { user, loading };
-}
+useEffect(() => { account.get() .then(setUser) .catch(() => setUser(null)) .finally(() => setLoading(false)); }, []);
 
-// =========================
-// PROTECTED ROUTE
-// =========================
-function ProtectedRoute({ children }) {
-  const { loading, authed } = useAuth();
+return { user, loading }; }
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+// ========================= // ROUTE GUARDS // ========================= function ProtectedRoute({ children }) { const { loading, authed } = useAuth();
 
-  return authed ? children : <Navigate to="/auth" replace />;
-}
+if (loading) return <p style={{ color: "white" }}>Loading...</p>; return authed ? children : <Navigate to="/auth" replace />; }
 
-// =========================
-// ADMIN ROUTE
-// =========================
-function AdminRoute({ children }) {
-  const { user, loading } = useUser();
+function AdminRoute({ children }) { const { user, loading } = useUser();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+if (loading) return <p style={{ color: "white" }}>Loading...</p>; if (!user) return <Navigate to="/auth" replace />; if (user.$id !== ADMIN_ID) return <Navigate to="/dashboard" replace />;
 
-  if (!user) return <Navigate to="/auth" replace />;
+return children; }
 
-  if (user.$id !== ADMIN_ID) {
-    return <Navigate to="/dashboard" replace />;
-  }
+function PublicRoute({ children }) { const { loading, authed } = useAuth();
 
-  return children;
-}
+if (loading) return <p style={{ color: "white" }}>Loading...</p>; return authed ? <Navigate to="/dashboard" replace /> : children; }
 
-// =========================
-// PUBLIC ROUTE
-// =========================
-function PublicRoute({ children }) {
-  const { loading, authed } = useAuth();
+// ========================= // WHOT WRAPPER // ========================= function GameWrapper() { const { gameId, stake } = useParams(); const navigate = useNavigate();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+return ( <WhotGame gameId={gameId} stake={Number(stake)} goHome={() => navigate("/dashboard")} /> ); }
 
-  return authed ? <Navigate to="/dashboard" replace /> : children;
-}
+// ========================= // ROUTES // ========================= function AppRoutes() { const navigate = useNavigate();
 
-// =========================
-// WHOT GAME WRAPPER
-// =========================
-function GameWrapper() {
-  const { gameId, stake } = useParams();
-  const navigate = useNavigate();
+return ( <Routes>
 
-  return (
-    <WhotGame
-      gameId={gameId}
-      stake={Number(stake)}
-      goHome={() => navigate("/dashboard")}
-    />
-  );
-}
+{/* AUTH */}
+  <Route
+    path="/auth"
+    element={
+      <PublicRoute>
+        <Auth onLogin={() => navigate("/dashboard")} />
+      </PublicRoute>
+    }
+  />
 
-// =========================
-// ROUTES
-// =========================
-function AppRoutes() {
-  const navigate = useNavigate();
+  {/* DASHBOARD */}
+  <Route
+    path="/dashboard"
+    element={
+      <ProtectedRoute>
+        <Dashboard
+          goLobby={() => navigate("/lobby")}
+          goWallet={() => navigate("/wallet")}
+          goTransactions={() => navigate("/transactions")}
+          goCasino={() => navigate("/casino")}
+          goSnakeLadder={() => navigate("/snake-ladder-lobby")}
+          goAdmin={() => navigate("/admin")}
+          logout={async () => {
+            await account.deleteSession("current");
+            navigate("/auth");
+          }}
+        />
+      </ProtectedRoute>
+    }
+  />
 
-  return (
-    <Routes>
+  {/* CASINO */}
+  <Route
+    path="/casino"
+    element={<ProtectedRoute><CasinoWheel /></ProtectedRoute>}
+  />
 
-      {/* AUTH */}
-      <Route
-        path="/auth"
-        element={
-          <PublicRoute>
-            <Auth onLogin={() => navigate("/dashboard")} />
-          </PublicRoute>
-        }
-      />
+  {/* WALLET */}
+  <Route
+    path="/wallet"
+    element={<ProtectedRoute><Wallet /></ProtectedRoute>}
+  />
 
-      {/* DASHBOARD */}
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <Dashboard
-              goLobby={() => navigate("/lobby")}
-              goWallet={() => navigate("/wallet")}
-              goTransactions={() => navigate("/transactions")}
-              goAdmin={() => navigate("/admin")}
-              goCasino={() => navigate("/casino")} // ✅ NEW
-              logout={async () => {
-                await account.deleteSession("current");
-                navigate("/auth");
-              }}
-            />
-          </ProtectedRoute>
-        }
-      />
+  {/* TRANSACTIONS */}
+  <Route
+    path="/transactions"
+    element={<ProtectedRoute><Transactions back={() => navigate("/dashboard")} /></ProtectedRoute>}
+  />
 
-      {/* ✅ CASINO ROUTE */}
-      <Route
-        path="/casino"
-        element={
-          <ProtectedRoute>
-            <CasinoWheel />
-          </ProtectedRoute>
-        }
-      />
+  {/* LOBBY */}
+  <Route
+    path="/lobby"
+    element={
+      <ProtectedRoute>
+        <Lobby
+          goGame={(id, stake) => navigate(`/game/${id}/${stake}`)}
+          back={() => navigate("/dashboard")}
+        />
+      </ProtectedRoute>
+    }
+  />
 
-      {/* WALLET */}
-      <Route
-        path="/wallet"
-        element={
-          <ProtectedRoute>
-            <Wallet />
-          </ProtectedRoute>
-        }
-      />
+  {/* WHOT GAME */}
+  <Route
+    path="/game/:gameId/:stake"
+    element={<ProtectedRoute><GameWrapper /></ProtectedRoute>}
+  />
 
-      {/* TRANSACTIONS */}
-      <Route
-        path="/transactions"
-        element={
-          <ProtectedRoute>
-            <Transactions back={() => navigate("/dashboard")} />
-          </ProtectedRoute>
-        }
-      />
+  {/* 🐍 SNAKE LOBBY FIRST */}
+  <Route
+    path="/snake-ladder-lobby"
+    element={
+      <ProtectedRoute>
+        <SnakeLadderLobby
+          goGame={(roomId) => navigate(`/snake-ladder/${roomId}`)}
+          back={() => navigate("/dashboard")}
+        />
+      </ProtectedRoute>
+    }
+  />
 
-      {/* LOBBY */}
-      <Route
-        path="/lobby"
-        element={
-          <ProtectedRoute>
-            <Lobby
-              goGame={(id, stake) =>
-                navigate(`/game/${id}/${stake}`)
-              }
-              back={() => navigate("/dashboard")}
-            />
-          </ProtectedRoute>
-        }
-      />
+  {/* 🐍 SNAKE GAME */}
+  <Route
+    path="/snake-ladder/:roomId"
+    element={
+      <ProtectedRoute>
+        <SnakeLadder back={() => navigate("/snake-ladder-lobby")} />
+      </ProtectedRoute>
+    }
+  />
 
-      {/* GAME */}
-      <Route
-        path="/game/:gameId/:stake"
-        element={
-          <ProtectedRoute>
-            <GameWrapper />
-          </ProtectedRoute>
-        }
-      />
+  {/* ADMIN */}
+  <Route
+    path="/admin"
+    element={<AdminRoute><AdminDashboard back={() => navigate("/dashboard")} /></AdminRoute>}
+  />
 
-      {/* ADMIN */}
-      <Route
-        path="/admin"
-        element={
-          <AdminRoute>
-            <AdminDashboard back={() => navigate("/dashboard")} />
-          </AdminRoute>
-        }
-      />
+  {/* DEFAULT */}
+  <Route path="*" element={<Navigate to="/auth" replace />} />
 
-      {/* DEFAULT */}
-      <Route path="*" element={<Navigate to="/auth" replace />} />
+</Routes>
 
-    </Routes>
-  );
-}
+); }
 
-// =========================
-// MAIN APP
-// =========================
-export default function App() {
-  return (
-    <HashRouter>
-      <AppRoutes />
-    </HashRouter>
-  );
-}
+// ========================= // APP // ========================= export default function App() { return ( <HashRouter> <AppRoutes /> </HashRouter> ); }
