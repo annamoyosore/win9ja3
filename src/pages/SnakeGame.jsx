@@ -5,7 +5,9 @@ import boardImg from "./board.png";
 const GAME = "snakegame";
 const SIZE = 100;
 
-// 🐍 SNAKES
+// =====================
+// SNAKES & LADDERS
+// =====================
 const snakes = {
   50: 5,
   43: 17,
@@ -16,7 +18,6 @@ const snakes = {
   98: 40,
 };
 
-// 🪜 LADDERS
 const ladders = {
   2: 23,
   6: 45,
@@ -26,7 +27,29 @@ const ladders = {
   71: 92,
 };
 
-// ===================== HELPERS =====================
+// =====================
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function rollDice() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+function safeParse(data, fallback) {
+  try {
+    return typeof data === "string" ? JSON.parse(data) : data || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// last 6 moves
+function keepLast6(arr, value) {
+  return [...(arr || []), value].slice(-6);
+}
+
+// =====================
+// BOARD POSITION
+// =====================
 function getCoords(pos) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
@@ -40,93 +63,55 @@ function getCoords(pos) {
   };
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function rollDice() {
-  return Math.floor(Math.random() * 6) + 1;
-}
-
-function safeParse(data, fallback) {
-  if (!data) return fallback;
-  try {
-    return typeof data === "object" ? data : JSON.parse(data);
-  } catch {
-    return fallback;
-  }
-}
-
-// keep last 6 moves only
-function keepLast6(arr, value) {
-  const updated = [...(arr || []), value];
-  return updated.slice(-6);
-}
-
-// ===================== GAME =====================
-export default function SnakeGame({ gameId }) {
+// =====================
+// MAIN GAME
+// =====================
+export default function SnakeGame({ gameId, userId }) {
   const [game, setGame] = useState(null);
-  const [userId, setUserId] = useState(null);
-
   const [positions, setPositions] = useState({ A: 1, B: 1 });
-  const [turn, setTurn] = useState("A");
-
   const [dice, setDice] = useState(1);
   const [moving, setMoving] = useState(false);
-
   const [error, setError] = useState("");
   const [winner, setWinner] = useState("");
-
-  const [pot, setPot] = useState(0);
-
-  // winner animation
   const [showWin, setShowWin] = useState(false);
 
-  // ===================== LOAD USER =====================
-  useEffect(() => {
-    async function loadUser() {
-      const u = await databases.getDocument; // placeholder safety
-      try {
-        const res = await fetch("/api/me");
-        const data = await res.json();
-        setUserId(data.$id);
-      } catch {}
-    }
-    loadUser();
-  }, []);
+  const lock = useRef(false);
 
-  // ===================== LOAD GAME =====================
+  // =====================
+  // LOAD GAME
+  // =====================
   useEffect(() => {
     if (!gameId) return;
 
     async function load() {
-      try {
-        const res = await databases.getDocument(
-          DATABASE_ID,
-          GAME,
-          gameId
-        );
+      const res = await databases.getDocument(
+        DATABASE_ID,
+        GAME,
+        gameId
+      );
 
-        const parsedPos = safeParse(res.positions, { A: 1, B: 1 });
-
-        setGame(res);
-        setPositions(parsedPos);
-        setTurn(res.turn || "A");
-        setPot(res.pot || 0);
-      } catch (err) {
-        console.log(err);
-      }
+      setGame(res);
+      setPositions(safeParse(res.positions, { A: 1, B: 1 }));
     }
 
     load();
   }, [gameId]);
 
-  // ===================== APPLY EFFECTS =====================
-  function applyEffects(pos) {
-    if (snakes[pos]) return snakes[pos];
-    if (ladders[pos]) return ladders[pos];
-    return pos;
+  // =====================
+  // CHECK TURN (STRICT)
+  // =====================
+  function isMyTurn() {
+    return game?.turn === userId;
   }
 
-  // ===================== MOVE ANIMATION =====================
+  function showError(msg) {
+    setError(msg);
+    setTimeout(() => setError(""), 1500);
+  }
+
+  // =====================
+  // MOVE PIECE
+  // =====================
   async function move(player, steps) {
     let current = positions[player];
 
@@ -141,102 +126,100 @@ export default function SnakeGame({ gameId }) {
       }));
     }
 
-    const finalPos = applyEffects(current);
+    let final = current;
+
+    if (snakes[final]) final = snakes[final];
+    if (ladders[final]) final = ladders[final];
 
     setPositions((prev) => ({
       ...prev,
-      [player]: finalPos,
+      [player]: final,
     }));
 
-    return finalPos;
+    return final;
   }
 
-  // ===================== TURN CHECK =====================
-  function isMyTurn() {
-    return game?.turn === userId;
-  }
-
-  function lockError(msg) {
-    setError(msg);
-    setTimeout(() => setError(""), 1500);
-  }
-
-  // ===================== PLAY =====================
+  // =====================
+  // PLAY TURN (LOCKED)
+  // =====================
   async function playTurn() {
-    if (!game || moving) return;
+    if (!game || moving || lock.current) return;
 
+    // 🔒 HARD TURN LOCK
     if (!isMyTurn()) {
-      return lockError("❌ Not your turn");
+      return showError("❌ Not your turn");
     }
 
+    lock.current = true;
     setMoving(true);
 
     const d = rollDice();
     setDice(d);
 
-    let newPos = await move(game.turn, d);
+    const player = game.turn === game.playerA ? "A" : "B";
 
-    const updated = {
-      ...positions,
-      [game.turn]: newPos,
-    };
+    const newPos = await move(player, d);
 
     const isWin = newPos >= SIZE;
 
-    const nextTurn = game.turn === "A" ? "B" : "A";
+    const nextTurn =
+      game.turn === game.playerA
+        ? game.playerB
+        : game.playerA;
 
-    const updatedGame = {
+    const updated = {
       ...game,
-      positions: JSON.stringify(updated),
+      positions: JSON.stringify({
+        ...positions,
+        [player]: newPos,
+      }),
       turn: nextTurn,
-      winner: isWin ? game.turn : "",
       status: isWin ? "finished" : "playing",
+      winner: isWin ? game.turn : "",
+      history: [
+        `Player ${player} rolled ${d}`,
+        ...(game.history || []),
+      ].slice(0, 6),
     };
 
     await databases.updateDocument(
       DATABASE_ID,
       GAME,
       gameId,
-      updatedGame
+      updated
     );
 
-    setGame(updatedGame);
-    setTurn(nextTurn);
+    setGame(updated);
 
     if (isWin) {
-      setWinner(game.turn);
+      setWinner(player);
       setShowWin(true);
 
       setTimeout(() => setShowWin(false), 3000);
     }
 
     setMoving(false);
+    lock.current = false;
   }
 
-  // ===================== UI =====================
+  // =====================
   if (!game) return <div style={{ color: "white" }}>Loading...</div>;
+
+  const isTurn = isMyTurn();
 
   return (
     <div style={styles.container}>
-      <h2>🐍 Snake & Ladder</h2>
+      <h2>🐍 Snake Game</h2>
 
-      {/* ERROR */}
-      {error && <div style={styles.error}>{error}</div>}
-
-      {/* TURN + DICE */}
+      {/* TURN */}
       <div style={styles.info}>
         🎲 Dice: {dice}
         <br />
-        Turn:{" "}
-        <b style={{ color: game.turn === "A" ? "lime" : "deepskyblue" }}>
-          Player {game.turn}
-        </b>
+        {isTurn ? "🟢 Your Turn" : "🔴 Opponent Turn"}
       </div>
 
-      {/* POT */}
-      <div style={{ marginBottom: 10 }}>
-        🏦 Pot: ₦{pot}
-      </div>
+      {/* ERROR */}
+      {error && <div style={styles.error}>{error}</div>}
 
       {/* BOARD */}
       <div style={styles.board}>
@@ -259,7 +242,7 @@ export default function SnakeGame({ gameId }) {
       {/* BUTTON */}
       <button
         onClick={playTurn}
-        disabled={moving || !isMyTurn() || game.status === "finished"}
+        disabled={!isTurn || moving || game.status === "finished"}
         style={styles.button}
       >
         🎲 Roll Dice
@@ -268,26 +251,21 @@ export default function SnakeGame({ gameId }) {
       {/* WIN POPUP */}
       {showWin && (
         <div style={styles.winBox}>
-          🏆 Player {winner} WON! <br />
-          💰 ₦{pot}
+          🏆 Player {winner} WON!
         </div>
       )}
 
-      {/* HISTORY (LAST 6 ONLY) */}
+      {/* HISTORY */}
       <div style={styles.history}>
-        <b>Last Moves</b>
-        <div>
-          A: {positions.A}
-        </div>
-        <div>
-          B: {positions.B}
-        </div>
+        {(game.history || []).map((h, i) => (
+          <div key={i}>{h}</div>
+        ))}
       </div>
     </div>
   );
 }
 
-// ===================== STYLES =====================
+// =====================
 const styles = {
   container: {
     textAlign: "center",
@@ -310,13 +288,12 @@ const styles = {
     height: 28,
     borderRadius: "50%",
     transform: "translate(-50%, -50%)",
+    color: "white",
+    fontWeight: "bold",
+    border: "2px solid white",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
-    fontWeight: "bold",
-    color: "white",
-    border: "2px solid white",
-    transition: "0.3s",
   },
 
   button: {
@@ -326,7 +303,6 @@ const styles = {
     border: "none",
     fontWeight: "bold",
     cursor: "pointer",
-    marginTop: 10,
   },
 
   info: {
@@ -344,7 +320,7 @@ const styles = {
     position: "fixed",
     top: "40%",
     left: "50%",
-    transform: "translate(-50%,-50%)",
+    transform: "translate(-50%, -50%)",
     background: "gold",
     color: "#000",
     padding: 20,
