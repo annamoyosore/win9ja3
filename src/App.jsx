@@ -20,9 +20,11 @@ import AdminDashboard from "./pages/aaa";
 
 import CasinoWheel from "./pages/CasinoWheel";
 
+// 🐍 SNAKE & LADDER
 import SnakeLadderLobby from "./pages/snakelobby";
 import SnakeGame from "./pages/SnakeGame";
 
+// 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 /* =========================
@@ -53,7 +55,7 @@ function useUser() {
   useEffect(() => {
     account
       .get()
-      .then(setUser)
+      .then((u) => setUser(u))
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
@@ -62,34 +64,97 @@ function useUser() {
 }
 
 /* =========================
-   ROUTE GUARDS
+   PROTECTED ROUTE
 ========================= */
 function ProtectedRoute({ children }) {
   const { loading, authed } = useAuth();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
+  if (loading) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          background: "#0f172a",
+          color: "white"
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
   return authed ? children : <Navigate to="/auth" replace />;
 }
 
+/* =========================
+   ADMIN ROUTE
+========================= */
 function AdminRoute({ children }) {
   const { user, loading } = useUser();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
-  if (!user) return <Navigate to="/auth" replace />;
-  if (user.$id !== ADMIN_ID) return <Navigate to="/dashboard" replace />;
+  if (loading) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          background: "#0f172a",
+          color: "white"
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" replace />;
+  }
+
+  if (user.$id !== ADMIN_ID) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return children;
 }
 
+/* =========================
+   PUBLIC ROUTE
+========================= */
 function PublicRoute({ children }) {
   const { loading, authed } = useAuth();
 
-  if (loading) return <p style={{ color: "white" }}>Loading...</p>;
-  return authed ? <Navigate to="/dashboard" replace /> : children;
+  if (loading) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          background: "#0f172a",
+          color: "white"
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
+  return authed ? (
+    <Navigate to="/dashboard" replace />
+  ) : (
+    children
+  );
 }
 
 /* =========================
-   WHOT WRAPPER
+   WHOT GAME WRAPPER
 ========================= */
 function GameWrapper() {
   const { gameId, stake } = useParams();
@@ -105,7 +170,7 @@ function GameWrapper() {
 }
 
 /* =========================
-   ROUTES
+   APP ROUTES
 ========================= */
 function AppRoutes() {
   const navigate = useNavigate();
@@ -133,10 +198,17 @@ function AppRoutes() {
               goWallet={() => navigate("/wallet")}
               goTransactions={() => navigate("/transactions")}
               goCasino={() => navigate("/casino")}
-              goSnakeLadder={() => navigate("/snake-ladder-lobby")}
+              goSnakeLadder={() =>
+                navigate("/snake-ladder-lobby")
+              }
               goAdmin={() => navigate("/admin")}
               logout={async () => {
-                await account.deleteSession("current");
+                try {
+                  await account.deleteSession("current");
+                } catch (e) {
+                  console.error(e);
+                }
+
                 navigate("/auth");
               }}
             />
@@ -169,7 +241,9 @@ function AppRoutes() {
         path="/transactions"
         element={
           <ProtectedRoute>
-            <Transactions back={() => navigate("/dashboard")} />
+            <Transactions
+              back={() => navigate("/dashboard")}
+            />
           </ProtectedRoute>
         }
       />
@@ -180,7 +254,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Lobby
-              goGame={(id, stake) => navigate(`/game/${id}/${stake}`)}
+              goGame={(id, stake) =>
+                navigate(`/game/${id}/${stake}`)
+              }
               back={() => navigate("/dashboard")}
             />
           </ProtectedRoute>
@@ -203,7 +279,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SnakeLadderLobby
-              goGame={(roomId) => navigate(`/snake-ladder/${roomId}`)}
+              goGame={(roomId) =>
+                navigate(`/snake-ladder/${roomId}`)
+              }
               back={() => navigate("/dashboard")}
             />
           </ProtectedRoute>
@@ -216,7 +294,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SnakeGame
-              back={() => navigate("/snake-ladder-lobby")}
+              back={() =>
+                navigate("/snake-ladder-lobby")
+              }
             />
           </ProtectedRoute>
         }
@@ -227,20 +307,25 @@ function AppRoutes() {
         path="/admin"
         element={
           <AdminRoute>
-            <AdminDashboard back={() => navigate("/dashboard")} />
+            <AdminDashboard
+              back={() => navigate("/dashboard")}
+            />
           </AdminRoute>
         }
       />
 
       {/* DEFAULT */}
-      <Route path="*" element={<Navigate to="/auth" replace />} />
+      <Route
+        path="*"
+        element={<Navigate to="/auth" replace />}
+      />
 
     </Routes>
   );
 }
 
 /* =========================
-   APP
+   MAIN APP
 ========================= */
 export default function App() {
   return (
