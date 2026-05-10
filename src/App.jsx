@@ -26,7 +26,7 @@ import AdminDashboard from "./pages/aaa";
 import CasinoWheel from "./pages/CasinoWheel";
 
 // 🐍 SNAKE GAME SYSTEM
-import SnakeLadderLobby from "./pages/snakelobby";
+import SnakeLobby from "./pages/snakelobby";
 import SnakeGame from "./pages/SnakeGame";
 
 const ADMIN_ID = "69ef9fe863a02a7490b4";
@@ -111,6 +111,21 @@ function GameWrapper() {
 }
 
 // =========================
+// SNAKE GAME WRAPPER
+// =========================
+function SnakeGameWrapper() {
+  const { gameId } = useParams();
+  const navigate = useNavigate();
+
+  return (
+    <SnakeGame
+      gameId={gameId}
+      back={() => navigate("/snake-lobby")}
+    />
+  );
+}
+
+// =========================
 // ROUTES
 // =========================
 function AppRoutes() {
@@ -139,7 +154,10 @@ function AppRoutes() {
               goWallet={() => navigate("/wallet")}
               goTransactions={() => navigate("/transactions")}
               goCasino={() => navigate("/casino")}
-              goSnakeLadder={() => navigate("/snake-ladder-lobby")}
+
+              // 🐍 FIXED: now goes to snake lobby
+              goSnakeLadder={() => navigate("/snake-lobby")}
+
               goAdmin={() => navigate("/admin")}
               logout={async () => {
                 await account.deleteSession("current");
@@ -205,12 +223,12 @@ function AppRoutes() {
 
       {/* 🐍 SNAKE LOBBY */}
       <Route
-        path="/snake-ladder-lobby"
+        path="/snake-lobby"
         element={
           <ProtectedRoute>
-            <SnakeLadderLobby
-              goGame={(roomId) =>
-                navigate(`/snake-ladder/${roomId}`)
+            <SnakeLobby
+              goGame={(gameId) =>
+                navigate(`/snake-game/${gameId}`)
               }
               back={() => navigate("/dashboard")}
             />
@@ -220,12 +238,10 @@ function AppRoutes() {
 
       {/* 🐍 SNAKE GAME */}
       <Route
-        path="/snake-ladder/:roomId"
+        path="/snake-game/:gameId"
         element={
           <ProtectedRoute>
-            <SnakeGame
-              back={() => navigate("/snake-ladder-lobby")}
-            />
+            <SnakeGameWrapper />
           </ProtectedRoute>
         }
       />
