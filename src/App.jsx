@@ -6,7 +6,7 @@ import Auth from "./pages/Auth"; import Dashboard from "./pages/Dashboard"; impo
 
 // ✅ CASINO import CasinoWheel from "./pages/CasinoWheel";
 
-// 🐍 SNAKE & LADDER (LOBBY FIRST) import SnakeLadderLobby from "./pages/SnakeLadderLobby"; import SnakeLadder from "./pages/SnakeLadder";
+// 🐍 SNAKE & LADDER (LOBBY FIRST) import SnakeLadderLobby from "./pages/snakelobby"; import SnakeLadder from "./pages/SnakeLadder";
 
 // 🔒 ADMIN ID const ADMIN_ID = "69ef9fe863a02a7490b4";
 
