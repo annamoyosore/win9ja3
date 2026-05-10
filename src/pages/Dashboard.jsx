@@ -16,14 +16,12 @@ export default function Dashboard({
   goWallet,
   goTransactions,
   goAdmin,
-  goSnakeLobby, // ✅ ADDED (IMPORTANT FIX)
+  goSnakeLobby,
   logout
 }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  const [openMenu, setOpenMenu] = useState("games");
 
   useEffect(() => {
     load();
@@ -51,7 +49,7 @@ export default function Dashboard({
   }
 
   function openWhatsApp() {
-    const url = `https://wa.me/18622726355?text=Hello%20Support%2C%20I%20need%20help%20with%20my%20account`;
+    const url = `https://wa.me/18622726355?text=Hello%20Support,%20I%20need%20help%20with%20my%20account`;
     window.open(url, "_blank");
   }
 
@@ -74,86 +72,62 @@ export default function Dashboard({
         </p>
       </div>
 
+      {/* GAMES */}
+      <h3 style={styles.sectionTitle}>🎮 Games</h3>
+
+      <div style={styles.gameGrid}>
+
+        {/* WHOT */}
+        <div style={{ ...styles.gameCard, background: "#2563eb" }} onClick={goLobby}>
+          <div style={styles.logo}>🎴 WHOT</div>
+          <p>Card battle game</p>
+        </div>
+
+        {/* SNAKE */}
+        <div style={{ ...styles.gameCard, background: "#16a34a" }} onClick={goSnakeLobby}>
+          <div style={styles.logo}>🐍 Snake & Ladder</div>
+          <p>Race to 100 tiles</p>
+        </div>
+
+        {/* CASINO */}
+        <div style={{ ...styles.gameCard, background: "#f59e0b" }} onClick={goCasino}>
+          <div style={styles.logo}>🎰 Jackpot</div>
+          <p>Spin & win rewards</p>
+        </div>
+
+      </div>
+
       {/* MENU */}
+      <h3 style={styles.sectionTitle}>⚙️ Menu</h3>
+
       <div style={styles.menu}>
 
-        {/* GAMES */}
-        <button
-          style={styles.menuBtn}
-          onClick={() => setOpenMenu(openMenu === "games" ? "" : "games")}
-        >
-          🎮 Games
-        </button>
-
-        {openMenu === "games" && (
-          <div style={styles.dropdown}>
-            <div style={styles.card} onClick={goLobby}>
-              🎲 Play WHOT
-            </div>
-
-            <div style={styles.card} onClick={goCasino}>
-              🎰 Casino Jackpot
-            </div>
-
-            {/* ✅ FIXED SNAKE NAVIGATION */}
-            <div style={styles.card} onClick={goSnakeLobby}>
-              🐍 Snake & Ladder
-            </div>
-          </div>
-        )}
-
-        {/* WALLET */}
-        <button
-          style={styles.menuBtn}
-          onClick={() => setOpenMenu(openMenu === "wallet" ? "" : "wallet")}
-        >
+        <div style={styles.menuBtn} onClick={goWallet}>
           💰 Wallet
-        </button>
+        </div>
 
-        {openMenu === "wallet" && (
-          <div style={styles.dropdown}>
-            <div style={styles.card} onClick={goWallet}>
-              💳 Fund Wallet
-            </div>
+        <div style={styles.menuBtn} onClick={goTransactions}>
+          📊 Transactions
+        </div>
 
-            <div style={styles.card} onClick={goTransactions}>
-              📊 Transactions
-            </div>
-          </div>
-        )}
-
-        {/* SUPPORT */}
-        <button
-          style={styles.menuBtn}
-          onClick={() => setOpenMenu(openMenu === "support" ? "" : "support")}
-        >
+        <div style={styles.menuBtn} onClick={openWhatsApp}>
           💬 Support
-        </button>
+        </div>
 
-        {openMenu === "support" && (
-          <div style={styles.dropdown}>
-            <div style={styles.card} onClick={openWhatsApp}>
-              📞 Chat on WhatsApp
-            </div>
+        <div style={styles.menuBtn}>
+          ℹ️ About (Coming soon)
+        </div>
+
+        <div style={styles.menuBtn}>
+          📘 Instructions (Coming soon)
+        </div>
+
+        {user?.$id === ADMIN_ID && (
+          <div style={styles.adminBtn} onClick={goAdmin}>
+            🛠 Admin Panel
           </div>
         )}
 
-        {/* ABOUT THIS APP*/}
-        <button style={styles.menuBtn}>
-          ℹ️ About (Coming soon)
-        </button>
-
-        {/* GAME  INSTRUCTIONS */}
-        <button style={styles.menuBtn}>
-          📘 Instructions (Coming soon)
-        </button>
-
-        {/* ADMIN */}
-        {user?.$id === ADMIN_ID && (
-          <button style={styles.adminBtn} onClick={goAdmin}>
-            🛠 Admin Panel
-          </button>
-        )}
       </div>
 
       {/* LOGOUT */}
@@ -173,9 +147,7 @@ const styles = {
     minHeight: "100vh",
     background: "#0b1220",
     color: "white",
-    padding: 15,
-    display: "flex",
-    flexDirection: "column"
+    padding: 15
   },
 
   header: {
@@ -191,8 +163,33 @@ const styles = {
     opacity: 0.8
   },
 
+  sectionTitle: {
+    marginTop: 20,
+    marginBottom: 10,
+    color: "#cbd5e1"
+  },
+
+  gameGrid: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12
+  },
+
+  gameCard: {
+    padding: 15,
+    borderRadius: 12,
+    cursor: "pointer",
+    color: "white",
+    boxShadow: "0 4px 10px rgba(0,0,0,0.3)"
+  },
+
+  logo: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 5
+  },
+
   menu: {
-    flex: 1,
     display: "flex",
     flexDirection: "column",
     gap: 10
@@ -204,31 +201,16 @@ const styles = {
     border: "1px solid #1f2937",
     borderRadius: 10,
     color: "white",
-    textAlign: "left",
-    fontWeight: "bold"
-  },
-
-  dropdown: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-    paddingLeft: 10
-  },
-
-  card: {
-    background: "#1f2937",
-    padding: 12,
-    borderRadius: 10,
+    fontWeight: "bold",
     cursor: "pointer"
   },
 
   adminBtn: {
     padding: 14,
     background: "purple",
-    border: "none",
     borderRadius: 10,
     color: "white",
-    marginTop: 10
+    cursor: "pointer"
   },
 
   logout: {
@@ -237,15 +219,7 @@ const styles = {
     border: "none",
     borderRadius: 10,
     color: "white",
-    marginTop: 20
-  },
-
-  loading: {
-    minHeight: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    color: "white",
-    background: "#0b1220"
+    marginTop: 20,
+    width: "100%"
   }
 };
