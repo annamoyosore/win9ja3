@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  databases,
-  DATABASE_ID,
-} from "../lib/appwrite";
-
+import { databases, DATABASE_ID } from "../lib/appwrite";
 import boardImg from "./board.png";
 
 const GAME = "snakegame";
@@ -49,34 +45,19 @@ function getCoords(pos) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function safeParse(data, fallback) {
-  if (!data) return fallback;
-  if (typeof data === "object") return data;
-  try {
-    return JSON.parse(data);
-  } catch {
-    return fallback;
-  }
-}
-
 function rollDice() {
   return Math.floor(Math.random() * 6) + 1;
 }
 
-// keep last 3 moves
-function keepLast3(arr, value) {
-  const updated = [...(arr || []), value];
-  return updated.slice(-3);
-}
-
 // =========================
-// GAME COMPONENT
+// MAIN GAME
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
+
   const [positions, setPositions] = useState({
-    A: [1],
-    B: [1],
+    A: 1,
+    B: 1,
   });
 
   const [turn, setTurn] = useState("A");
@@ -89,10 +70,10 @@ export default function SnakeGame({ gameId }) {
   useEffect(() => {
     if (!gameId) return;
 
-    loadGame();
+    load();
   }, [gameId]);
 
-  async function loadGame() {
+  async function load() {
     const res = await databases.getDocument(
       DATABASE_ID,
       GAME,
@@ -101,17 +82,18 @@ export default function SnakeGame({ gameId }) {
 
     setGame(res);
 
-    const parsed = safeParse(res.positions, {
-      A: [1],
-      B: [1],
-    });
+    try {
+      const parsed = JSON.parse(res.positions);
+      setPositions(parsed);
+    } catch {
+      setPositions({ A: 1, B: 1 });
+    }
 
-    setPositions(parsed);
     setTurn(res.turn || "A");
   }
 
   // =========================
-  // SNAKE / LADDER APPLY
+  // APPLY SNAKE / LADDER
   // =========================
   function applyEffects(pos) {
     if (snakes[pos]) return snakes[pos];
@@ -120,10 +102,10 @@ export default function SnakeGame({ gameId }) {
   }
 
   // =========================
-  // PLAY TURN (FIXED CORE LOGIC)
+  // PLAY TURN (FIXED FLOW)
   // =========================
   async function playTurn() {
-    if (!game || moving) return;
+    if (!game || moving || game.status === "finished") return;
 
     setMoving(true);
 
@@ -132,30 +114,47 @@ export default function SnakeGame({ gameId }) {
 
     const player = turn;
 
-    const current =
-      positions[player][positions[player].length - 1];
+    let current = positions[player];
 
-    let next = current + diceValue;
+    // =========================
+    // 1. MOVE FIRST (ANIMATION)
+    // =========================
+    for (let i = 0; i < diceValue; i++) {
+      await sleep(120);
 
-    if (next > SIZE) next = SIZE;
+      current += 1;
+      if (current > SIZE) current = SIZE;
 
-    next = applyEffects(next);
+      setPositions((prev) => ({
+        ...prev,
+        [player]: current,
+      }));
+    }
 
-    const updatedHistory = keepLast3(
-      positions[player],
-      next
-    );
+    // =========================
+    // 2. APPLY SNAKE/LADDER
+    // =========================
+    const finalPos = applyEffects(current);
 
-    const updatedPositions = {
-      ...positions,
-      [player]: updatedHistory,
-    };
+    setPositions((prev) => ({
+      ...prev,
+      [player]: finalPos,
+    }));
 
-    const winner = next >= SIZE ? player : "";
+    // =========================
+    // 3. CHECK WINNER
+    // =========================
+    const winner = finalPos >= SIZE ? player : "";
 
-    const updatedGame = {
+    // =========================
+    // 4. SAVE TO BACKEND (ONLY AFTER MOVE)
+    // =========================
+    const updated = {
       ...game,
-      positions: JSON.stringify(updatedPositions),
+      positions: JSON.stringify({
+        ...positions,
+        [player]: finalPos,
+      }),
       turn: player === "A" ? "B" : "A",
       status: winner ? "finished" : "playing",
       winner,
@@ -165,39 +164,36 @@ export default function SnakeGame({ gameId }) {
       DATABASE_ID,
       GAME,
       gameId,
-      updatedGame
+      updated
     );
 
-    setGame(updatedGame);
-    setPositions(updatedPositions);
-    setTurn(updatedGame.turn);
+    setGame(updated);
+    setTurn(updated.turn);
 
     setMoving(false);
   }
 
   // =========================
-  // GET CURRENT POSITION
+  // GET POSITION
   // =========================
-  const getPos = (p) =>
-    positions[p]?.[positions[p].length - 1] || 1;
+  const getPos = (p) => positions[p];
 
-  // =========================
-  // UI
-  // =========================
   if (!game) return <div style={{ color: "white" }}>Loading...</div>;
 
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN */}
-      <div style={styles.info}>
-        🎲 Dice: {dice} <br />
+      {/* TURN INDICATOR (NO USER ID) */}
+      <div style={styles.turn}>
         Turn:{" "}
         <b style={{ color: turn === "A" ? "lime" : "deepskyblue" }}>
           Player {turn}
         </b>
       </div>
+
+      {/* DICE */}
+      <div style={styles.dice}>🎲 {dice}</div>
 
       {/* BOARD */}
       <div style={styles.boardWrapper}>
@@ -210,7 +206,6 @@ export default function SnakeGame({ gameId }) {
               ...styles.token,
               ...getCoords(getPos(p)),
               background: p === "A" ? "red" : "blue",
-              transform: "translate(-50%, -50%)",
             }}
           >
             {p}
@@ -233,13 +228,6 @@ export default function SnakeGame({ gameId }) {
           🏆 Winner: Player {game.winner}
         </h3>
       )}
-
-      {/* LAST 3 MOVES */}
-      <div style={styles.history}>
-        <h4>Last Moves (A / B)</h4>
-        <div>A: {positions.A.join(" → ")}</div>
-        <div>B: {positions.B.join(" → ")}</div>
-      </div>
     </div>
   );
 }
@@ -254,6 +242,16 @@ const styles = {
     color: "white",
     minHeight: "100vh",
     padding: 20,
+  },
+
+  turn: {
+    marginBottom: 10,
+    fontSize: 18,
+  },
+
+  dice: {
+    fontSize: 40,
+    marginBottom: 10,
   },
 
   boardWrapper: {
@@ -273,6 +271,7 @@ const styles = {
     width: 28,
     height: 28,
     borderRadius: "50%",
+    transform: "translate(-50%, -50%)",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
@@ -282,10 +281,6 @@ const styles = {
     transition: "0.25s linear",
   },
 
-  info: {
-    marginBottom: 10,
-  },
-
   button: {
     padding: 12,
     borderRadius: 10,
@@ -293,15 +288,5 @@ const styles = {
     border: "none",
     fontWeight: "bold",
     cursor: "pointer",
-  },
-
-  history: {
-    marginTop: 15,
-    background: "#111827",
-    padding: 10,
-    borderRadius: 10,
-    maxWidth: 320,
-    margin: "10px auto",
-    textAlign: "left",
   },
 };
