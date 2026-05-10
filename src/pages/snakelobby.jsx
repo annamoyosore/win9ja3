@@ -3,28 +3,35 @@ import {
   account,
   databases,
   DATABASE_ID,
-  ID
+  ID,
+  Query
 } from "../lib/appwrite";
 
-const GAME_COLLECTION = "snakegame";
+const SNAKE_LOBBY_COLLECTION = "snakelobby";
+const SNAKE_GAME_COLLECTION = "snakegame";
 const WALLET_COLLECTION = "wallets";
 
-const MAX_ACTIVE = 5;
+const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
 const MAX_PLAYERS = 2;
+const ADMIN_CUT = 0.1;
 
 export default function SnakeLobby({ goGame, back }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
-  const [games, setGames] = useState([]);
-  const [activeGame, setActiveGame] = useState(null);
-
   const [stake, setStake] = useState(200);
-  const [msg, setMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
+  const [availableGames, setAvailableGames] = useState([]);
+  const [myGames, setMyGames] = useState([]);
+
+  // =========================
+  // INIT
+  // =========================
   useEffect(() => {
     init();
-    const t = setInterval(loadGames, 5000);
+    const t = setInterval(loadGames, 4000);
     return () => clearInterval(t);
   }, []);
 
@@ -35,129 +42,277 @@ export default function SnakeLobby({ goGame, back }) {
     const w = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
-      [{ method: "equal", attribute: "userId", values: [u.$id] }]
+      [Query.equal("userId", u.$id), Query.limit(1)]
     );
 
-    if (w.documents?.length) setWallet(w.documents[0]);
+    if (w.documents.length) setWallet(w.documents[0]);
 
-    await loadGames();
+    loadGames(u.$id);
   }
 
   // =========================
-  // SAFE PARSER
+  // LOAD GAMES (FIXED FILTERING)
   // =========================
-  function safeJSON(d, fb) {
+  async function loadGames(uid) {
     try {
-      if (!d) return fb;
-      if (typeof d === "object") return d;
-      return JSON.parse(d);
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        [Query.limit(100)]
+      );
+
+      const all = res.documents;
+
+      // AVAILABLE = waiting + not host + not joined
+      const available = all.filter(g => {
+        const players = safeParse(g.players, []);
+        const joined = safeParse(g.joinedUsers, {});
+
+        return (
+          g.status === "waiting" &&
+          g.hostId !== uid &&
+          !joined[uid]
+        );
+      });
+
+      // MY GAMES = host OR joined OR active game
+      const mine = all.filter(g => {
+        const players = safeParse(g.players, []);
+        const joined = safeParse(g.joinedUsers, {});
+
+        return (
+          g.hostId === uid ||
+          joined[uid]
+        );
+      });
+
+      setAvailableGames(available);
+      setMyGames(mine);
+
+    } catch (err) {
+      console.log(err);
+    }
+  }
+
+  function safeParse(data, fallback) {
+    try {
+      if (!data) return fallback;
+      if (typeof data === "object") return data;
+      return JSON.parse(data);
     } catch {
-      return fb;
+      return fallback;
     }
   }
 
   // =========================
-  // LOAD GAMES (ONLY USER-RELATED)
+  // WALLET SAFE UPDATE
   // =========================
-  async function loadGames() {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      GAME_COLLECTION
-    );
-
-    const mine = (res.documents || []).filter((g) => {
-      const players = safeJSON(g.players, []);
-
-      return players.includes(user?.$id);
-    });
-
-    setGames(mine);
-
-    // 👇 find running game
-    const running = mine.find((g) => g.status !== "finished");
-    setActiveGame(running || null);
-  }
-
-  // =========================
-  // LIMIT CHECK
-  // =========================
-  function canPlayMore() {
-    const running = games.filter((g) => g.status !== "finished");
-    return running.length < MAX_ACTIVE;
-  }
-
-  // =========================
-  // CREATE GAME
-  // =========================
-  async function createGame() {
-    if (!canPlayMore()) return setMsg("Finish a game first (max 5)");
-
-    if (wallet.balance < stake) return setMsg("Insufficient balance");
-
-    const u = await account.get();
-
-    await databases.createDocument(
-      DATABASE_ID,
-      GAME_COLLECTION,
-      ID.unique(),
-      {
-        hostId: u.$id,
-        stake,
-        players: JSON.stringify([u.$id]),
-        positions: JSON.stringify({ A: 1, B: 1 }),
-        turn: "A",
-        status: "waiting",
-        winner: ""
-      }
-    );
-
-    setMsg("Game created");
-    loadGames();
-  }
-
-  // =========================
-  // JOIN GAME
-  // =========================
-  async function joinGame(game) {
-    const u = await account.get();
-
-    if (game.hostId === u.$id) {
-      return setMsg("You cannot join your own game");
-    }
-
+  async function updateWallet(amount) {
     const fresh = await databases.getDocument(
       DATABASE_ID,
-      GAME_COLLECTION,
-      game.$id
+      WALLET_COLLECTION,
+      wallet.$id
     );
-
-    const players = safeJSON(fresh.players, []);
-
-    if (players.includes(u.$id)) {
-      return goGame?.(fresh.$id);
-    }
-
-    if (players.length >= MAX_PLAYERS) {
-      return setMsg("Game full");
-    }
-
-    if (wallet.balance < fresh.stake) {
-      return setMsg("Insufficient balance");
-    }
-
-    players.push(u.$id);
 
     await databases.updateDocument(
       DATABASE_ID,
-      GAME_COLLECTION,
-      fresh.$id,
+      WALLET_COLLECTION,
+      wallet.$id,
       {
-        players: JSON.stringify(players),
-        status: players.length === 2 ? "playing" : "waiting"
+        balance: Number(fresh.balance) + amount
       }
     );
+  }
 
-    goGame?.(fresh.$id);
+  async function deductWallet(amount) {
+    const fresh = await databases.getDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id
+    );
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      wallet.$id,
+      {
+        balance: Number(fresh.balance) - amount
+      }
+    );
+  }
+
+  // =========================
+  // CREATE ROOM
+  // =========================
+  async function createRoom() {
+    if (!user || loading) return;
+
+    setLoading(true);
+    setMessage("");
+
+    try {
+      if (stake < 200) {
+        setMessage("Minimum stake is ₦200");
+        return;
+      }
+
+      const freshWallet = await databases.getDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id
+      );
+
+      if (Number(freshWallet.balance) < stake) {
+        setMessage("Insufficient balance");
+        return;
+      }
+
+      await deductWallet(stake);
+
+      await databases.createDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        ID.unique(),
+        {
+          hostId: user.$id,
+          stake,
+          status: "waiting",
+          players: JSON.stringify([user.$id]),
+          joinedUsers: JSON.stringify({ [user.$id]: true }),
+          gameId: ""
+        }
+      );
+
+      setMessage("Room created");
+
+    } catch (e) {
+      console.log(e);
+      setMessage("Create failed");
+    }
+
+    setLoading(false);
+    loadGames(user.$id);
+  }
+
+  // =========================
+  // JOIN ROOM
+  // =========================
+  async function joinRoom(room) {
+    if (loading) return;
+
+    setLoading(true);
+
+    try {
+      const fresh = await databases.getDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        room.$id
+      );
+
+      if (fresh.hostId === user.$id) {
+        setMessage("You cannot join your own game");
+        return;
+      }
+
+      const players = safeParse(fresh.players, []);
+      const joined = safeParse(fresh.joinedUsers, {});
+
+      if (joined[user.$id]) {
+        setMessage("Already joined");
+        return;
+      }
+
+      if (players.length >= MAX_PLAYERS) {
+        setMessage("Room full");
+        return;
+      }
+
+      const freshWallet = await databases.getDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id
+      );
+
+      if (Number(freshWallet.balance) < fresh.stake) {
+        setMessage("Insufficient balance");
+        return;
+      }
+
+      await deductWallet(fresh.stake);
+
+      players.push(user.$id);
+      joined[user.$id] = true;
+
+      const full = players.length === MAX_PLAYERS;
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        room.$id,
+        {
+          players: JSON.stringify(players),
+          joinedUsers: JSON.stringify(joined),
+          status: full ? "matched" : "waiting"
+        }
+      );
+
+      if (full) {
+        const total = fresh.stake * 2;
+        const adminCut = total * ADMIN_CUT;
+
+        const admin = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", ADMIN_USER_ID), Query.limit(1)]
+        );
+
+        if (admin.documents.length) {
+          const aw = admin.documents[0];
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            aw.$id,
+            {
+              balance: Number(aw.balance) + adminCut
+            }
+          );
+        }
+
+        const game = await databases.createDocument(
+          DATABASE_ID,
+          SNAKE_GAME_COLLECTION,
+          ID.unique(),
+          {
+            lobbyId: room.$id,
+            players: JSON.stringify(players),
+            status: "playing",
+            turn: players[0],
+            pot: total - adminCut,
+            winner: ""
+          }
+        );
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          SNAKE_LOBBY_COLLECTION,
+          room.$id,
+          {
+            gameId: game.$id,
+            status: "playing"
+          }
+        );
+
+        goGame(game.$id);
+      }
+
+    } catch (e) {
+      console.log(e);
+      setMessage("Join failed");
+    }
+
+    setLoading(false);
+    loadGames(user.$id);
   }
 
   // =========================
@@ -167,56 +322,51 @@ export default function SnakeLobby({ goGame, back }) {
     <div style={styles.container}>
       <h2>🐍 Snake Lobby</h2>
 
-      <p style={{ color: "yellow" }}>{msg}</p>
-
-      {/* CREATE */}
-      <div style={styles.card}>
+      <div style={styles.box}>
         <input
           type="number"
           value={stake}
           onChange={(e) => setStake(Number(e.target.value))}
-          style={styles.input}
         />
 
-        <button onClick={createGame} style={styles.createBtn}>
-          Create Game
+        <button onClick={createRoom} disabled={loading} style={styles.create}>
+          Create Room
         </button>
+
+        <p>{message}</p>
       </div>
 
-      {/* MY RUNNING GAME (ONLY USER CAN SEE) */}
-      {activeGame && (
-        <div style={styles.active}>
-          <h3>🔥 Your Running Game</h3>
-          <p>Status: {activeGame.status}</p>
+      <h3>🔥 Your Active Game</h3>
 
-          <button
-            style={styles.resumeBtn}
-            onClick={() => goGame?.(activeGame.$id)}
-          >
-            ▶ Resume Game
+      {myGames.map(g => {
+        const players = safeParse(g.players, []);
+        return (
+          <div key={g.$id} style={styles.card}>
+            <p>Status: {g.status}</p>
+
+            {g.gameId && (
+              <button
+                style={styles.resume}
+                onClick={() => goGame(g.gameId)}
+              >
+                ▶ Resume
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      <h3>🎯 Available Games</h3>
+
+      {availableGames.map(g => (
+        <div key={g.$id} style={styles.card}>
+          <p>Stake: ₦{g.stake}</p>
+
+          <button onClick={() => joinRoom(g)} disabled={loading}>
+            Join
           </button>
         </div>
-      )}
-
-      {/* AVAILABLE GAMES */}
-      <h3>🎮 Available Games</h3>
-
-      {games
-        .filter((g) => g.status === "waiting")
-        .map((g) => {
-          const players = safeJSON(g.players, []);
-
-          return (
-            <div key={g.$id} style={styles.room}>
-              <p>Stake ₦{g.stake}</p>
-              <p>Players: {players.length}/{MAX_PLAYERS}</p>
-
-              <button onClick={() => joinGame(g)}>
-                Join Game
-              </button>
-            </div>
-          );
-        })}
+      ))}
 
       <button onClick={back}>Back</button>
     </div>
@@ -233,46 +383,30 @@ const styles = {
     color: "white",
     minHeight: "100vh"
   },
-
-  card: {
+  box: {
     background: "#1e293b",
-    padding: 15,
+    padding: 10,
     borderRadius: 10
   },
-
-  input: {
-    width: "100%",
-    padding: 10
+  card: {
+    background: "#111827",
+    padding: 10,
+    marginTop: 10,
+    borderRadius: 8
   },
-
-  createBtn: {
+  create: {
     background: "orange",
     padding: 10,
     width: "100%",
     marginTop: 10,
-    fontWeight: "bold"
-  },
-
-  room: {
-    background: "#111827",
-    padding: 10,
-    marginTop: 10,
-    borderRadius: 10
-  },
-
-  active: {
-    background: "#065f46",
-    padding: 15,
-    marginTop: 15,
-    borderRadius: 10
-  },
-
-  resumeBtn: {
-    background: "#22c55e",
-    padding: 10,
     border: "none",
-    color: "white",
+    borderRadius: 8
+  },
+  resume: {
+    background: "green",
+    padding: 10,
     borderRadius: 8,
-    fontWeight: "bold"
+    color: "white",
+    border: "none"
   }
 };
