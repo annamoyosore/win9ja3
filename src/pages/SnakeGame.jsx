@@ -3,6 +3,9 @@ import { databases, DATABASE_ID } from "../lib/appwrite";
 import boardImg from "./board.png";
 
 const GAME = "snakegame";
+const MATCH = "matches";
+const LOBBY = "snakelobby";
+const WALLET = "wallets";
 const SIZE = 100;
 
 // =====================
@@ -64,18 +67,21 @@ function getCoords(pos) {
 }
 
 // =====================
-// MAIN GAME
+// GAME COMPONENT
 // =====================
 export default function SnakeGame({ gameId, userId }) {
   const [game, setGame] = useState(null);
   const [positions, setPositions] = useState({ A: 1, B: 1 });
+
   const [dice, setDice] = useState(1);
   const [moving, setMoving] = useState(false);
+
   const [error, setError] = useState("");
   const [winner, setWinner] = useState("");
   const [showWin, setShowWin] = useState(false);
 
-  const lock = useRef(false);
+  const payoutLock = useRef(false);
+  const actionLock = useRef(false);
 
   // =====================
   // LOAD GAME
@@ -98,7 +104,7 @@ export default function SnakeGame({ gameId, userId }) {
   }, [gameId]);
 
   // =====================
-  // CHECK TURN (STRICT)
+  // TURN CHECK
   // =====================
   function isMyTurn() {
     return game?.turn === userId;
@@ -120,8 +126,8 @@ export default function SnakeGame({ gameId, userId }) {
       current += 1;
       if (current > SIZE) current = SIZE;
 
-      setPositions((prev) => ({
-        ...prev,
+      setPositions((p) => ({
+        ...p,
         [player]: current,
       }));
     }
@@ -131,8 +137,8 @@ export default function SnakeGame({ gameId, userId }) {
     if (snakes[final]) final = snakes[final];
     if (ladders[final]) final = ladders[final];
 
-    setPositions((prev) => ({
-      ...prev,
+    setPositions((p) => ({
+      ...p,
       [player]: final,
     }));
 
@@ -140,17 +146,16 @@ export default function SnakeGame({ gameId, userId }) {
   }
 
   // =====================
-  // PLAY TURN (LOCKED)
+  // PLAY TURN
   // =====================
   async function playTurn() {
-    if (!game || moving || lock.current) return;
+    if (!game || moving || actionLock.current) return;
 
-    // 🔒 HARD TURN LOCK
     if (!isMyTurn()) {
       return showError("❌ Not your turn");
     }
 
-    lock.current = true;
+    actionLock.current = true;
     setMoving(true);
 
     const d = rollDice();
@@ -176,10 +181,7 @@ export default function SnakeGame({ gameId, userId }) {
       turn: nextTurn,
       status: isWin ? "finished" : "playing",
       winner: isWin ? game.turn : "",
-      history: [
-        `Player ${player} rolled ${d}`,
-        ...(game.history || []),
-      ].slice(0, 6),
+      history: keepLast6(game.history, `Player ${player} rolled ${d}`),
     };
 
     await databases.updateDocument(
@@ -194,12 +196,97 @@ export default function SnakeGame({ gameId, userId }) {
     if (isWin) {
       setWinner(player);
       setShowWin(true);
-
-      setTimeout(() => setShowWin(false), 3000);
+      await handlePayout(updated);
     }
 
     setMoving(false);
-    lock.current = false;
+    actionLock.current = false;
+  }
+
+  // =====================
+  // 💰 PAYOUT + LOBBY CLOSE
+  // =====================
+  async function handlePayout(g) {
+    if (payoutLock.current) return;
+    payoutLock.current = true;
+
+    try {
+      const match = await databases.getDocument(
+        DATABASE_ID,
+        MATCH,
+        g.matchId
+      );
+
+      const lobby = await databases.getDocument(
+        DATABASE_ID,
+        LOBBY,
+        match.lobbyId
+      );
+
+      const pot = Number(match.pot || 0);
+
+      if (!g.winner || pot <= 0) return;
+
+      const walletRes = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET,
+        [
+          { method: "equal", attribute: "userId", value: g.winner }
+        ]
+      );
+
+      if (!walletRes.documents.length) return;
+
+      const wallet = walletRes.documents[0];
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET,
+        wallet.$id,
+        {
+          balance: Number(wallet.balance || 0) + pot,
+        }
+      );
+
+      // close match
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH,
+        match.$id,
+        {
+          pot: 0,
+          status: "finished",
+          payoutDone: true,
+        }
+      );
+
+      // close lobby (IMPORTANT)
+      await databases.updateDocument(
+        DATABASE_ID,
+        LOBBY,
+        lobby.$id,
+        {
+          status: "finished",
+          active: false,
+          gameStatus: "finished",
+        }
+      );
+
+      // mark game done
+      await databases.updateDocument(
+        DATABASE_ID,
+        GAME,
+        gameId,
+        {
+          payoutDone: true,
+          status: "finished",
+        }
+      );
+
+      console.log("✅ payout complete + lobby closed");
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   // =====================
@@ -211,17 +298,14 @@ export default function SnakeGame({ gameId, userId }) {
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN */}
+      {error && <div style={styles.error}>{error}</div>}
+
       <div style={styles.info}>
         🎲 Dice: {dice}
         <br />
         {isTurn ? "🟢 Your Turn" : "🔴 Opponent Turn"}
       </div>
 
-      {/* ERROR */}
-      {error && <div style={styles.error}>{error}</div>}
-
-      {/* BOARD */}
       <div style={styles.board}>
         <img src={boardImg} style={{ width: "100%", height: "100%" }} />
 
@@ -239,7 +323,6 @@ export default function SnakeGame({ gameId, userId }) {
         ))}
       </div>
 
-      {/* BUTTON */}
       <button
         onClick={playTurn}
         disabled={!isTurn || moving || game.status === "finished"}
@@ -248,16 +331,14 @@ export default function SnakeGame({ gameId, userId }) {
         🎲 Roll Dice
       </button>
 
-      {/* WIN POPUP */}
       {showWin && (
         <div style={styles.winBox}>
           🏆 Player {winner} WON!
         </div>
       )}
 
-      {/* HISTORY */}
       <div style={styles.history}>
-        {(game.history || []).map((h, i) => (
+        {game.history?.map((h, i) => (
           <div key={i}>{h}</div>
         ))}
       </div>
