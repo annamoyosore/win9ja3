@@ -4,6 +4,7 @@ import {
   DATABASE_ID,
   ID,
   Query,
+  account,
 } from "../lib/appwrite";
 
 // 🐍 COLLECTIONS
@@ -14,10 +15,21 @@ const SNAKE_GAME_COLLECTION = "snakegame";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 10;
 
-export default function SnakeLobby({ userId }) {
+export default function SnakeLobby() {
+  const [userId, setUserId] = useState(null);
   const [lobbies, setLobbies] = useState([]);
   const [stake, setStake] = useState(100);
   const [creating, setCreating] = useState(false);
+
+  // =========================
+  // GET LOGGED IN USER
+  // =========================
+  useEffect(() => {
+    account
+      .get()
+      .then((res) => setUserId(res.$id))
+      .catch(() => setUserId(null));
+  }, []);
 
   // =========================
   // LOAD LOBBIES
@@ -88,9 +100,7 @@ export default function SnakeLobby({ userId }) {
         return alert("Lobby already full");
       }
 
-      // =========================
-      // POT + ADMIN CUT CALCULATION
-      // =========================
+      // 💰 POT + ADMIN CUT
       const totalPot = lobby.stake * 2;
       const adminCut = Math.floor(
         (totalPot * ADMIN_CUT_PERCENT) / 100
@@ -109,9 +119,7 @@ export default function SnakeLobby({ userId }) {
         }
       );
 
-      // =========================
-      // CREATE GAME
-      // =========================
+      // create game
       const game = await databases.createDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
@@ -129,7 +137,6 @@ export default function SnakeLobby({ userId }) {
         }
       );
 
-      // link game
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -139,9 +146,7 @@ export default function SnakeLobby({ userId }) {
         }
       );
 
-      // =========================
-      // ADMIN CUT WALLET (OPTIONAL)
-      // =========================
+      // 👑 ADMIN WALLET ENTRY
       await databases.createDocument(
         DATABASE_ID,
         "wallets",
@@ -165,6 +170,15 @@ export default function SnakeLobby({ userId }) {
   // =========================
   // UI
   // =========================
+  if (!userId) {
+    return (
+      <div style={styles.container}>
+        <h2>🐍 Snake Lobby</h2>
+        <p>Please login to continue</p>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Lobby (2 Players)</h2>
