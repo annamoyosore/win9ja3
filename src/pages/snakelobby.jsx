@@ -9,7 +9,7 @@ import {
 import {
   SNAKE_LOBBY_COLLECTION,
   SNAKE_GAME_COLLECTION,
-} from "../config/snake";
+} from "../lib/appwrite";
 
 export default function SnakeLobby({ userId }) {
   const [lobbies, setLobbies] = useState([]);
