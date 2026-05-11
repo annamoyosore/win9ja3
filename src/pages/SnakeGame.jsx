@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { databases, DATABASE_ID } from "../lib/appwrite";
+import { databases, DATABASE_ID, Query } from "../lib/appwrite";
 import boardImg from "./board.png";
 
 const SNAKE_GAME_COLLECTION = "snakegame";
@@ -60,8 +60,13 @@ function applyEffects(pos) {
   return pos;
 }
 
+// keep only last 3 moves
+function trimHistory(history = []) {
+  return history.slice(0, 3);
+}
+
 // =========================
-// 🎉 FLOWERS ANIMATION
+// FLOWERS
 // =========================
 function fireFlowers() {
   const canvas = document.createElement("canvas");
@@ -82,7 +87,7 @@ function fireFlowers() {
 
   const emojis = ["🌸", "🌺", "🌼", "💐", "🌷"];
 
-  const pieces = Array.from({ length: 90 }).map(() => ({
+  const pieces = Array.from({ length: 80 }).map(() => ({
     x: Math.random() * canvas.width,
     y: Math.random() * -canvas.height,
     emoji: emojis[Math.floor(Math.random() * emojis.length)],
@@ -115,8 +120,8 @@ export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
   const [positions, setPositions] = useState({ A: 1, B: 1 });
   const [turn, setTurn] = useState("A");
-  const [dice, setDice] = useState(1);
 
+  const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
   const [moving, setMoving] = useState(false);
 
@@ -151,23 +156,27 @@ export default function SnakeGame({ gameId }) {
 
     for (let i = 0; i < steps; i++) {
       await sleep(120);
+
       pos++;
       if (pos > SIZE) pos = SIZE;
 
-      setPositions((p) => ({ ...p, [player]: pos }));
+      setPositions((prev) => ({
+        ...prev,
+        [player]: pos,
+      }));
     }
 
     return applyEffects(pos);
   }
 
   // =========================
-  // PAYOUT WINNER
+  // PAYOUT
   // =========================
-  async function payout(winnerUserId, pot) {
+  async function payout(userId, pot) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
-      [Query.equal("userId", winnerUserId), Query.limit(1)]
+      [Query.equal("userId", userId), Query.limit(1)]
     );
 
     if (res.documents.length) {
@@ -197,6 +206,7 @@ export default function SnakeGame({ gameId }) {
     try {
       const player = turn;
 
+      // 🎲 animation
       for (let i = 0; i < 6; i++) {
         setDice(Math.floor(Math.random() * 6) + 1);
         await sleep(60);
@@ -205,10 +215,15 @@ export default function SnakeGame({ gameId }) {
       const d = secureDice();
       setDice(d);
 
-      const final = await move(player, d);
+      const finalPos = await move(player, d);
 
-      const winner = final >= SIZE ? player : null;
+      const winner = finalPos >= SIZE ? player : null;
       const nextTurn = player === "A" ? "B" : "A";
+
+      const newHistory = trimHistory([
+        `Player ${player} rolled ${d} → ${finalPos}`,
+        ...(game.history || []),
+      ]);
 
       const updated = await databases.updateDocument(
         DATABASE_ID,
@@ -217,11 +232,12 @@ export default function SnakeGame({ gameId }) {
         {
           positions: JSON.stringify({
             ...positions,
-            [player]: final,
+            [player]: finalPos,
           }),
           turn: winner ? null : nextTurn,
           status: winner ? "finished" : "running",
           winner: winner || "",
+          history: newHistory,
         }
       );
 
@@ -239,13 +255,10 @@ export default function SnakeGame({ gameId }) {
 
         alert(`🏆 Player ${winner} wins ₦${pot}`);
 
-        // 💰 PAY WINNER
         await payout(winnerUserId, pot);
 
-        // 🌸 ANIMATION
         fireFlowers();
 
-        // 🏁 CLOSE GAME
         await databases.updateDocument(
           DATABASE_ID,
           SNAKE_GAME_COLLECTION,
@@ -257,7 +270,6 @@ export default function SnakeGame({ gameId }) {
           }
         );
 
-        // 🏁 CLOSE LOBBY
         await databases.updateDocument(
           DATABASE_ID,
           SNAKE_LOBBY_COLLECTION,
@@ -267,7 +279,6 @@ export default function SnakeGame({ gameId }) {
           }
         );
 
-        // 🚪 BACK TO DASHBOARD
         setTimeout(() => {
           window.location.href = "/dashboard";
         }, 3000);
@@ -277,7 +288,10 @@ export default function SnakeGame({ gameId }) {
     } finally {
       setRolling(false);
       setMoving(false);
-      setTimeout(() => (lock.current = false), 400);
+
+      setTimeout(() => {
+        lock.current = false;
+      }, 300);
     }
   }
 
@@ -288,7 +302,6 @@ export default function SnakeGame({ gameId }) {
       <h2>🐍 Snake Game</h2>
 
       <div style={styles.top}>
-        <div>🎲 Dice: {dice}</div>
         <div>Turn: {turn}</div>
         <div>🏦 Pot: ₦{game?.pot || 0}</div>
       </div>
@@ -310,9 +323,16 @@ export default function SnakeGame({ gameId }) {
         ))}
       </div>
 
-      <button onClick={playTurn} disabled={rolling || moving}>
-        🎲 Roll Dice
-      </button>
+      {/* 🎲 BUTTON + DICE SIDE BY SIDE */}
+      <div style={styles.controls}>
+        <button onClick={playTurn} disabled={rolling || moving}>
+          🎲 Roll Dice
+        </button>
+
+        <div style={styles.diceBox}>
+          🎲 {dice}
+        </div>
+      </div>
     </div>
   );
 }
@@ -328,17 +348,24 @@ const styles = {
     minHeight: "100vh",
     padding: 15,
   },
+
   top: {
     display: "flex",
     justifyContent: "space-around",
   },
+
   boardWrapper: {
     position: "relative",
     width: 360,
     height: 360,
     margin: "20px auto",
   },
-  board: { width: "100%", height: "100%" },
+
+  board: {
+    width: "100%",
+    height: "100%",
+  },
+
   token: {
     position: "absolute",
     width: 28,
@@ -349,5 +376,20 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     fontWeight: "bold",
+  },
+
+  controls: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 15,
+    marginTop: 10,
+  },
+
+  diceBox: {
+    padding: "10px 15px",
+    background: "#1e293b",
+    borderRadius: 10,
+    fontSize: 18,
   },
 };
