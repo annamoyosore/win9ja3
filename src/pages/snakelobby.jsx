@@ -50,11 +50,13 @@ async function createGame(lobby, opponentId, pot) {
     ID.unique(),
     {
       lobbyId: lobby.$id,
+      hostId: lobby.hostId,
+      opponentId,
       players: `${lobby.hostId},${opponentId}`,
       status: "running",
       turn: lobby.hostId,
-      payoutDone: false,
-      pot
+      pot,
+      payoutDone: false
     }
   );
 }
@@ -92,7 +94,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD LOBBIES
+  // LOAD LOBBIES + ACTIVE GAMES
   // =========================
   async function loadLobbies(userId) {
     const res = await databases.listDocuments(
@@ -101,7 +103,7 @@ export default function Lobby({ goGame, back }) {
       [Query.limit(100)]
     );
 
-    // 🟡 WAITING LOBBIES
+    // 🟡 WAITING
     const waiting = res.documents.filter(
       (m) =>
         m.status === "waiting" &&
@@ -109,11 +111,16 @@ export default function Lobby({ goGame, back }) {
         m.hostId !== userId
     );
 
-    // 🔥 ACTIVE LOBBIES (FIXED)
+    // 🔥 ACTIVE (FIXED + BULLETPROOF)
     const active = res.documents.filter(
       (m) =>
-        m.status === "matched" &&
-        (m.hostId === userId || m.opponentId === userId)
+        (m.hostId === userId || m.opponentId === userId) &&
+        (
+          m.status === "matched" ||
+          m.status === "running" ||
+          m.status === "playing" ||
+          m.status === "active"
+        )
     );
 
     setMatches(waiting);
@@ -220,7 +227,7 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // admin payout
+      // admin cut
       const adminRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -272,15 +279,16 @@ export default function Lobby({ goGame, back }) {
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>₦{m.stake}</p>
-
-          <button onClick={() => joinMatch(m)}>
-            Join
-          </button>
+          <button onClick={() => joinMatch(m)}>Join</button>
         </div>
       ))}
 
       {/* ACTIVE */}
       <h3>🔥 Active Games</h3>
+
+      {activeMatches.length === 0 && (
+        <p>No active games yet</p>
+      )}
 
       {activeMatches.map((m) => (
         <div key={m.$id} style={styles.card}>
@@ -289,8 +297,8 @@ export default function Lobby({ goGame, back }) {
             <p>Status: {m.status}</p>
           </div>
 
-          {/* ✅ ALWAYS SHOW RESUME IF MATCHED */}
-          {m.status === "matched" && m.gameId && (
+          {/* ALWAYS SHOW RESUME */}
+          {m.gameId && (
             <button
               style={styles.resumeBtn}
               onClick={() => goGame(m.gameId, m.stake)}
