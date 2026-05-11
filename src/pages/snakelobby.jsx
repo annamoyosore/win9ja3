@@ -72,8 +72,6 @@ export default function Lobby({ goGame, back }) {
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
 
-  const notifiedTurns = useRef({});
-
   useEffect(() => {
     init();
   }, []);
@@ -94,7 +92,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LOAD LOBBIES + ACTIVE GAMES
+  // LOAD LOBBIES (FIXED)
   // =========================
   async function loadLobbies(userId) {
     const res = await databases.listDocuments(
@@ -103,25 +101,27 @@ export default function Lobby({ goGame, back }) {
       [Query.limit(100)]
     );
 
-    // 🟡 WAITING
-    const waiting = res.documents.filter(
-      (m) =>
-        m.status === "waiting" &&
-        !m.opponentId &&
+    // 🟡 WAITING (FIXED BULLETPROOF)
+    const waiting = res.documents.filter((m) => {
+      return (
+        (m.status || "").toLowerCase() === "waiting" &&
+        (!m.opponentId || m.opponentId === null || m.opponentId === "") &&
         m.hostId !== userId
-    );
+      );
+    });
 
-    // 🔥 ACTIVE (FIXED + BULLETPROOF)
-    const active = res.documents.filter(
-      (m) =>
+    // 🔥 ACTIVE GAMES
+    const active = res.documents.filter((m) => {
+      return (
         (m.hostId === userId || m.opponentId === userId) &&
+        m.gameId &&
         (
-          m.status === "matched" ||
-          m.status === "running" ||
-          m.status === "playing" ||
-          m.status === "active"
+          (m.status || "").toLowerCase() === "matched" ||
+          (m.status || "").toLowerCase() === "running" ||
+          (m.status || "").toLowerCase() === "playing"
         )
-    );
+      );
+    });
 
     setMatches(waiting);
     setActiveMatches(active);
@@ -170,6 +170,7 @@ export default function Lobby({ goGame, back }) {
 
       setStake("");
       loadLobbies(user.$id);
+
     } catch (err) {
       alert(err.message);
     }
@@ -227,26 +228,6 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // admin cut
-      const adminRes = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", ADMIN_ID), Query.limit(1)]
-      );
-
-      if (adminRes.documents.length) {
-        const admin = adminRes.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          admin.$id,
-          {
-            balance: Number(admin.balance || 0) + adminCut
-          }
-        );
-      }
-
       goGame(game.$id, fresh.stake);
 
     } catch (err) {
@@ -276,6 +257,8 @@ export default function Lobby({ goGame, back }) {
       {/* WAITING */}
       <h3>🟡 Waiting Lobbies</h3>
 
+      {matches.length === 0 && <p>No waiting lobbies</p>}
+
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>₦{m.stake}</p>
@@ -286,9 +269,7 @@ export default function Lobby({ goGame, back }) {
       {/* ACTIVE */}
       <h3>🔥 Active Games</h3>
 
-      {activeMatches.length === 0 && (
-        <p>No active games yet</p>
-      )}
+      {activeMatches.length === 0 && <p>No active games</p>}
 
       {activeMatches.map((m) => (
         <div key={m.$id} style={styles.card}>
@@ -297,7 +278,6 @@ export default function Lobby({ goGame, back }) {
             <p>Status: {m.status}</p>
           </div>
 
-          {/* ALWAYS SHOW RESUME */}
           {m.gameId && (
             <button
               style={styles.resumeBtn}
