@@ -11,11 +11,10 @@ import {
 const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
 
-const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 12;
 
 // =========================
-// WALLET FETCH
+// WALLET
 // =========================
 async function getWallet(userId) {
   const res = await databases.listDocuments(
@@ -31,31 +30,33 @@ export default function Snakelobby({ goGame }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
-  const [lobbies, setLobbies] = useState([]);
   const [stake, setStake] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [joining, setJoining] = useState(null);
 
+  const [waiting, setWaiting] = useState([]);
+  const [active, setActive] = useState([]);
+
+  const [loadingCreate, setLoadingCreate] = useState(false);
+  const [loadingJoin, setLoadingJoin] = useState(null);
+
+  // =========================
+  // INIT
+  // =========================
   useEffect(() => {
     init();
   }, []);
 
   async function init() {
-    try {
-      const u = await account.get();
-      setUser(u);
+    const u = await account.get();
+    setUser(u);
 
-      const w = await getWallet(u.$id);
-      setWallet(w);
+    const w = await getWallet(u.$id);
+    setWallet(w);
 
-      loadLobbies(u.$id);
-    } catch (err) {
-      console.error(err);
-    }
+    loadLobbies(u.$id);
   }
 
   // =========================
-  // LOAD WAITING LOBBIES ONLY
+  // LOAD LOBBIES (FIXED)
   // =========================
   async function loadLobbies(userId) {
     const res = await databases.listDocuments(
@@ -64,15 +65,29 @@ export default function Snakelobby({ goGame }) {
       [Query.limit(100)]
     );
 
-    const waiting = res.documents.filter((m) => {
+    // 🧠 HOST MUST SEE OWN + OPPONENT LOBBIES
+    const mine = res.documents.filter((m) => {
       return (
-        (m.status || "").toLowerCase() === "waiting" &&
-        !m.opponentId &&
-        m.hostId !== userId
+        m.hostId === userId ||
+        m.opponentId === userId
       );
     });
 
-    setLobbies(waiting);
+    // 🟡 WAITING (SHOW HOST TOO)
+    const waitingLobbies = mine.filter((m) => {
+      return (m.status || "").toLowerCase() === "waiting";
+    });
+
+    // 🟢 ACTIVE (MATCHED + GAME EXISTS)
+    const activeGames = mine.filter((m) => {
+      return (
+        (m.status || "").toLowerCase() === "matched" &&
+        m.gameId
+      );
+    });
+
+    setWaiting(waitingLobbies);
+    setActive(activeGames);
   }
 
   // =========================
@@ -89,7 +104,7 @@ export default function Snakelobby({ goGame }) {
       return alert("Insufficient balance");
     }
 
-    setLoading(true);
+    setLoadingCreate(true);
 
     try {
       await databases.updateDocument(
@@ -120,20 +135,19 @@ export default function Snakelobby({ goGame }) {
       loadLobbies(user.$id);
 
     } catch (err) {
-      console.error(err);
       alert(err.message);
     }
 
-    setLoading(false);
+    setLoadingCreate(false);
   }
 
   // =========================
-  // JOIN LOBBY → MATCHED CREATES GAME
+  // JOIN LOBBY (MATCHED CREATES GAME)
   // =========================
   async function joinLobby(lobby) {
-    if (joining) return;
+    if (loadingJoin) return;
 
-    setJoining(lobby.$id);
+    setLoadingJoin(lobby.$id);
 
     try {
       const fresh = await databases.getDocument(
@@ -142,14 +156,12 @@ export default function Snakelobby({ goGame }) {
         lobby.$id
       );
 
-      // 🚫 prevent self join
       if (fresh.hostId === user.$id) {
         throw new Error("Cannot join your own lobby");
       }
 
-      // 🚫 already taken
       if (fresh.opponentId) {
-        throw new Error("Lobby already matched");
+        throw new Error("Already matched");
       }
 
       const amount = Number(fresh.stake);
@@ -168,7 +180,7 @@ export default function Snakelobby({ goGame }) {
         }
       );
 
-      // 🔒 STEP 1: set MATCHED (TRIGGER STATE)
+      // 🔒 SET MATCHED
       const matchedLobby = await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -183,7 +195,7 @@ export default function Snakelobby({ goGame }) {
       const adminCut = Math.floor((total * ADMIN_CUT_PERCENT) / 100);
       const finalPot = total - adminCut;
 
-      // 🎮 STEP 2: CREATE GAME (ONLY HERE)
+      // 🎮 CREATE GAME
       const game = await databases.createDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
@@ -199,7 +211,7 @@ export default function Snakelobby({ goGame }) {
         }
       );
 
-      // 🔗 STEP 3: LINK GAME TO LOBBY
+      // 🔗 LINK GAME
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -210,15 +222,13 @@ export default function Snakelobby({ goGame }) {
         }
       );
 
-      // 🚀 OPEN GAME IMMEDIATELY
       goGame(game.$id, amount);
 
     } catch (err) {
-      console.error(err);
       alert(err.message);
     }
 
-    setJoining(null);
+    setLoadingJoin(null);
   }
 
   // =========================
@@ -234,21 +244,55 @@ export default function Snakelobby({ goGame }) {
         placeholder="Stake (min ₦150)"
       />
 
-      <button onClick={createLobby} disabled={loading}>
-        {loading ? "Creating..." : "Create Lobby"}
+      <button onClick={createLobby} disabled={loadingCreate}>
+        {loadingCreate ? "Creating..." : "Create Lobby"}
       </button>
 
-      <h3>🟡 Waiting Lobbies</h3>
+      {/* 🟡 WAITING */}
+      <h3>Waiting Games</h3>
 
-      {lobbies.length === 0 && <p>No lobbies available</p>}
+      {waiting.length === 0 && <p>No waiting games</p>}
 
-      {lobbies.map((l) => (
-        <div key={l.$id} style={styles.card}>
-          <p>₦{l.stake}</p>
+      {waiting.map((m) => (
+        <div key={m.$id} style={styles.card}>
+          <div>
+            <p>₦{m.stake}</p>
 
-          <button onClick={() => joinLobby(l)} disabled={joining === l.$id}>
-            {joining === l.$id ? "Joining..." : "Join"}
-          </button>
+            {m.hostId === user.$id ? (
+              <p>⏳ Waiting for opponent...</p>
+            ) : (
+              <p>Available</p>
+            )}
+          </div>
+
+          {m.hostId !== user.$id && (
+            <button onClick={() => joinLobby(m)} disabled={loadingJoin === m.$id}>
+              Join
+            </button>
+          )}
+        </div>
+      ))}
+
+      {/* 🟢 ACTIVE */}
+      <h3>Active Games</h3>
+
+      {active.length === 0 && <p>No active games</p>}
+
+      {active.map((m) => (
+        <div key={m.$id} style={styles.card}>
+          <div>
+            <p>₦{m.stake}</p>
+            <p>Matched Game</p>
+          </div>
+
+          {m.gameId && (
+            <button
+              style={styles.resume}
+              onClick={() => goGame(m.gameId, m.stake)}
+            >
+              ▶ Resume
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -256,7 +300,7 @@ export default function Snakelobby({ goGame }) {
 }
 
 // =========================
-// STYLES
+// STYLE
 // =========================
 const styles = {
   container: {
@@ -274,5 +318,14 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center"
+  },
+
+  resume: {
+    background: "#16a34a",
+    padding: "10px 18px",
+    borderRadius: 10,
+    border: "none",
+    color: "#fff",
+    fontWeight: "bold"
   }
 };
