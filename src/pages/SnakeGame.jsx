@@ -12,13 +12,12 @@ import boardImg from "./board.png";
 // COLLECTIONS
 // =========================
 const GAME_COLLECTION = "snakegame";
-const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const WALLET_COLLECTION = "wallets";
 
 const SIZE = 100;
 
 // =========================
-// GAME RULES
+// SNAKES & LADDERS
 // =========================
 const snakes = {
   50: 5,
@@ -80,7 +79,11 @@ export default function SnakeGameRoom({ gameId }) {
   const [user, setUser] = useState(null);
   const [game, setGame] = useState(null);
 
-  const [positions, setPositions] = useState({ A: 1, B: 1 });
+  const [positions, setPositions] = useState({
+    host: 1,
+    opponent: 1,
+  });
+
   const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
 
@@ -103,14 +106,17 @@ export default function SnakeGameRoom({ gameId }) {
       );
 
       setGame(res);
-      setPositions(JSON.parse(res.positions || '{"A":1,"B":1}'));
+
+      setPositions(
+        JSON.parse(res.positions || '{"host":1,"opponent":1}')
+      );
     }
 
     init();
   }, [gameId]);
 
   // =========================
-  // REALTIME
+  // REALTIME SYNC
   // =========================
   useEffect(() => {
     if (!gameId) return;
@@ -120,7 +126,7 @@ export default function SnakeGameRoom({ gameId }) {
       (res) => {
         const g = res.payload;
         setGame(g);
-        setPositions(JSON.parse(g.positions || '{"A":1,"B":1}'));
+        setPositions(JSON.parse(g.positions || '{"host":1,"opponent":1}'));
       }
     );
 
@@ -128,19 +134,20 @@ export default function SnakeGameRoom({ gameId }) {
   }, [gameId]);
 
   // =========================
-  // TURN LOGIC (NEW SYSTEM)
+  // TURN CHECK
   // =========================
-  const isMyTurn =
-    game &&
-    user &&
-    game.turn === user.$id;
+  const isMyTurn = game && user && game.turn === user.$id;
 
-  const myRole =
+  // =========================
+  // PLAYER ROLE
+  // =========================
+  const myKey =
     game?.hostId === user?.$id
-      ? "HOST"
-      : game?.opponentId === user?.$id
-      ? "OPPONENT"
-      : null;
+      ? "host"
+      : "opponent";
+
+  const otherKey =
+    myKey === "host" ? "opponent" : "host";
 
   // =========================
   // PAYOUT
@@ -149,10 +156,7 @@ export default function SnakeGameRoom({ gameId }) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       WALLET_COLLECTION,
-      [
-        Query.equal("userId", userId),
-        Query.limit(1),
-      ]
+      [Query.equal("userId", userId), Query.limit(1)]
     );
 
     if (!res.documents.length) return;
@@ -164,8 +168,7 @@ export default function SnakeGameRoom({ gameId }) {
       WALLET_COLLECTION,
       wallet.$id,
       {
-        balance:
-          Number(wallet.balance || 0) + Number(amount || 0),
+        balance: Number(wallet.balance || 0) + Number(amount || 0),
       }
     );
   }
@@ -173,7 +176,7 @@ export default function SnakeGameRoom({ gameId }) {
   // =========================
   // MOVE ANIMATION
   // =========================
-  async function animateMove(player, start, end) {
+  async function animateMove(key, start, end) {
     let pos = start;
 
     while (pos < end) {
@@ -182,7 +185,7 @@ export default function SnakeGameRoom({ gameId }) {
 
       setPositions((p) => ({
         ...p,
-        [player]: pos,
+        [key]: pos,
       }));
     }
 
@@ -190,7 +193,7 @@ export default function SnakeGameRoom({ gameId }) {
 
     setPositions((p) => ({
       ...p,
-      [player]: final,
+      [key]: final,
     }));
 
     return final;
@@ -213,36 +216,28 @@ export default function SnakeGameRoom({ gameId }) {
         gameId
       );
 
-      if (fresh.turn !== user.$id) {
-        alert("❌ Not your turn");
-        return;
-      }
+      if (fresh.turn !== user.$id) return;
 
       const roll = rollDice();
       setDice(roll);
 
-      const parsed = JSON.parse(fresh.positions || '{"A":1,"B":1}');
+      const currentPos =
+        JSON.parse(fresh.positions || '{"host":1,"opponent":1}')[myKey];
 
-      const currentPos = parsed[user.$id === fresh.hostId ? "A" : "B"];
+      let target = currentPos + roll;
+      if (target > SIZE) target = SIZE;
 
-      let end = currentPos + roll;
-      if (end > SIZE) end = SIZE;
-
-      const finalPos = await animateMove(
-        user.$id === fresh.hostId ? "A" : "B",
-        currentPos,
-        end
-      );
+      const finalPos = await animateMove(myKey, currentPos, target);
 
       const winner = finalPos >= SIZE ? user.$id : null;
 
       const nextTurn =
-        user.$id === fresh.hostId
+        fresh.turn === fresh.hostId
           ? fresh.opponentId
           : fresh.hostId;
 
       const history = trimHistory([
-        `Player rolled ${roll} → ${finalPos}`,
+        `Roll ${roll} → ${finalPos}`,
         ...(fresh.history || []),
       ]);
 
@@ -252,8 +247,8 @@ export default function SnakeGameRoom({ gameId }) {
         gameId,
         {
           positions: JSON.stringify({
-            ...parsed,
-            [user.$id === fresh.hostId ? "A" : "B"]: finalPos,
+            ...JSON.parse(fresh.positions),
+            [myKey]: finalPos,
           }),
 
           turn: winner ? null : nextTurn,
@@ -267,7 +262,7 @@ export default function SnakeGameRoom({ gameId }) {
       setPositions(JSON.parse(updated.positions));
 
       // =========================
-      // WIN + PAYOUT
+      // WIN FLOW
       // =========================
       if (winner) {
         const pot = Number(fresh.pot || 0);
@@ -314,25 +309,24 @@ export default function SnakeGameRoom({ gameId }) {
   // =========================
   if (!game) return <div style={{ color: "#fff" }}>Loading...</div>;
 
-  const playerKey = user?.$id === game?.hostId ? "A" : "B";
-
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
       <div style={styles.top}>
-        <div>🎮 You are Player {playerKey}</div>
+        <div>🎮 You are: {myKey.toUpperCase()}</div>
+        <div>🎯 Turn: {isMyTurn ? "YOUR TURN" : "WAIT"}</div>
       </div>
 
       <div style={styles.boardWrapper}>
         <img src={boardImg} style={styles.board} />
 
-        <div style={{ ...styles.token, ...getCoords(positions.A), background: "red" }}>
-          A
+        <div style={{ ...styles.token, ...getCoords(positions.host), background: "red" }}>
+          H
         </div>
 
-        <div style={{ ...styles.token, ...getCoords(positions.B), background: "blue" }}>
-          B
+        <div style={{ ...styles.token, ...getCoords(positions.opponent), background: "blue" }}>
+          O
         </div>
       </div>
 
@@ -341,7 +335,7 @@ export default function SnakeGameRoom({ gameId }) {
         disabled={!isMyTurn || rolling}
         style={styles.button}
       >
-        {isMyTurn ? "🎲 Roll Dice" : "⏳ Wait Turn"}
+        {rolling ? "Rolling..." : "🎲 Roll Dice"}
       </button>
 
       <div style={{ marginTop: 10 }}>🎲 {dice}</div>
