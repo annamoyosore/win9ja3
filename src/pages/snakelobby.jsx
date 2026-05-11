@@ -21,7 +21,7 @@ const WALLET_COLLECTION =
 
 // ✅ ADMIN USER ID
 const ADMIN_USER_ID =
-  "YOUR_ADMIN_USER_ID";
+  "69ef9fe863a02a7490b4";
 
 // =========================
 // COMPONENT
