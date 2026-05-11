@@ -3,7 +3,6 @@ import {
   account,
   databases,
   DATABASE_ID,
-  Query,
 } from "../lib/appwrite";
 
 import boardImg from "./board.png";
@@ -76,9 +75,10 @@ export default function SnakeGameRoom({ gameId }) {
 
   const [positions, setPositions] = useState({ A: 1, B: 1 });
   const [turn, setTurn] = useState("A");
-  const [dice, setDice] = useState(1);
 
+  const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
+
   const lock = useRef(false);
 
   // =========================
@@ -98,7 +98,6 @@ export default function SnakeGameRoom({ gameId }) {
       );
 
       setGame(res);
-
       setTurn(res.turn || "A");
 
       setPositions(
@@ -121,7 +120,6 @@ export default function SnakeGameRoom({ gameId }) {
         const g = res.payload;
 
         setGame(g);
-
         setTurn(g.turn || "A");
 
         setPositions(
@@ -134,7 +132,7 @@ export default function SnakeGameRoom({ gameId }) {
   }, [gameId]);
 
   // =========================
-  // ROLE SYSTEM
+  // PLAYER IDENTIFICATION
   // =========================
   function myPlayer() {
     if (!user || !game) return null;
@@ -149,7 +147,6 @@ export default function SnakeGameRoom({ gameId }) {
 
   const isMyTurn =
     currentPlayer &&
-    turn &&
     turn === currentPlayer &&
     game?.status !== "finished";
 
@@ -179,10 +176,7 @@ export default function SnakeGameRoom({ gameId }) {
   async function playTurn() {
     if (!game || !user || rolling || lock.current) return;
 
-    if (!isMyTurn) {
-      alert("❌ Not your turn");
-      return;
-    }
+    if (!isMyTurn) return;
 
     lock.current = true;
     setRolling(true);
@@ -239,6 +233,7 @@ export default function SnakeGameRoom({ gameId }) {
 
       setGame(updated);
       setTurn(updated.turn);
+
       setPositions(JSON.parse(updated.positions));
 
       if (winner) {
@@ -260,22 +255,17 @@ export default function SnakeGameRoom({ gameId }) {
   // UI
   // =========================
   if (!game) {
-    return <div style={{ color: "#fff" }}>Loading game...</div>;
+    return <div style={{ color: "#fff" }}>Loading...</div>;
   }
 
   return (
     <div style={styles.container}>
-      <h2>🐍 Snake Game Room</h2>
+      <h2>🐍 Snake Game</h2>
 
-      {/* TURN INDICATOR */}
+      {/* CLEAN PLAYERS ONLY (NO WAIT TEXT) */}
       <div style={styles.top}>
-        <div style={{ color: turn === "A" ? "lime" : "gray" }}>
-          Player A {turn === "A" ? "→ TURN" : "WAIT"}
-        </div>
-
-        <div style={{ color: turn === "B" ? "lime" : "gray" }}>
-          Player B {turn === "B" ? "→ TURN" : "WAIT"}
-        </div>
+        <div>🔴 Player A</div>
+        <div>🔵 Player B</div>
       </div>
 
       {/* BOARD */}
@@ -295,15 +285,12 @@ export default function SnakeGameRoom({ gameId }) {
       <button
         onClick={playTurn}
         disabled={!isMyTurn || rolling}
-        style={{
-          ...styles.button,
-          opacity: isMyTurn ? 1 : 0.5,
-        }}
+        style={styles.button}
       >
-        {isMyTurn ? "🎲 Roll Dice" : "⏳ Wait Turn"}
+        🎲 Roll Dice
       </button>
 
-      <div style={{ marginTop: 10 }}>🎲 Dice: {dice}</div>
+      <div style={{ marginTop: 10 }}>🎲 {dice}</div>
     </div>
   );
 }
