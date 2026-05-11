@@ -2,21 +2,15 @@ import { useEffect, useState, useRef } from "react";
 import {
   account,
   databases,
-  DATABASE_ID,
-  Query,
+  DATABASE_ID
 } from "../lib/appwrite";
 
 import boardImg from "./board.png";
 
-const SNAKE_GAME_COLLECTION = "snakegame";
-const SNAKE_LOBBY_COLLECTION = "snakelobby";
-const WALLET_COLLECTION = "wallets";
-
+const COLLECTION = "snakegame";
 const SIZE = 100;
 
-// =========================
-// SNAKES & LADDERS
-// =========================
+// 🐍 snakes
 const snakes = {
   50: 5,
   43: 17,
@@ -27,6 +21,7 @@ const snakes = {
   98: 40,
 };
 
+// 🪜 ladders
 const ladders = {
   2: 23,
   6: 45,
@@ -52,9 +47,9 @@ function getCoords(pos) {
   };
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function rollDice() {
+function dice() {
   return Math.floor(Math.random() * 6) + 1;
 }
 
@@ -65,50 +60,37 @@ function applyEffects(pos) {
 }
 
 // =========================
-// MAIN GAME
+// COMPONENT
 // =========================
 export default function SnakeGame({ gameId }) {
+
   const [user, setUser] = useState(null);
   const [game, setGame] = useState(null);
 
-  const [positions, setPositions] = useState({
-    host: 1,
-    opponent: 1,
-  });
+  const [positions, setPositions] = useState({ A: 1, B: 1 });
+  const [diceValue, setDiceValue] = useState(1);
 
-  const [turn, setTurn] = useState("host");
-  const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
 
   const lock = useRef(false);
 
   // =========================
-  // LOAD GAME
+  // LOAD USER + GAME
   // =========================
   useEffect(() => {
-    if (!gameId) return;
-
     async function init() {
-      try {
-        const u = await account.get();
-        setUser(u);
+      const u = await account.get();
+      setUser(u);
 
-        const res = await databases.getDocument(
-          DATABASE_ID,
-          SNAKE_GAME_COLLECTION,
-          gameId
-        );
+      const res = await databases.getDocument(
+        DATABASE_ID,
+        COLLECTION,
+        gameId
+      );
 
-        setGame(res);
+      setGame(res);
 
-        setTurn(res.turn || "host");
-
-        setPositions(
-          JSON.parse(res.positions || '{"host":1,"opponent":1}')
-        );
-      } catch (err) {
-        console.error(err);
-      }
+      setPositions(JSON.parse(res.positions || '{"A":1,"B":1}'));
     }
 
     init();
@@ -121,18 +103,13 @@ export default function SnakeGame({ gameId }) {
     if (!gameId) return;
 
     const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${SNAKE_GAME_COLLECTION}.documents.${gameId}`,
+      `databases.${DATABASE_ID}.collections.${COLLECTION}.documents.${gameId}`,
       (res) => {
-        const payload = res.payload;
+        const g = res.payload;
 
-        setGame(payload);
+        setGame(g);
 
-        // FIX: never allow undefined turn
-        setTurn(payload.turn || "host");
-
-        setPositions(
-          JSON.parse(payload.positions || '{"host":1,"opponent":1}')
-        );
+        setPositions(JSON.parse(g.positions || '{"A":1,"B":1}'));
       }
     );
 
@@ -140,244 +117,154 @@ export default function SnakeGame({ gameId }) {
   }, [gameId]);
 
   // =========================
-  // ROLE DETECTION (FIXED)
+  // CHECK TURN (BACKEND RULE)
   // =========================
-  function myRole() {
-    if (!user || !game) return null;
-
-    if (!game.hostId || !game.opponentId) return null;
-
-    if (user.$id === game.hostId) return "host";
-    if (user.$id === game.opponentId) return "opponent";
-
-    return null;
-  }
-
-  const role = myRole();
-
-  // FIX: stable turn check
-  const isMyTurn =
-    role &&
-    game?.turn &&
-    game.turn === role;
+  const isMyTurn = game?.turn === user?.$id;
 
   // =========================
-  // MOVE ANIMATION
+  // MOVE LOGIC
   // =========================
-  async function animateMove(player, start, end) {
+  async function animateMove(playerKey, start, end) {
     let current = start;
 
     while (current < end) {
-      await sleep(120);
+      await sleep(150);
       current++;
 
-      setPositions((prev) => ({
+      setPositions(prev => ({
         ...prev,
-        [player]: current,
+        [playerKey]: current
       }));
     }
 
-    return applyEffects(current);
+    const final = applyEffects(current);
+
+    setPositions(prev => ({
+      ...prev,
+      [playerKey]: final
+    }));
+
+    return final;
   }
 
   // =========================
   // PLAY TURN
   // =========================
-  async function playTurn() {
-    if (!game || !user || rolling || lock.current) return;
+  async function play() {
 
-    // FIX: block correctly
+    if (!game || !user || rolling) return;
+
     if (!isMyTurn) return;
 
     lock.current = true;
     setRolling(true);
 
     try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
-        gameId
-      );
 
-      const role =
-        user.$id === fresh.hostId ? "host" : "opponent";
+      const currentPlayerKey =
+        game.hostId === user.$id ? "A" : "B";
 
-      const positionsData = JSON.parse(
-        fresh.positions || '{"host":1,"opponent":1}'
-      );
+      const opponentId =
+        game.hostId === user.$id
+          ? game.opponentId
+          : game.hostId;
 
-      const start = positionsData[role];
+      const currentPositions = JSON.parse(game.positions);
 
-      const d = rollDice();
-      setDice(d);
+      const start = currentPositions[currentPlayerKey];
 
-      let end = start + d;
+      const roll = dice();
+
+      setDiceValue(roll);
+
+      let end = start + roll;
       if (end > SIZE) end = SIZE;
 
-      const finalPos = await animateMove(role, start, end);
+      const final = await animateMove(
+        currentPlayerKey,
+        start,
+        end
+      );
 
-      const corrected = applyEffects(finalPos);
+      const nextTurn = opponentId;
 
-      const winner = corrected >= SIZE ? role : null;
+      const updatedPositions = {
+        ...currentPositions,
+        [currentPlayerKey]: final
+      };
 
-      // FIX: stable turn switching
-      const nextTurn = fresh.turn === "host" ? "opponent" : "host";
+      const winner = final >= SIZE ? user.$id : null;
 
-      const updated = await databases.updateDocument(
+      await databases.updateDocument(
         DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
+        COLLECTION,
         gameId,
         {
-          positions: JSON.stringify({
-            ...positionsData,
-            [role]: corrected,
-          }),
-
+          positions: JSON.stringify(updatedPositions),
           turn: winner ? null : nextTurn,
-
-          status: winner ? "finished" : "running",
-
           winner: winner || "",
+          status: winner ? "finished" : "running"
         }
       );
 
-      setGame(updated);
-      setTurn(updated.turn || "host");
-
-      setPositions(JSON.parse(updated.positions));
-
-      // ================= WIN =================
-      if (winner) {
-        const pot = Number(fresh.pot || 0);
-
-        const winnerId =
-          role === "host" ? fresh.hostId : fresh.opponentId;
-
-        await payout(winnerId, pot);
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          SNAKE_LOBBY_COLLECTION,
-          fresh.lobbyId,
-          {
-            status: "finished",
-          }
-        );
-
-        setTimeout(() => {
-          window.location.href = "/dashboard";
-        }, 2500);
-      }
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
     } finally {
       setRolling(false);
-      setTimeout(() => (lock.current = false), 300);
+      lock.current = false;
     }
   }
 
-  // =========================
-  // SAFE LOADING GUARD
-  // =========================
-  if (!game || !user) {
-    return <div style={{ color: "#fff" }}>Loading...</div>;
-  }
+  if (!game || !user) return null;
 
-  // =========================
-  // UI
-  // =========================
+  const myKey =
+    game.hostId === user.$id ? "A" : "B";
+
   return (
-    <div style={styles.container}>
+    <div style={{ textAlign: "center", background: "#0f172a", color: "white", minHeight: "100vh" }}>
+
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN DISPLAY (FIXED - NEVER BOTH "OPPONENT TURN") */}
-      <div style={styles.turnBox}>
-        {isMyTurn ? "🎯 Your Turn" : "⏳ Opponent Turn"}
+      <p>
+        {isMyTurn ? "🟢 Your Turn" : "⏳ Opponent Turn"}
+      </p>
+
+      <p>🎲 Dice: {diceValue}</p>
+
+      <div style={{ position: "relative", width: 360, height: 360, margin: "auto" }}>
+        <img src={boardImg} style={{ width: "100%" }} />
+
+        <div style={{
+          position: "absolute",
+          ...getCoords(positions.A),
+          background: "red",
+          width: 25,
+          height: 25,
+          borderRadius: "50%"
+        }} />
+
+        <div style={{
+          position: "absolute",
+          ...getCoords(positions.B),
+          background: "blue",
+          width: 25,
+          height: 25,
+          borderRadius: "50%"
+        }} />
       </div>
 
-      {/* BOARD */}
-      <div style={styles.boardWrapper}>
-        <img src={boardImg} style={styles.board} />
+      <button
+        onClick={play}
+        disabled={!isMyTurn || rolling}
+        style={{
+          marginTop: 20,
+          padding: 12,
+          background: isMyTurn ? "gold" : "gray"
+        }}
+      >
+        🎲 Roll Dice
+      </button>
 
-        <div
-          style={{
-            ...styles.token,
-            ...getCoords(positions.host),
-            background: "red",
-          }}
-        />
-
-        <div
-          style={{
-            ...styles.token,
-            ...getCoords(positions.opponent),
-            background: "blue",
-          }}
-        />
-      </div>
-
-      {/* CONTROLS */}
-      <div style={styles.controls}>
-        <button
-          onClick={playTurn}
-          disabled={!isMyTurn || rolling}
-        >
-          {rolling ? "Rolling..." : "🎲 Roll Dice"}
-        </button>
-
-        <div style={styles.dice}>{dice}</div>
-      </div>
     </div>
   );
 }
-
-// =========================
-// STYLES
-// =========================
-const styles = {
-  container: {
-    textAlign: "center",
-    background: "#0f172a",
-    color: "#fff",
-    minHeight: "100vh",
-    padding: 15,
-  },
-
-  turnBox: {
-    margin: 10,
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-
-  boardWrapper: {
-    position: "relative",
-    width: 360,
-    height: 360,
-    margin: "20px auto",
-  },
-
-  board: {
-    width: "100%",
-    height: "100%",
-  },
-
-  token: {
-    position: "absolute",
-    width: 26,
-    height: 26,
-    borderRadius: "50%",
-    transform: "translate(-50%, -50%)",
-  },
-
-  controls: {
-    display: "flex",
-    justifyContent: "center",
-    gap: 10,
-  },
-
-  dice: {
-    padding: 10,
-    background: "#1e293b",
-    borderRadius: 8,
-  },
-};
