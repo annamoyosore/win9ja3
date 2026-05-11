@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import {
+  account,
   databases,
   DATABASE_ID,
   Query
@@ -68,7 +69,9 @@ function secureDice() {
 
 function applyEffects(pos) {
   if (snakes[pos]) return snakes[pos];
+
   if (ladders[pos]) return ladders[pos];
+
   return pos;
 }
 
@@ -77,7 +80,7 @@ function trimHistory(history = []) {
 }
 
 // =========================
-// WIN FLOWERS
+// FLOWERS
 // =========================
 function fireFlowers() {
   const canvas = document.createElement("canvas");
@@ -99,7 +102,7 @@ function fireFlowers() {
 
   const flowers = ["🌸", "🌺", "🌼", "💐"];
 
-  const pieces = Array.from({ length: 100 }).map(() => ({
+  const pieces = Array.from({ length: 120 }).map(() => ({
     x: Math.random() * canvas.width,
     y: Math.random() * -canvas.height,
     emoji:
@@ -119,7 +122,7 @@ function fireFlowers() {
       canvas.height
     );
 
-    ctx.font = "24px serif";
+    ctx.font = "26px serif";
 
     pieces.forEach((p) => {
       ctx.fillText(p.emoji, p.x, p.y);
@@ -129,7 +132,7 @@ function fireFlowers() {
 
     frame++;
 
-    if (frame < 160) {
+    if (frame < 180) {
       requestAnimationFrame(draw);
     } else {
       canvas.remove();
@@ -140,11 +143,13 @@ function fireFlowers() {
 }
 
 // =========================
-// MAIN COMPONENT
+// MAIN
 // =========================
 export default function SnakeGame({
   gameId,
 }) {
+  const [user, setUser] = useState(null);
+
   const [game, setGame] = useState(null);
 
   const [positions, setPositions] = useState({
@@ -161,13 +166,17 @@ export default function SnakeGame({
   const lock = useRef(false);
 
   // =========================
-  // LOAD GAME
+  // LOAD
   // =========================
   useEffect(() => {
     if (!gameId) return;
 
-    async function loadGame() {
+    async function init() {
       try {
+        const u = await account.get();
+
+        setUser(u);
+
         const res =
           await databases.getDocument(
             DATABASE_ID,
@@ -190,11 +199,11 @@ export default function SnakeGame({
       }
     }
 
-    loadGame();
+    init();
   }, [gameId]);
 
   // =========================
-  // REALTIME GAME SYNC
+  // REALTIME
   // =========================
   useEffect(() => {
     if (!gameId) return;
@@ -221,6 +230,28 @@ export default function SnakeGame({
 
     return () => unsub();
   }, [gameId]);
+
+  // =========================
+  // CURRENT PLAYER
+  // =========================
+  function myPlayer() {
+    if (!user || !game) return null;
+
+    if (user.$id === game.hostId) {
+      return "A";
+    }
+
+    if (user.$id === game.opponentId) {
+      return "B";
+    }
+
+    return null;
+  }
+
+  const currentPlayer = myPlayer();
+
+  const isMyTurn =
+    currentPlayer === turn;
 
   // =========================
   // PAYOUT
@@ -268,7 +299,7 @@ export default function SnakeGame({
   }
 
   // =========================
-  // ANIMATE TILE
+  // TILE ANIMATION
   // =========================
   async function animateMove(
     player,
@@ -278,7 +309,7 @@ export default function SnakeGame({
     let current = start;
 
     while (current < end) {
-      await sleep(120);
+      await sleep(180);
 
       current++;
 
@@ -289,10 +320,9 @@ export default function SnakeGame({
     }
 
     const effected =
-      applyEffects(end);
+      applyEffects(current);
 
-    // snake / ladder jump
-    if (effected !== end) {
+    if (effected !== current) {
       await sleep(400);
 
       setPositions((prev) => ({
@@ -310,6 +340,7 @@ export default function SnakeGame({
   async function playTurn() {
     if (
       !game ||
+      !user ||
       rolling ||
       lock.current
     )
@@ -318,12 +349,19 @@ export default function SnakeGame({
     if (game.status === "finished")
       return;
 
+    // 🚫 block wrong player
+    if (!isMyTurn) {
+      return alert(
+        "❌ Not your turn"
+      );
+    }
+
     lock.current = true;
 
     setRolling(true);
 
     try {
-      // 🔄 fresh backend game
+      // fresh backend
       const fresh =
         await databases.getDocument(
           DATABASE_ID,
@@ -334,12 +372,21 @@ export default function SnakeGame({
       const currentTurn =
         fresh.turn;
 
-      if (!currentTurn) {
-        setRolling(false);
+      // 🚫 backend validation
+      const backendPlayer =
+        user.$id === fresh.hostId
+          ? "A"
+          : "B";
+
+      if (
+        backendPlayer !== currentTurn
+      ) {
+        alert("❌ Not your turn");
+
         return;
       }
 
-      // 🎲 dice animation
+      // 🎲 rolling animation
       for (let i = 0; i < 8; i++) {
         setDice(
           Math.floor(
@@ -347,16 +394,16 @@ export default function SnakeGame({
           ) + 1
         );
 
-        await sleep(70);
+        await sleep(80);
       }
 
-      // 🎲 final dice
+      // 🎲 real dice
       const rolled =
         secureDice();
 
       setDice(rolled);
 
-      // 📍 positions
+      // positions
       const currentPositions =
         JSON.parse(
           fresh.positions ||
@@ -375,7 +422,7 @@ export default function SnakeGame({
         endPos = SIZE;
       }
 
-      // 🎬 animate move
+      // 🎬 animate movement
       const finalPos =
         await animateMove(
           currentTurn,
@@ -383,28 +430,26 @@ export default function SnakeGame({
           endPos
         );
 
-      // 🏆 winner?
+      // winner
       const winner =
         finalPos >= SIZE
           ? currentTurn
           : null;
 
-      // 🔄 next turn
+      // next turn
       const nextTurn =
         currentTurn === "A"
           ? "B"
           : "A";
 
-      // 🧾 last 3 moves
+      // last 3 history
       const history =
         trimHistory([
           `Player ${currentTurn} rolled ${rolled} → ${finalPos}`,
           ...(fresh.history || []),
         ]);
 
-      // =========================
-      // SAVE BACKEND
-      // =========================
+      // save backend
       const updated =
         await databases.updateDocument(
           DATABASE_ID,
@@ -433,9 +478,7 @@ export default function SnakeGame({
           }
         );
 
-      // =========================
-      // UPDATE FRONTEND
-      // =========================
+      // frontend sync
       setGame(updated);
 
       setTurn(updated.turn);
@@ -459,16 +502,16 @@ export default function SnakeGame({
             ? fresh.hostId
             : fresh.opponentId;
 
-        // 💰 payout
+        // payout
         await payout(
           winnerUserId,
           pot
         );
 
-        // 🌸 flowers
+        // flowers
         fireFlowers();
 
-        // 🏁 game close
+        // clear game pot
         await databases.updateDocument(
           DATABASE_ID,
           SNAKE_GAME_COLLECTION,
@@ -479,7 +522,7 @@ export default function SnakeGame({
           }
         );
 
-        // 🏁 lobby close
+        // finish lobby
         if (fresh.lobbyId) {
           await databases.updateDocument(
             DATABASE_ID,
@@ -535,40 +578,47 @@ export default function SnakeGame({
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN INDICATORS */}
+      {/* TURN */}
       <div style={styles.top}>
-        <div>
-          🔴 Player A{" "}
-          <span
-            style={{
-              color:
-                turn === "A"
-                  ? "lime"
-                  : "gray",
-            }}
-          >
-            ●
-          </span>
+        <div
+          style={{
+            ...styles.playerBox,
+            border:
+              turn === "A"
+                ? "2px solid lime"
+                : "2px solid gray",
+          }}
+        >
+          🔴 Player A
+          <div>
+            {turn === "A"
+              ? "🟢 TURN"
+              : "⚪ WAIT"}
+          </div>
         </div>
 
-        <div>
-          🔵 Player B{" "}
-          <span
-            style={{
-              color:
-                turn === "B"
-                  ? "lime"
-                  : "gray",
-            }}
-          >
-            ●
-          </span>
+        <div
+          style={{
+            ...styles.playerBox,
+            border:
+              turn === "B"
+                ? "2px solid lime"
+                : "2px solid gray",
+          }}
+        >
+          🔵 Player B
+          <div>
+            {turn === "B"
+              ? "🟢 TURN"
+              : "⚪ WAIT"}
+          </div>
         </div>
+      </div>
 
-        <div>
-          🏦 ₦
-          {game?.pot || 0}
-        </div>
+      {/* POT */}
+      <div style={styles.pot}>
+        🏦 Pot: ₦
+        {Number(game?.pot || 0)}
       </div>
 
       {/* BOARD */}
@@ -579,35 +629,54 @@ export default function SnakeGame({
           style={styles.board}
         />
 
-        {["A", "B"].map((p) => (
-          <div
-            key={p}
-            style={{
-              ...styles.token,
-              ...getCoords(
-                positions[p]
-              ),
-              background:
-                p === "A"
-                  ? "red"
-                  : "blue",
-            }}
-          >
-            {p}
-          </div>
-        ))}
+        {/* PLAYER A */}
+        <div
+          style={{
+            ...styles.token,
+            ...getCoords(
+              positions.A
+            ),
+            background: "red",
+          }}
+        >
+          A
+        </div>
+
+        {/* PLAYER B */}
+        <div
+          style={{
+            ...styles.token,
+            ...getCoords(
+              positions.B
+            ),
+            background: "blue",
+          }}
+        >
+          B
+        </div>
       </div>
 
       {/* CONTROLS */}
       <div style={styles.controls}>
         <button
           onClick={playTurn}
-          disabled={rolling}
-          style={styles.rollBtn}
+          disabled={
+            rolling ||
+            !isMyTurn ||
+            game.status ===
+              "finished"
+          }
+          style={{
+            ...styles.rollBtn,
+            opacity:
+              !isMyTurn ? 0.5 : 1,
+          }}
         >
           {rolling
             ? "Rolling..."
-            : "🎲 Roll Dice"}
+            : isMyTurn
+            ? "🎲 Roll Dice"
+            : "⏳ Wait Turn"}
         </button>
 
         <div style={styles.diceBox}>
@@ -646,8 +715,25 @@ const styles = {
   top: {
     display: "flex",
     justifyContent:
-      "space-around",
-    marginBottom: 12,
+      "center",
+    gap: 12,
+    marginBottom: 15,
+  },
+
+  playerBox: {
+    background: "#1e293b",
+    padding: 10,
+    borderRadius: 10,
+    minWidth: 130,
+    fontWeight: "bold",
+  },
+
+  pot: {
+    background: "#111827",
+    padding: 12,
+    borderRadius: 12,
+    width: 220,
+    margin: "0 auto 15px",
     fontWeight: "bold",
   },
 
@@ -676,11 +762,15 @@ const styles = {
     fontWeight: "bold",
     color: "#fff",
     border: "2px solid #fff",
+    transition:
+      "all 0.18s linear",
+    zIndex: 10,
   },
 
   controls: {
     display: "flex",
-    justifyContent: "center",
+    justifyContent:
+      "center",
     alignItems: "center",
     gap: 12,
     marginTop: 10,
@@ -693,6 +783,7 @@ const styles = {
     background: "gold",
     fontWeight: "bold",
     cursor: "pointer",
+    fontSize: 16,
   },
 
   diceBox: {
@@ -701,10 +792,12 @@ const styles = {
     borderRadius: 10,
     fontWeight: "bold",
     minWidth: 70,
+    fontSize: 18,
   },
 
   history: {
     marginTop: 20,
     fontSize: 14,
+    lineHeight: 1.8,
   },
 };
