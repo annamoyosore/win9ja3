@@ -14,9 +14,6 @@ const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegames";
 const WALLET_COLLECTION = "wallets";
 
-// =========================
-// CONFIG
-// =========================
 const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
 const MIN_STAKE = 150;
 
@@ -63,7 +60,7 @@ export default function SnakeLobby({ openGame, goHome }) {
 
       setRooms(res.documents || []);
     } catch (err) {
-      console.log("LOAD ROOMS ERROR:", err);
+      console.log("LOAD ERROR:", err);
     }
   }
 
@@ -108,7 +105,6 @@ export default function SnakeLobby({ openGame, goHome }) {
         return popup("❌ Insufficient balance");
       }
 
-      // 💸 deduct stake
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -118,7 +114,6 @@ export default function SnakeLobby({ openGame, goHome }) {
         }
       );
 
-      // 🎮 create lobby
       await databases.createDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -128,11 +123,9 @@ export default function SnakeLobby({ openGame, goHome }) {
           opponentId: "",
           stake,
           pot: stake,
-          adminCut: 0,
           status: "waiting",
           gameId: "",
           payoutDone: false,
-          winnerId: "",
         }
       );
 
@@ -148,114 +141,156 @@ export default function SnakeLobby({ openGame, goHome }) {
   }
 
   // =========================
-  // JOIN ROOM (RACE SAFE)
+  // JOIN ROOM (SAFE + SNIPES)
   // =========================
   async function joinRoom(room) {
     if (!user || loading) return;
 
+    const snipes = [];
+
+    const fail = async (msg, stage, refund = false, walletData = null) => {
+      snipes.push(`❌ FAILED AT: ${stage}`);
+      console.log("SNIPES:", snipes);
+
+      if (refund && walletData) {
+        try {
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            walletData.$id,
+            {
+              balance:
+                Number(walletData.balance || 0) + Number(room.stake),
+            }
+          );
+          snipes.push("💰 REFUND DONE");
+        } catch {
+          snipes.push("💥 REFUND FAILED");
+        }
+      }
+
+      popup(msg + " | " + snipes.join(" → "));
+      setLoading(false);
+      throw new Error(msg);
+    };
+
     try {
       setLoading(true);
 
-      if (room.hostId === user.$id) {
-        return popup("❌ You cannot join your own room");
-      }
-
-      if (room.opponentId) {
-        return popup("Room already taken");
-      }
-
-      if (room.stake < MIN_STAKE) {
-        return popup("❌ Minimum stake is ₦150");
-      }
-
-      const wallet = await getWallet(user.$id);
-
-      if (!wallet) return popup("Wallet not found");
-
-      const balance = Number(wallet.balance || 0);
-
-      if (balance < room.stake) {
-        return popup("❌ Insufficient funds");
-      }
-
-      // 🚨 STEP 1: LOCK ROOM FIRST (prevents double join)
-      const freshRoom = await databases.getDocument(
+      // =========================
+      // CHECK ROOM
+      // =========================
+      const fresh = await databases.getDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         room.$id
       );
 
-      if (freshRoom.opponentId) {
-        return popup("❌ Room already filled");
+      if (fresh.opponentId) {
+        return fail("Room already taken", "ROOM_CHECK");
       }
 
-      // 💸 deduct player stake
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: balance - room.stake,
-        }
-      );
-
-      // 💰 compute pot
-      const total = room.stake * 2;
-      const adminCut = Math.floor(total * 0.1);
-      const gamePot = total - adminCut;
-
-      // 💰 admin payout
-      const adminWallet = await getWallet(ADMIN_USER_ID);
-
-      if (adminWallet) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          adminWallet.$id,
-          {
-            balance: Number(adminWallet.balance || 0) + adminCut,
-          }
-        );
+      if (fresh.status !== "waiting") {
+        return fail("Room not available", "STATUS_CHECK");
       }
 
-      // 🎮 create game
-      const game = await databases.createDocument(
-        DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
-        ID.unique(),
-        {
-          lobbyId: room.$id,
-          hostId: room.hostId,
-          opponentId: user.$id,
-          turn: room.hostId,
+      // =========================
+      // WALLET CHECK
+      // =========================
+      const wallet = await getWallet(user.$id);
 
-          positions: JSON.stringify({ A: 1, B: 1 }),
-          history: JSON.stringify([]),
+      if (!wallet) return fail("Wallet missing", "WALLET");
 
-          dice: 1,
-          status: "playing",
-          winnerId: "",
-          payoutDone: false,
-          pot: gamePot,
-        }
-      );
+      const balance = Number(wallet.balance || 0);
 
-      // 🏁 update lobby safely
+      if (balance < fresh.stake) {
+        return fail("Insufficient funds", "BALANCE_CHECK");
+      }
+
+      // =========================
+      // LOCK ROOM FIRST
+      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
-        room.$id,
-        {
-          opponentId: user.$id,
-          status: "playing",
-          gameId: game.$id,
-          pot: gamePot,
-        }
+        fresh.$id,
+        { status: "locking" }
       );
 
-      popup("🎮 Joined successfully");
+      snipes.push("🔒 ROOM LOCKED");
 
-      openGame(game.$id, room.$id);
+      // =========================
+      // CREATE GAME FIRST
+      // =========================
+      let game;
+
+      try {
+        game = await databases.createDocument(
+          DATABASE_ID,
+          SNAKE_GAME_COLLECTION,
+          ID.unique(),
+          {
+            lobbyId: fresh.$id,
+            hostId: fresh.hostId,
+            opponentId: user.$id,
+            turn: fresh.hostId,
+            positions: JSON.stringify({ A: 1, B: 1 }),
+            history: JSON.stringify([]),
+            dice: 1,
+            status: "playing",
+            winnerId: "",
+            payoutDone: false,
+            pot: fresh.stake * 2,
+          }
+        );
+
+        snipes.push("🎮 GAME CREATED");
+      } catch (e) {
+        return fail("Game creation failed", "GAME_CREATE");
+      }
+
+      // =========================
+      // UPDATE LOBBY
+      // =========================
+      try {
+        await databases.updateDocument(
+          DATABASE_ID,
+          SNAKE_LOBBY_COLLECTION,
+          fresh.$id,
+          {
+            opponentId: user.$id,
+            status: "playing",
+            gameId: game.$id,
+          }
+        );
+
+        snipes.push("📦 LOBBY UPDATED");
+      } catch (e) {
+        return fail("Lobby update failed", "LOBBY_UPDATE", true, wallet);
+      }
+
+      // =========================
+      // DEDUCT WALLET LAST
+      // =========================
+      try {
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          wallet.$id,
+          {
+            balance: balance - fresh.stake,
+          }
+        );
+
+        snipes.push("💸 WALLET DEDUCTED");
+      } catch (e) {
+        return fail("Wallet deduction failed", "WALLET_DEDUCT", true, wallet);
+      }
+
+      snipes.push("✅ JOIN SUCCESS");
+      console.log("FINAL SNIPES:", snipes);
+
+      openGame(game.$id, fresh.$id);
     } catch (err) {
       console.log(err);
       popup("❌ Failed to join room");
@@ -265,10 +300,10 @@ export default function SnakeLobby({ openGame, goHome }) {
   }
 
   // =========================
-  // RESUME GAME
+  // RESUME
   // =========================
   function resumeGame(room) {
-    if (!room?.gameId) return;
+    if (!room.gameId) return;
     openGame(room.gameId, room.$id);
   }
 
@@ -298,43 +333,32 @@ export default function SnakeLobby({ openGame, goHome }) {
 
       {/* ROOMS */}
       <div style={styles.rooms}>
-        {rooms.map((room) => {
-          const isHost = room.hostId === user?.$id;
+        {rooms.map((room) => (
+          <div key={room.$id} style={styles.room}>
+            <div>🎮 Stake: ₦{room.stake}</div>
+            <div>🏦 Pot: ₦{room.pot}</div>
+            <div>Status: {room.status}</div>
 
-          return (
-            <div key={room.$id} style={styles.room}>
-              <div>🎮 Stake: ₦{room.stake}</div>
-              <div>🏦 Pot: ₦{room.pot}</div>
-              <div>Status: {room.status}</div>
+            {room.status === "waiting" && !room.opponentId && (
+              <button
+                onClick={() => joinRoom(room)}
+                style={styles.joinBtn}
+                disabled={loading}
+              >
+                Join
+              </button>
+            )}
 
-              {room.status === "waiting" && !isHost && (
-                <button
-                  onClick={() => joinRoom(room)}
-                  style={styles.joinBtn}
-                  disabled={loading}
-                >
-                  Join
-                </button>
-              )}
-
-              {isHost && room.status === "waiting" && (
-                <div style={{ color: "gold" }}>
-                  Waiting for opponent...
-                </div>
-              )}
-
-              {(isHost || room.opponentId === user?.$id) &&
-                room.status === "playing" && (
-                  <button
-                    onClick={() => resumeGame(room)}
-                    style={styles.resumeBtn}
-                  >
-                    Resume Game
-                  </button>
-                )}
-            </div>
-          );
-        })}
+            {room.status === "playing" && (
+              <button
+                onClick={() => resumeGame(room)}
+                style={styles.resumeBtn}
+              >
+                Resume
+              </button>
+            )}
+          </div>
+        ))}
       </div>
 
       <button onClick={goHome} style={styles.exitBtn}>
