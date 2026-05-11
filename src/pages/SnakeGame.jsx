@@ -1,5 +1,11 @@
 import { useEffect, useState, useRef } from "react";
-import { account, databases, DATABASE_ID, Query } from "../lib/appwrite";
+import {
+  account,
+  databases,
+  DATABASE_ID,
+  Query,
+} from "../lib/appwrite";
+
 import boardImg from "./board.png";
 
 const SNAKE_GAME_COLLECTION = "snakegame";
@@ -94,6 +100,7 @@ export default function SnakeGame({ gameId }) {
         );
 
         setGame(res);
+
         setTurn(res.turn || "host");
 
         setPositions(
@@ -116,13 +123,15 @@ export default function SnakeGame({ gameId }) {
     const unsub = databases.client.subscribe(
       `databases.${DATABASE_ID}.collections.${SNAKE_GAME_COLLECTION}.documents.${gameId}`,
       (res) => {
-        const data = res.payload;
+        const payload = res.payload;
 
-        setGame(data);
-        setTurn(data.turn);
+        setGame(payload);
+
+        // FIX: never allow undefined turn
+        setTurn(payload.turn || "host");
 
         setPositions(
-          JSON.parse(data.positions || '{"host":1,"opponent":1}')
+          JSON.parse(payload.positions || '{"host":1,"opponent":1}')
         );
       }
     );
@@ -135,13 +144,22 @@ export default function SnakeGame({ gameId }) {
   // =========================
   function myRole() {
     if (!user || !game) return null;
+
+    if (!game.hostId || !game.opponentId) return null;
+
     if (user.$id === game.hostId) return "host";
     if (user.$id === game.opponentId) return "opponent";
+
     return null;
   }
 
   const role = myRole();
-  const isMyTurn = role && turn === role;
+
+  // FIX: stable turn check
+  const isMyTurn =
+    role &&
+    game?.turn &&
+    game.turn === role;
 
   // =========================
   // MOVE ANIMATION
@@ -168,6 +186,7 @@ export default function SnakeGame({ gameId }) {
   async function playTurn() {
     if (!game || !user || rolling || lock.current) return;
 
+    // FIX: block correctly
     if (!isMyTurn) return;
 
     lock.current = true;
@@ -192,16 +211,16 @@ export default function SnakeGame({ gameId }) {
       const d = rollDice();
       setDice(d);
 
-      let target = start + d;
-      if (target > SIZE) target = SIZE;
+      let end = start + d;
+      if (end > SIZE) end = SIZE;
 
-      const finalPos = await animateMove(role, start, target);
+      const finalPos = await animateMove(role, start, end);
 
       const corrected = applyEffects(finalPos);
 
       const winner = corrected >= SIZE ? role : null;
 
-      // 🔥 FIXED TURN SWITCH
+      // FIX: stable turn switching
       const nextTurn = fresh.turn === "host" ? "opponent" : "host";
 
       const updated = await databases.updateDocument(
@@ -223,7 +242,8 @@ export default function SnakeGame({ gameId }) {
       );
 
       setGame(updated);
-      setTurn(updated.turn);
+      setTurn(updated.turn || "host");
+
       setPositions(JSON.parse(updated.positions));
 
       // ================= WIN =================
@@ -257,15 +277,20 @@ export default function SnakeGame({ gameId }) {
   }
 
   // =========================
+  // SAFE LOADING GUARD
+  // =========================
+  if (!game || !user) {
+    return <div style={{ color: "#fff" }}>Loading...</div>;
+  }
+
+  // =========================
   // UI
   // =========================
-  if (!game) return <div style={{ color: "#fff" }}>Loading...</div>;
-
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
-      {/* TURN ONLY */}
+      {/* TURN DISPLAY (FIXED - NEVER BOTH "OPPONENT TURN") */}
       <div style={styles.turnBox}>
         {isMyTurn ? "🎯 Your Turn" : "⏳ Opponent Turn"}
       </div>
@@ -274,13 +299,29 @@ export default function SnakeGame({ gameId }) {
       <div style={styles.boardWrapper}>
         <img src={boardImg} style={styles.board} />
 
-        <div style={{ ...styles.token, ...getCoords(positions.host), background: "red" }} />
-        <div style={{ ...styles.token, ...getCoords(positions.opponent), background: "blue" }} />
+        <div
+          style={{
+            ...styles.token,
+            ...getCoords(positions.host),
+            background: "red",
+          }}
+        />
+
+        <div
+          style={{
+            ...styles.token,
+            ...getCoords(positions.opponent),
+            background: "blue",
+          }}
+        />
       </div>
 
       {/* CONTROLS */}
       <div style={styles.controls}>
-        <button onClick={playTurn} disabled={!isMyTurn || rolling}>
+        <button
+          onClick={playTurn}
+          disabled={!isMyTurn || rolling}
+        >
           {rolling ? "Rolling..." : "🎲 Roll Dice"}
         </button>
 
@@ -290,6 +331,8 @@ export default function SnakeGame({ gameId }) {
   );
 }
 
+// =========================
+// STYLES
 // =========================
 const styles = {
   container: {
