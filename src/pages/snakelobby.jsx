@@ -14,10 +14,10 @@ const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegames";
 const WALLET_COLLECTION = "wallets";
 
-// ✅ ADMIN USER ID
+// =========================
+// CONFIG
+// =========================
 const ADMIN_USER_ID = "69ef9fe863a02a7490b4";
-
-// ✅ MINIMUM STAKE
 const MIN_STAKE = 150;
 
 // =========================
@@ -30,8 +30,6 @@ export default function SnakeLobby({ openGame, goHome }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  const lock = useState(false)[0];
-
   // =========================
   // LOAD USER
   // =========================
@@ -40,7 +38,7 @@ export default function SnakeLobby({ openGame, goHome }) {
   }, []);
 
   // =========================
-  // LOAD ROOMS
+  // LOAD ROOMS + REALTIME
   // =========================
   useEffect(() => {
     if (!user) return;
@@ -91,7 +89,7 @@ export default function SnakeLobby({ openGame, goHome }) {
   // CREATE ROOM
   // =========================
   async function createRoom() {
-    if (!user) return;
+    if (!user || loading) return;
 
     try {
       setLoading(true);
@@ -110,15 +108,17 @@ export default function SnakeLobby({ openGame, goHome }) {
         return popup("❌ Insufficient balance");
       }
 
-      // 💸 deduct host stake
+      // 💸 deduct stake
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
         wallet.$id,
-        { balance: balance - stake }
+        {
+          balance: balance - stake,
+        }
       );
 
-      // 🎮 create lobby (ONLY valid fields)
+      // 🎮 create lobby
       await databases.createDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -137,9 +137,10 @@ export default function SnakeLobby({ openGame, goHome }) {
       );
 
       popup("✅ Room created");
+      setStake(MIN_STAKE);
       loadRooms();
     } catch (err) {
-      console.log("CREATE ERROR:", err);
+      console.log(err);
       popup("❌ Failed to create room");
     } finally {
       setLoading(false);
@@ -147,11 +148,10 @@ export default function SnakeLobby({ openGame, goHome }) {
   }
 
   // =========================
-  // JOIN ROOM
+  // JOIN ROOM (RACE SAFE)
   // =========================
   async function joinRoom(room) {
-    if (!user || lock) return;
-    lock = true;
+    if (!user || loading) return;
 
     try {
       setLoading(true);
@@ -161,7 +161,11 @@ export default function SnakeLobby({ openGame, goHome }) {
       }
 
       if (room.opponentId) {
-        return popup("Room already full");
+        return popup("Room already taken");
+      }
+
+      if (room.stake < MIN_STAKE) {
+        return popup("❌ Minimum stake is ₦150");
       }
 
       const wallet = await getWallet(user.$id);
@@ -169,28 +173,36 @@ export default function SnakeLobby({ openGame, goHome }) {
       if (!wallet) return popup("Wallet not found");
 
       const balance = Number(wallet.balance || 0);
-      const stakeValue = Number(room.stake || 0);
 
-      if (stakeValue < MIN_STAKE) {
-        return popup("❌ Minimum stake is ₦150");
-      }
-
-      if (balance < stakeValue) {
+      if (balance < room.stake) {
         return popup("❌ Insufficient funds");
       }
 
-      // 💸 deduct opponent stake
+      // 🚨 STEP 1: LOCK ROOM FIRST (prevents double join)
+      const freshRoom = await databases.getDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        room.$id
+      );
+
+      if (freshRoom.opponentId) {
+        return popup("❌ Room already filled");
+      }
+
+      // 💸 deduct player stake
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
         wallet.$id,
-        { balance: balance - stakeValue }
+        {
+          balance: balance - room.stake,
+        }
       );
 
-      // 💰 pot calculation
-      const totalPot = stakeValue * 2;
-      const adminCut = Math.floor(totalPot * 0.1);
-      const gamePot = totalPot - adminCut;
+      // 💰 compute pot
+      const total = room.stake * 2;
+      const adminCut = Math.floor(total * 0.1);
+      const gamePot = total - adminCut;
 
       // 💰 admin payout
       const adminWallet = await getWallet(ADMIN_USER_ID);
@@ -201,8 +213,7 @@ export default function SnakeLobby({ openGame, goHome }) {
           WALLET_COLLECTION,
           adminWallet.$id,
           {
-            balance:
-              Number(adminWallet.balance || 0) + adminCut,
+            balance: Number(adminWallet.balance || 0) + adminCut,
           }
         );
       }
@@ -222,16 +233,14 @@ export default function SnakeLobby({ openGame, goHome }) {
           history: JSON.stringify([]),
 
           dice: 1,
-          winner: "",
-          winnerId: "",
           status: "playing",
-
+          winnerId: "",
           payoutDone: false,
           pot: gamePot,
         }
       );
 
-      // 🏁 update lobby
+      // 🏁 update lobby safely
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -245,14 +254,13 @@ export default function SnakeLobby({ openGame, goHome }) {
       );
 
       popup("🎮 Joined successfully");
-      openGame(game.$id, room.$id);
 
+      openGame(game.$id, room.$id);
     } catch (err) {
-      console.log("JOIN ERROR:", err);
+      console.log(err);
       popup("❌ Failed to join room");
     } finally {
       setLoading(false);
-      lock = false;
     }
   }
 
@@ -273,7 +281,7 @@ export default function SnakeLobby({ openGame, goHome }) {
 
       {message && <div style={styles.message}>{message}</div>}
 
-      {/* CREATE ROOM */}
+      {/* CREATE */}
       <div style={styles.create}>
         <input
           type="number"
@@ -283,11 +291,7 @@ export default function SnakeLobby({ openGame, goHome }) {
           style={styles.input}
         />
 
-        <button
-          onClick={createRoom}
-          disabled={loading}
-          style={styles.button}
-        >
+        <button onClick={createRoom} disabled={loading} style={styles.button}>
           Create Room
         </button>
       </div>
@@ -307,6 +311,7 @@ export default function SnakeLobby({ openGame, goHome }) {
                 <button
                   onClick={() => joinRoom(room)}
                   style={styles.joinBtn}
+                  disabled={loading}
                 >
                   Join
                 </button>
@@ -350,24 +355,28 @@ const styles = {
     padding: 20,
     textAlign: "center",
   },
+
   message: {
     background: "#dc2626",
     padding: 10,
     borderRadius: 10,
     marginBottom: 10,
   },
+
   create: {
     display: "flex",
     justifyContent: "center",
     gap: 10,
     marginBottom: 20,
   },
+
   input: {
     padding: 10,
     borderRadius: 8,
     border: "none",
     width: 120,
   },
+
   button: {
     padding: "10px 15px",
     borderRadius: 8,
@@ -376,16 +385,19 @@ const styles = {
     color: "#fff",
     fontWeight: "bold",
   },
+
   rooms: {
     maxWidth: 420,
     margin: "0 auto",
   },
+
   room: {
     background: "#111827",
     padding: 15,
     marginBottom: 10,
     borderRadius: 10,
   },
+
   joinBtn: {
     marginTop: 10,
     background: "#2563eb",
@@ -394,6 +406,7 @@ const styles = {
     padding: 10,
     borderRadius: 8,
   },
+
   resumeBtn: {
     marginTop: 10,
     background: "gold",
@@ -402,6 +415,7 @@ const styles = {
     padding: 10,
     borderRadius: 8,
   },
+
   exitBtn: {
     marginTop: 20,
     background: "#ef4444",
