@@ -4,7 +4,6 @@ import boardImg from "./board.png";
 
 const GAME_COLLECTION = "snakegame";
 const MATCH_COLLECTION = "snakelobby";
-
 const SIZE = 100;
 
 // =========================
@@ -36,6 +35,7 @@ function getCoords(pos) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
   let col = index % 10;
+
   if (row % 2 === 1) col = 9 - col;
 
   return {
@@ -59,7 +59,7 @@ function applyEffects(pos) {
 }
 
 // =========================
-// GAME COMPONENT
+// MAIN GAME
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
@@ -106,7 +106,7 @@ export default function SnakeGame({ gameId }) {
   }, [gameId]);
 
   // =========================
-  // REFRESH GAME STATE
+  // REFRESH GAME
   // =========================
   async function refreshGame() {
     const fresh = await databases.getDocument(
@@ -117,28 +117,48 @@ export default function SnakeGame({ gameId }) {
 
     setGame(fresh);
     setTurn(fresh.turn);
+
     return fresh;
   }
 
   // =========================
-  // MOVE
+  // FIXED MOVE SYSTEM (NO TILE BUG)
   // =========================
   async function move(player, steps) {
-    let pos = positions[player];
+    let currentPos = null;
+
+    setPositions((prev) => {
+      currentPos = prev[player];
+      return prev;
+    });
+
+    await sleep(50);
 
     for (let i = 0; i < steps; i++) {
-      await sleep(100);
-      pos++;
-      if (pos > SIZE) pos = SIZE;
+      await sleep(120);
 
-      setPositions((p) => ({ ...p, [player]: pos }));
+      currentPos += 1;
+      if (currentPos > SIZE) currentPos = SIZE;
+
+      setPositions((prev) => ({
+        ...prev,
+        [player]: currentPos,
+      }));
     }
 
-    return applyEffects(pos);
+    // 🐍 APPLY SNAKES/LADDERS AFTER MOVE
+    const final = applyEffects(currentPos);
+
+    setPositions((prev) => ({
+      ...prev,
+      [player]: final,
+    }));
+
+    return final;
   }
 
   // =========================
-  // PLAY TURN (FIXED SERVER TURN)
+  // PLAY TURN (SERVER CONTROLLED)
   // =========================
   async function playTurn() {
     if (!game || rolling || moving || lock.current) return;
@@ -148,15 +168,15 @@ export default function SnakeGame({ gameId }) {
     setMoving(true);
 
     try {
-      // 🔥 ALWAYS GET FRESH GAME STATE
       const fresh = await refreshGame();
 
       if (fresh.status !== "running") return;
 
-      const player = fresh.turn; // ✅ SERVER CONTROLLED TURN
+      const player = fresh.turn; // 🟢 ALWAYS SERVER TURN
 
       if (!player) return;
 
+      // 🎲 dice animation
       for (let i = 0; i < 6; i++) {
         setDice(Math.floor(Math.random() * 6) + 1);
         await sleep(60);
@@ -168,7 +188,6 @@ export default function SnakeGame({ gameId }) {
       const finalPos = await move(player, d);
 
       const winner = finalPos >= SIZE ? player : null;
-
       const nextTurn = player === "A" ? "B" : "A";
 
       const updated = {
@@ -196,10 +215,10 @@ export default function SnakeGame({ gameId }) {
       setTurn(res.turn);
 
       // =========================
-      // WIN + POT FIXED
+      // WIN + POT SAFE
       // =========================
       if (winner) {
-        const pot = Number(res.pot || 0); // ✅ FROM GAME ONLY
+        const pot = Number(res.pot || 0);
 
         alert(`🏆 Player ${winner} wins ₦${pot}`);
 
@@ -209,7 +228,7 @@ export default function SnakeGame({ gameId }) {
           gameId,
           {
             status: "finished",
-            winner: winner,
+            winner,
             payoutDone: true,
           }
         );
@@ -232,13 +251,20 @@ export default function SnakeGame({ gameId }) {
   // =========================
   if (!game) return <div style={{ color: "#fff" }}>Loading...</div>;
 
+  const safePositions = {
+    A: positions?.A || 1,
+    B: positions?.B || 1,
+  };
+
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Game</h2>
 
       <div style={styles.top}>
         <div>🎲 Dice: {dice}</div>
-        <div>Turn: {turn || "Loading..."}</div>
+        <div>
+          Turn: {turn === game.hostId ? "Player A" : "Player B"}
+        </div>
         <div>🏦 Pot: ₦{game?.pot || 0}</div>
       </div>
 
@@ -250,7 +276,7 @@ export default function SnakeGame({ gameId }) {
             key={p}
             style={{
               ...styles.token,
-              ...getCoords(positions[p]),
+              ...getCoords(safePositions[p]),
               background: p === "A" ? "red" : "blue",
             }}
           >
@@ -294,7 +320,10 @@ const styles = {
     margin: "20px auto",
   },
 
-  board: { width: "100%", height: "100%" },
+  board: {
+    width: "100%",
+    height: "100%",
+  },
 
   token: {
     position: "absolute",
