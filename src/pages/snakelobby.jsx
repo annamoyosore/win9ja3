@@ -19,7 +19,7 @@ const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 10;
 
 // =========================
-// WALLET SAFE SYSTEM
+// WALLET SYSTEM
 // =========================
 async function getOrCreateWallet(userId) {
   const res = await databases.listDocuments(
@@ -68,6 +68,7 @@ export default function Snakelobby() {
   const [lobbies, setLobbies] = useState([]);
   const [stake, setStake] = useState("");
   const [loading, setLoading] = useState(false);
+  const [activeGame, setActiveGame] = useState(null);
 
   // =========================
   // GET USER
@@ -98,9 +99,37 @@ export default function Snakelobby() {
 
       setLobbies(res.documents || []);
     } catch (err) {
-      console.error("Load error:", err);
+      console.error("Lobby load error:", err);
     }
   }
+
+  // =========================
+  // LOAD ACTIVE GAME (RESUME SYSTEM)
+  // =========================
+  useEffect(() => {
+    if (!userId) return;
+
+    async function loadActiveGame() {
+      try {
+        const res = await databases.listDocuments(
+          DATABASE_ID,
+          SNAKE_GAME_COLLECTION,
+          [Query.equal("status", "playing")]
+        );
+
+        const game = res.documents.find(
+          (g) =>
+            g.hostId === userId || g.opponentId === userId
+        );
+
+        setActiveGame(game || null);
+      } catch (err) {
+        console.error("Game load error:", err);
+      }
+    }
+
+    loadActiveGame();
+  }, [userId]);
 
   // =========================
   // HOST GAME
@@ -148,7 +177,7 @@ export default function Snakelobby() {
   }
 
   // =========================
-  // JOIN GAME (FULL FIXED FLOW)
+  // JOIN GAME (FIXED SAFE TRANSACTION)
   // =========================
   async function joinLobby(lobby) {
     if (!userId) return alert("Login required");
@@ -156,57 +185,47 @@ export default function Snakelobby() {
     setLoading(true);
 
     try {
-      // 🔥 ALWAYS REFRESH LOBBY (fix race condition)
-      const freshLobby = await databases.getDocument(
+      // 🔥 always fetch fresh lobby (prevents race bugs)
+      const fresh = await databases.getDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         lobby.$id
       );
 
-      // ❌ already joined
-      if (freshLobby.opponentId) {
-        return alert("❌ Lobby already full");
+      if (fresh.status !== "waiting") {
+        return alert("❌ Game already started");
       }
 
-      // ❌ prevent self join
-      if (freshLobby.hostId === userId) {
-        return alert("❌ You cannot join your own lobby");
+      if (fresh.opponentId) {
+        return alert("❌ Lobby full");
       }
 
-      const stakeAmount = Number(freshLobby.stake);
-
-      if (!stakeAmount || stakeAmount <= 0) {
-        return alert("Invalid stake");
+      if (fresh.hostId === userId) {
+        return alert("❌ You cannot join your own game");
       }
 
-      // 💰 deduct opponent
+      const stakeAmount = Number(fresh.stake);
+
       await deductWallet(userId, stakeAmount);
 
       // =========================
       // POT CALCULATION
       // =========================
       const totalPot = stakeAmount * 2;
-      const adminCut = Math.floor((totalPot * ADMIN_CUT_PERCENT) / 100);
+      const adminCut = Math.floor(totalPot * ADMIN_CUT_PERCENT / 100);
       const gamePot = totalPot - adminCut;
 
-      // 👑 UPDATE LOBBY FIRST (LOCK IT)
-      await databases.updateDocument(
-        DATABASE_ID,
-        SNAKE_LOBBY_COLLECTION,
-        lobby.$id,
-        {
-          opponentId: userId,
-          status: "active",
-        }
-      );
-
-      // 🎮 CREATE GAME
+      // =========================
+      // CREATE GAME FIRST (CRITICAL FIX)
+      // =========================
       const game = await databases.createDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
         ID.unique(),
         {
-          matchId: lobby.$id,
+          matchId: fresh.$id,
+          hostId: fresh.hostId,
+          opponentId: userId,
           turn: "A",
           status: "playing",
           pot: gamePot,
@@ -216,23 +235,33 @@ export default function Snakelobby() {
         }
       );
 
-      // link game
+      if (!game) {
+        throw new Error("GAME_CREATION_FAILED");
+      }
+
+      // =========================
+      // LOCK LOBBY AFTER GAME CREATION
+      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
-        lobby.$id,
+        fresh.$id,
         {
+          opponentId: userId,
+          status: "active",
           gameId: game.$id,
         }
       );
 
-      alert("🔥 Joined successfully!");
+      alert("🔥 Game started!");
       loadLobbies();
     } catch (err) {
       console.error("JOIN ERROR:", err);
 
       if (err.message === "INSUFFICIENT_BALANCE") {
         alert("❌ Not enough balance");
+      } else if (err.message === "GAME_CREATION_FAILED") {
+        alert("❌ Game failed to start, try again");
       } else {
         alert("❌ Failed to join lobby");
       }
@@ -256,6 +285,18 @@ export default function Snakelobby() {
   return (
     <div style={styles.container}>
       <h2>🐍 Snake Lobby (2 Players)</h2>
+
+      {/* 🟢 RESUME BUTTON */}
+      {activeGame && (
+        <button
+          style={styles.resume}
+          onClick={() =>
+            (window.location.href = `/snakegame/${activeGame.$id}`)
+          }
+        >
+          ▶ Resume Game
+        </button>
+      )}
 
       <div style={styles.box}>
         <input
@@ -317,5 +358,14 @@ const styles = {
     background: "#1e293b",
     padding: 12,
     borderRadius: 10,
+  },
+
+  resume: {
+    background: "green",
+    color: "#fff",
+    padding: 10,
+    marginBottom: 10,
+    borderRadius: 8,
+    border: "none",
   },
 };
