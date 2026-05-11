@@ -6,10 +6,13 @@ import {
   Query,
 } from "../lib/appwrite";
 
-import {
-  SNAKE_LOBBY_COLLECTION,
-  SNAKE_GAME_COLLECTION,
-} from "../lib/appwrite";
+// 🐍 COLLECTIONS
+const SNAKE_LOBBY_COLLECTION = "snakelobby";
+const SNAKE_GAME_COLLECTION = "snakegame";
+
+// 👑 ADMIN SETTINGS
+const ADMIN_ID = "YOUR_ADMIN_USER_ID";
+const ADMIN_CUT_PERCENT = 10;
 
 export default function SnakeLobby({ userId }) {
   const [lobbies, setLobbies] = useState([]);
@@ -35,12 +38,12 @@ export default function SnakeLobby({ userId }) {
 
       setLobbies(res.documents || []);
     } catch (err) {
-      console.error("Load lobby error:", err);
+      console.error(err);
     }
   }
 
   // =========================
-  // CREATE LOBBY (HOST)
+  // CREATE LOBBY
   // =========================
   async function createLobby() {
     if (!userId) return alert("Login required");
@@ -64,43 +67,50 @@ export default function SnakeLobby({ userId }) {
 
       loadLobbies();
     } catch (err) {
-      console.error("Create lobby error:", err);
+      console.error("Create error:", err);
     } finally {
       setCreating(false);
     }
   }
 
   // =========================
-  // JOIN LOBBY (OPPONENT)
+  // JOIN LOBBY
   // =========================
   async function joinLobby(lobby) {
     if (!userId) return alert("Login required");
 
     try {
-      // prevent self join
       if (lobby.hostId === userId) {
         return alert("You are the host");
       }
 
-      // prevent double join
       if (lobby.opponentId) {
         return alert("Lobby already full");
       }
 
-      // assign opponent
-      const updatedLobby = await databases.updateDocument(
+      // =========================
+      // POT + ADMIN CUT CALCULATION
+      // =========================
+      const totalPot = lobby.stake * 2;
+      const adminCut = Math.floor(
+        (totalPot * ADMIN_CUT_PERCENT) / 100
+      );
+      const gamePot = totalPot - adminCut;
+
+      // update lobby
+      await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         lobby.$id,
         {
           opponentId: userId,
-          pot: lobby.stake * 2,
+          pot: gamePot,
           status: "active",
         }
       );
 
       // =========================
-      // START GAME
+      // CREATE GAME
       // =========================
       const game = await databases.createDocument(
         DATABASE_ID,
@@ -119,6 +129,7 @@ export default function SnakeLobby({ userId }) {
         }
       );
 
+      // link game
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -128,11 +139,26 @@ export default function SnakeLobby({ userId }) {
         }
       );
 
+      // =========================
+      // ADMIN CUT WALLET (OPTIONAL)
+      // =========================
+      await databases.createDocument(
+        DATABASE_ID,
+        "wallets",
+        ID.unique(),
+        {
+          userId: ADMIN_ID,
+          amount: adminCut,
+          type: "admin_cut",
+          source: "snake_game",
+        }
+      );
+
       alert("🔥 Game started!");
 
       loadLobbies();
     } catch (err) {
-      console.error("Join lobby error:", err);
+      console.error("Join error:", err);
     }
   }
 
@@ -148,7 +174,6 @@ export default function SnakeLobby({ userId }) {
           type="number"
           value={stake}
           onChange={(e) => setStake(e.target.value)}
-          placeholder="Stake"
         />
 
         <button onClick={createLobby} disabled={creating}>
@@ -164,9 +189,12 @@ export default function SnakeLobby({ userId }) {
             <div>Host: {lobby.hostId}</div>
             <div>Stake: ₦{lobby.stake}</div>
             <div>Pot: ₦{lobby.pot}</div>
+
             <div>
-              Opponent: {lobby.opponentId ? "Joined" : "Waiting..."}
+              Opponent:{" "}
+              {lobby.opponentId ? "Joined" : "Waiting..."}
             </div>
+
             <div>Status: {lobby.status}</div>
 
             <button onClick={() => joinLobby(lobby)}>
