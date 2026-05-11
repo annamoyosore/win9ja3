@@ -12,18 +12,24 @@ const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
 
 const ADMIN_CUT_PERCENT = 12;
+const MIN_STAKE = 150;
 
 // =========================
-// WALLET
+// WALLET SAFE FETCH
 // =========================
 async function getWallet(userId) {
-  const res = await databases.listDocuments(
-    DATABASE_ID,
-    WALLET_COLLECTION,
-    [Query.equal("userId", userId), Query.limit(1)]
-  );
+  try {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", userId), Query.limit(1)]
+    );
 
-  return res.documents[0];
+    return res.documents?.[0] || null;
+  } catch (err) {
+    console.error("Wallet fetch error:", err);
+    return null;
+  }
 }
 
 export default function Snakelobby({ goGame }) {
@@ -38,56 +44,55 @@ export default function Snakelobby({ goGame }) {
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [loadingJoin, setLoadingJoin] = useState(null);
 
-  // =========================
-  // INIT
-  // =========================
   useEffect(() => {
     init();
   }, []);
 
+  // =========================
+  // INIT SAFE
+  // =========================
   async function init() {
-    const u = await account.get();
-    setUser(u);
+    try {
+      const u = await account.get();
+      setUser(u);
 
-    const w = await getWallet(u.$id);
-    setWallet(w);
+      const w = await getWallet(u.$id);
+      setWallet(w);
 
-    loadLobbies(u.$id);
+      await loadLobbies(u.$id);
+    } catch (err) {
+      console.error("Init error:", err);
+    }
   }
 
   // =========================
-  // LOAD LOBBIES (FIXED)
+  // LOAD LOBBIES (HOST + OPPONENT)
   // =========================
   async function loadLobbies(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      SNAKE_LOBBY_COLLECTION,
-      [Query.limit(100)]
-    );
-
-    // 🧠 HOST MUST SEE OWN + OPPONENT LOBBIES
-    const mine = res.documents.filter((m) => {
-      return (
-        m.hostId === userId ||
-        m.opponentId === userId
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        [Query.limit(100)]
       );
-    });
 
-    // 🟡 WAITING (SHOW HOST TOO)
-    const waitingLobbies = mine.filter((m) => {
-      return (m.status || "").toLowerCase() === "waiting";
-    });
+      const mine = res.documents.filter((m) => {
+        return m.hostId === userId || m.opponentId === userId;
+      });
 
-    // 🟢 ACTIVE (MATCHED + GAME EXISTS)
-    const activeGames = mine.filter((m) => {
-      return (
-        (m.status || "").toLowerCase() === "matched" &&
-        m.gameId
+      const waitingLobbies = mine.filter(
+        (m) => (m.status || "") === "waiting"
       );
-    });
 
-    setWaiting(waitingLobbies);
-    setActive(activeGames);
+      const activeGames = mine.filter(
+        (m) => (m.status || "") === "matched" && m.gameId
+      );
+
+      setWaiting(waitingLobbies);
+      setActive(activeGames);
+    } catch (err) {
+      console.error("Load lobby error:", err);
+    }
   }
 
   // =========================
@@ -96,8 +101,8 @@ export default function Snakelobby({ goGame }) {
   async function createLobby() {
     const amount = Number(stake);
 
-    if (!amount || amount < 150) {
-      return alert("Minimum stake is ₦150");
+    if (!amount || amount < MIN_STAKE) {
+      return alert(`Minimum stake is ₦${MIN_STAKE}`);
     }
 
     if (!wallet || wallet.balance < amount) {
@@ -132,9 +137,10 @@ export default function Snakelobby({ goGame }) {
       );
 
       setStake("");
-      loadLobbies(user.$id);
+      await loadLobbies(user.$id);
 
     } catch (err) {
+      console.error(err);
       alert(err.message);
     }
 
@@ -142,7 +148,7 @@ export default function Snakelobby({ goGame }) {
   }
 
   // =========================
-  // JOIN LOBBY (MATCHED CREATES GAME)
+  // JOIN → MATCHED → GAME CREATED
   // =========================
   async function joinLobby(lobby) {
     if (loadingJoin) return;
@@ -166,17 +172,19 @@ export default function Snakelobby({ goGame }) {
 
       const amount = Number(fresh.stake);
 
-      if (!wallet || wallet.balance < amount) {
+      const freshWallet = await getWallet(user.$id);
+
+      if (!freshWallet || freshWallet.balance < amount) {
         throw new Error("Insufficient balance");
       }
 
-      // 💰 deduct wallet
+      // 💰 deduct opponent wallet
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
-        wallet.$id,
+        freshWallet.$id,
         {
-          balance: wallet.balance - amount
+          balance: freshWallet.balance - amount
         }
       );
 
@@ -225,6 +233,7 @@ export default function Snakelobby({ goGame }) {
       goGame(game.$id, amount);
 
     } catch (err) {
+      console.error(err);
       alert(err.message);
     }
 
@@ -248,48 +257,47 @@ export default function Snakelobby({ goGame }) {
         {loadingCreate ? "Creating..." : "Create Lobby"}
       </button>
 
-      {/* 🟡 WAITING */}
-      <h3>Waiting Games</h3>
+      {/* WAITING */}
+      <h3>Waiting Lobbies</h3>
 
-      {waiting.length === 0 && <p>No waiting games</p>}
+      {waiting.length === 0 && <p>No waiting lobbies</p>}
 
-      {waiting.map((m) => (
-        <div key={m.$id} style={styles.card}>
+      {waiting.map((l) => (
+        <div key={l.$id} style={styles.card}>
           <div>
-            <p>₦{m.stake}</p>
-
-            {m.hostId === user.$id ? (
+            <p>₦{l.stake}</p>
+            {l.hostId === user.$id ? (
               <p>⏳ Waiting for opponent...</p>
             ) : (
               <p>Available</p>
             )}
           </div>
 
-          {m.hostId !== user.$id && (
-            <button onClick={() => joinLobby(m)} disabled={loadingJoin === m.$id}>
+          {l.hostId !== user.$id && (
+            <button
+              onClick={() => joinLobby(l)}
+              disabled={loadingJoin === l.$id}
+            >
               Join
             </button>
           )}
         </div>
       ))}
 
-      {/* 🟢 ACTIVE */}
+      {/* ACTIVE */}
       <h3>Active Games</h3>
 
       {active.length === 0 && <p>No active games</p>}
 
-      {active.map((m) => (
-        <div key={m.$id} style={styles.card}>
+      {active.map((l) => (
+        <div key={l.$id} style={styles.card}>
           <div>
-            <p>₦{m.stake}</p>
-            <p>Matched Game</p>
+            <p>₦{l.stake}</p>
+            <p>Matched</p>
           </div>
 
-          {m.gameId && (
-            <button
-              style={styles.resume}
-              onClick={() => goGame(m.gameId, m.stake)}
-            >
+          {l.gameId && (
+            <button onClick={() => goGame(l.gameId, l.stake)}>
               ▶ Resume
             </button>
           )}
@@ -318,14 +326,5 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center"
-  },
-
-  resume: {
-    background: "#16a34a",
-    padding: "10px 18px",
-    borderRadius: 10,
-    border: "none",
-    color: "#fff",
-    fontWeight: "bold"
   }
 };
