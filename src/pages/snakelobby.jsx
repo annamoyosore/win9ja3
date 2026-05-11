@@ -54,17 +54,17 @@ export default function SnakeLobby({ userId }) {
         ID.unique(),
         {
           hostId: userId,
-          players: JSON.stringify([userId]),
+          opponentId: null,
           stake: Number(stake),
           pot: Number(stake),
           status: "waiting",
-          gameId: "",
+          gameId: null,
         }
       );
 
       loadLobbies();
     } catch (err) {
-      console.error(err);
+      console.error("Create lobby error:", err);
     } finally {
       setCreating(false);
     }
@@ -77,64 +77,62 @@ export default function SnakeLobby({ userId }) {
     if (!userId) return alert("Login required");
 
     try {
-      const players = JSON.parse(lobby.players || "[]");
-
-      if (players.includes(userId)) {
-        return alert("Already joined");
+      // prevent self join
+      if (lobby.hostId === userId) {
+        return alert("You are the host");
       }
 
-      if (players.length >= 2) {
-        return alert("Lobby full");
+      // prevent double join
+      if (lobby.opponentId) {
+        return alert("Lobby already full");
       }
 
-      const updatedPlayers = [...players, userId];
-      const isFull = updatedPlayers.length === 2;
-
+      // assign opponent
       const updatedLobby = await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         lobby.$id,
         {
-          players: JSON.stringify(updatedPlayers),
-          pot: updatedPlayers.length * lobby.stake,
-          status: isFull ? "active" : "waiting",
+          opponentId: userId,
+          pot: lobby.stake * 2,
+          status: "active",
         }
       );
 
       // =========================
-      // START GAME WHEN FULL
+      // START GAME
       // =========================
-      if (isFull) {
-        const game = await databases.createDocument(
-          DATABASE_ID,
-          SNAKE_GAME_COLLECTION,
-          ID.unique(),
-          {
-            matchId: lobby.$id,
-            turn: "A",
-            status: "playing",
-            positions: JSON.stringify({ A: 1, B: 1 }),
-            winner: "",
-            history: JSON.stringify([]),
-          }
-        );
+      const game = await databases.createDocument(
+        DATABASE_ID,
+        SNAKE_GAME_COLLECTION,
+        ID.unique(),
+        {
+          matchId: lobby.$id,
+          turn: "A",
+          status: "playing",
+          positions: JSON.stringify({
+            A: 1,
+            B: 1,
+          }),
+          winner: "",
+          history: JSON.stringify([]),
+        }
+      );
 
-        await databases.updateDocument(
-          DATABASE_ID,
-          SNAKE_LOBBY_COLLECTION,
-          lobby.$id,
-          {
-            gameId: game.$id,
-            status: "active",
-          }
-        );
+      await databases.updateDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        lobby.$id,
+        {
+          gameId: game.$id,
+        }
+      );
 
-        alert("🔥 Game started!");
-      }
+      alert("🔥 Game started!");
 
       loadLobbies();
     } catch (err) {
-      console.error("Join error:", err);
+      console.error("Join lobby error:", err);
     }
   }
 
@@ -158,26 +156,24 @@ export default function SnakeLobby({ userId }) {
         </button>
       </div>
 
-      <h3>Available Lobbies</h3>
+      <h3>Waiting Lobbies</h3>
 
       <div style={styles.list}>
-        {lobbies.map((lobby) => {
-          const players = JSON.parse(lobby.players || "[]");
-
-          return (
-            <div key={lobby.$id} style={styles.card}>
-              <div>Host: {lobby.hostId}</div>
-              <div>Stake: ₦{lobby.stake}</div>
-              <div>Pot: ₦{lobby.pot}</div>
-              <div>Players: {players.length}/2</div>
-              <div>Status: {lobby.status}</div>
-
-              <button onClick={() => joinLobby(lobby)}>
-                Join Game
-              </button>
+        {lobbies.map((lobby) => (
+          <div key={lobby.$id} style={styles.card}>
+            <div>Host: {lobby.hostId}</div>
+            <div>Stake: ₦{lobby.stake}</div>
+            <div>Pot: ₦{lobby.pot}</div>
+            <div>
+              Opponent: {lobby.opponentId ? "Joined" : "Waiting..."}
             </div>
-          );
-        })}
+            <div>Status: {lobby.status}</div>
+
+            <button onClick={() => joinLobby(lobby)}>
+              Join Game
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
