@@ -28,7 +28,7 @@ export default function SnakeLobby({ openGame, goHome }) {
   const [message, setMessage] = useState("");
 
   // =========================
-  // LOAD USER
+  // INIT USER
   // =========================
   useEffect(() => {
     account.get().then(setUser).catch(() => {});
@@ -96,7 +96,6 @@ export default function SnakeLobby({ openGame, goHome }) {
       }
 
       const wallet = await getWallet(user.$id);
-
       if (!wallet) return popup("Wallet not found");
 
       const balance = Number(wallet.balance || 0);
@@ -105,6 +104,7 @@ export default function SnakeLobby({ openGame, goHome }) {
         return popup("❌ Insufficient balance");
       }
 
+      // 💸 deduct first safely
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -114,6 +114,7 @@ export default function SnakeLobby({ openGame, goHome }) {
         }
       );
 
+      // 🎮 create room
       await databases.createDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -141,31 +142,32 @@ export default function SnakeLobby({ openGame, goHome }) {
   }
 
   // =========================
-  // JOIN ROOM (SAFE + SNIPES)
+  // JOIN ROOM (SAFE + AUTO UNLOCK)
   // =========================
   async function joinRoom(room) {
     if (!user || loading) return;
 
     const snipes = [];
 
-    const fail = async (msg, stage, refund = false, walletData = null) => {
+    const fail = async (msg, stage, unlockRoom = false) => {
       snipes.push(`❌ FAILED AT: ${stage}`);
       console.log("SNIPES:", snipes);
 
-      if (refund && walletData) {
+      if (unlockRoom) {
         try {
           await databases.updateDocument(
             DATABASE_ID,
-            WALLET_COLLECTION,
-            walletData.$id,
+            SNAKE_LOBBY_COLLECTION,
+            room.$id,
             {
-              balance:
-                Number(walletData.balance || 0) + Number(room.stake),
+              status: "waiting",
+              opponentId: ""
             }
           );
-          snipes.push("💰 REFUND DONE");
+
+          snipes.push("🔓 ROOM UNLOCKED");
         } catch {
-          snipes.push("💥 REFUND FAILED");
+          snipes.push("💥 ROOM UNLOCK FAILED");
         }
       }
 
@@ -198,7 +200,6 @@ export default function SnakeLobby({ openGame, goHome }) {
       // WALLET CHECK
       // =========================
       const wallet = await getWallet(user.$id);
-
       if (!wallet) return fail("Wallet missing", "WALLET");
 
       const balance = Number(wallet.balance || 0);
@@ -208,7 +209,7 @@ export default function SnakeLobby({ openGame, goHome }) {
       }
 
       // =========================
-      // LOCK ROOM FIRST
+      // LOCK ROOM
       // =========================
       await databases.updateDocument(
         DATABASE_ID,
@@ -220,7 +221,7 @@ export default function SnakeLobby({ openGame, goHome }) {
       snipes.push("🔒 ROOM LOCKED");
 
       // =========================
-      // CREATE GAME FIRST
+      // CREATE GAME
       // =========================
       let game;
 
@@ -246,51 +247,44 @@ export default function SnakeLobby({ openGame, goHome }) {
 
         snipes.push("🎮 GAME CREATED");
       } catch (e) {
-        return fail("Game creation failed", "GAME_CREATE");
+        return fail("Game creation failed", "GAME_CREATE", true);
       }
 
       // =========================
       // UPDATE LOBBY
       // =========================
-      try {
-        await databases.updateDocument(
-          DATABASE_ID,
-          SNAKE_LOBBY_COLLECTION,
-          fresh.$id,
-          {
-            opponentId: user.$id,
-            status: "playing",
-            gameId: game.$id,
-          }
-        );
+      await databases.updateDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        fresh.$id,
+        {
+          opponentId: user.$id,
+          status: "playing",
+          gameId: game.$id,
+        }
+      );
 
-        snipes.push("📦 LOBBY UPDATED");
-      } catch (e) {
-        return fail("Lobby update failed", "LOBBY_UPDATE", true, wallet);
-      }
+      snipes.push("📦 LOBBY UPDATED");
 
       // =========================
       // DEDUCT WALLET LAST
       // =========================
-      try {
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          wallet.$id,
-          {
-            balance: balance - fresh.stake,
-          }
-        );
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: balance - fresh.stake,
+        }
+      );
 
-        snipes.push("💸 WALLET DEDUCTED");
-      } catch (e) {
-        return fail("Wallet deduction failed", "WALLET_DEDUCT", true, wallet);
-      }
-
+      snipes.push("💸 WALLET DEDUCTED");
       snipes.push("✅ JOIN SUCCESS");
+
       console.log("FINAL SNIPES:", snipes);
 
       openGame(game.$id, fresh.$id);
+
     } catch (err) {
       console.log(err);
       popup("❌ Failed to join room");
@@ -300,7 +294,7 @@ export default function SnakeLobby({ openGame, goHome }) {
   }
 
   // =========================
-  // RESUME
+  // RESUME GAME
   // =========================
   function resumeGame(room) {
     if (!room.gameId) return;
@@ -350,10 +344,7 @@ export default function SnakeLobby({ openGame, goHome }) {
             )}
 
             {room.status === "playing" && (
-              <button
-                onClick={() => resumeGame(room)}
-                style={styles.resumeBtn}
-              >
+              <button onClick={() => resumeGame(room)} style={styles.resumeBtn}>
                 Resume
               </button>
             )}
