@@ -15,11 +15,51 @@ const SNAKE_GAME_COLLECTION = "snakegame";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 10;
 
+// =========================
+// SAFE WALLET HELPERS (NO CRASH MODE)
+// =========================
+async function getWallet(userId) {
+  try {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      "wallets",
+      [Query.equal("userId", userId)]
+    );
+
+    return res.documents?.[0] || null;
+  } catch (err) {
+    console.warn("Wallet fetch failed:", err.message);
+    return null;
+  }
+}
+
+async function updateWallet(userId, amountChange) {
+  try {
+    const wallet = await getWallet(userId);
+
+    if (!wallet) {
+      console.warn("Wallet not found for:", userId);
+      return; // SAFE FAIL (no crash)
+    }
+
+    await databases.updateDocument(
+      DATABASE_ID,
+      "wallets",
+      wallet.$id,
+      {
+        balance: wallet.balance + amountChange,
+      }
+    );
+  } catch (err) {
+    console.warn("Wallet update failed:", err.message);
+  }
+}
+
 export default function SnakeLobby() {
   const [userId, setUserId] = useState(null);
   const [lobbies, setLobbies] = useState([]);
   const [stake, setStake] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   // =========================
   // GET USER
@@ -55,20 +95,23 @@ export default function SnakeLobby() {
   }
 
   // =========================
-  // CREATE LOBBY (FIXED)
+  // STAKE & HOST
   // =========================
-  async function createLobby() {
+  async function stakeAndHost() {
     if (!userId) return alert("Login required");
 
-    const safeStake = parseInt(stake);
+    const amount = parseInt(stake);
 
-    if (!safeStake || safeStake <= 0) {
-      return alert("Enter valid stake amount");
+    if (!amount || amount <= 0) {
+      return alert("Enter valid stake");
     }
 
-    setCreating(true);
+    setLoading(true);
 
     try {
+      // 💰 SAFE WALLET DEDUCTION
+      await updateWallet(userId, -amount);
+
       await databases.createDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -76,8 +119,8 @@ export default function SnakeLobby() {
         {
           hostId: userId,
           opponentId: null,
-          stake: safeStake,
-          pot: safeStake,
+          stake: amount,
+          pot: amount,
           status: "waiting",
           gameId: null,
         }
@@ -86,10 +129,10 @@ export default function SnakeLobby() {
       setStake("");
       loadLobbies();
     } catch (err) {
-      console.error("CREATE ERROR:", err);
-      alert("Failed to create lobby");
+      console.error("HOST ERROR:", err);
+      alert("Failed to stake & host");
     } finally {
-      setCreating(false);
+      setLoading(false);
     }
   }
 
@@ -105,10 +148,15 @@ export default function SnakeLobby() {
       }
 
       if (lobby.opponentId) {
-        return alert("Lobby already full");
+        return alert("Lobby full");
       }
 
-      const totalPot = lobby.stake * 2;
+      const amount = lobby.stake;
+
+      // 💰 SAFE OPPONENT DEDUCTION
+      await updateWallet(userId, -amount);
+
+      const totalPot = amount * 2;
       const adminCut = Math.floor(
         (totalPot * ADMIN_CUT_PERCENT) / 100
       );
@@ -135,10 +183,7 @@ export default function SnakeLobby() {
           matchId: lobby.$id,
           turn: "A",
           status: "playing",
-          positions: JSON.stringify({
-            A: 1,
-            B: 1,
-          }),
+          positions: JSON.stringify({ A: 1, B: 1 }),
           winner: "",
           history: JSON.stringify([]),
         }
@@ -153,21 +198,10 @@ export default function SnakeLobby() {
         }
       );
 
-      // admin wallet entry
-      await databases.createDocument(
-        DATABASE_ID,
-        "wallets",
-        ID.unique(),
-        {
-          userId: ADMIN_ID,
-          amount: adminCut,
-          type: "admin_cut",
-          source: "snake_game",
-        }
-      );
+      // 👑 ADMIN CUT (SAFE)
+      await updateWallet(ADMIN_ID, adminCut);
 
       alert("🔥 Game started!");
-
       loadLobbies();
     } catch (err) {
       console.error("JOIN ERROR:", err);
@@ -199,8 +233,8 @@ export default function SnakeLobby() {
           onChange={(e) => setStake(e.target.value)}
         />
 
-        <button onClick={createLobby} disabled={creating}>
-          Create Lobby
+        <button onClick={stakeAndHost} disabled={loading}>
+          🎯 Stake & Host
         </button>
       </div>
 
@@ -212,11 +246,7 @@ export default function SnakeLobby() {
             <div>Host: {lobby.hostId}</div>
             <div>Stake: ₦{lobby.stake}</div>
             <div>Pot: ₦{lobby.pot}</div>
-
-            <div>
-              Opponent: {lobby.opponentId ? "Joined" : "Waiting..."}
-            </div>
-
+            <div>Opponent: {lobby.opponentId ? "Joined" : "Waiting..."}</div>
             <div>Status: {lobby.status}</div>
 
             <button onClick={() => joinLobby(lobby)}>
