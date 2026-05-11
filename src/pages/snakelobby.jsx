@@ -7,55 +7,63 @@ import {
   account,
 } from "../lib/appwrite";
 
-// 🐍 COLLECTIONS
+// =========================
+// COLLECTIONS
+// =========================
 const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
+const WALLET_COLLECTION = "wallets";
 
 // 👑 ADMIN SETTINGS
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 10;
 
 // =========================
-// SAFE WALLET HELPERS (NO CRASH MODE)
+// WALLET HELPERS
 // =========================
-async function getWallet(userId) {
-  try {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      "wallets",
-      [Query.equal("userId", userId)]
-    );
+async function getOrCreateWallet(userId) {
+  const res = await databases.listDocuments(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    [Query.equal("userId", userId)]
+  );
 
-    return res.documents?.[0] || null;
-  } catch (err) {
-    console.warn("Wallet fetch failed:", err.message);
-    return null;
-  }
-}
+  if (res.documents.length > 0) return res.documents[0];
 
-async function updateWallet(userId, amountChange) {
-  try {
-    const wallet = await getWallet(userId);
-
-    if (!wallet) {
-      console.warn("Wallet not found for:", userId);
-      return; // SAFE FAIL (no crash)
+  return await databases.createDocument(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    ID.unique(),
+    {
+      userId,
+      balance: 0,
     }
-
-    await databases.updateDocument(
-      DATABASE_ID,
-      "wallets",
-      wallet.$id,
-      {
-        balance: wallet.balance + amountChange,
-      }
-    );
-  } catch (err) {
-    console.warn("Wallet update failed:", err.message);
-  }
+  );
 }
 
-export default function SnakeLobby() {
+async function deductWallet(userId, amount) {
+  const wallet = await getOrCreateWallet(userId);
+
+  const balance = Number(wallet.balance || 0);
+
+  if (balance < amount) {
+    throw new Error("INSUFFICIENT_BALANCE");
+  }
+
+  await databases.updateDocument(
+    DATABASE_ID,
+    WALLET_COLLECTION,
+    wallet.$id,
+    {
+      balance: balance - amount,
+    }
+  );
+}
+
+// =========================
+// COMPONENT
+// =========================
+export default function Snakelobby() {
   const [userId, setUserId] = useState(null);
   const [lobbies, setLobbies] = useState([]);
   const [stake, setStake] = useState("");
@@ -90,7 +98,7 @@ export default function SnakeLobby() {
 
       setLobbies(res.documents || []);
     } catch (err) {
-      console.error("LOAD ERROR:", err);
+      console.error("Load error:", err);
     }
   }
 
@@ -109,8 +117,7 @@ export default function SnakeLobby() {
     setLoading(true);
 
     try {
-      // 💰 SAFE WALLET DEDUCTION
-      await updateWallet(userId, -amount);
+      await deductWallet(userId, amount);
 
       await databases.createDocument(
         DATABASE_ID,
@@ -120,7 +127,6 @@ export default function SnakeLobby() {
           hostId: userId,
           opponentId: null,
           stake: amount,
-          pot: amount,
           status: "waiting",
           gameId: null,
         }
@@ -129,52 +135,77 @@ export default function SnakeLobby() {
       setStake("");
       loadLobbies();
     } catch (err) {
-      console.error("HOST ERROR:", err);
-      alert("Failed to stake & host");
+      if (err.message === "INSUFFICIENT_BALANCE") {
+        alert("❌ Insufficient wallet balance");
+      } else {
+        alert("Failed to create lobby");
+      }
+
+      console.error(err);
     } finally {
       setLoading(false);
     }
   }
 
   // =========================
-  // JOIN LOBBY
+  // JOIN LOBBY (POT LOGIC FIXED)
   // =========================
   async function joinLobby(lobby) {
     if (!userId) return alert("Login required");
 
     try {
       if (lobby.hostId === userId) {
-        return alert("You are the host");
+        return alert("You are host");
       }
 
       if (lobby.opponentId) {
         return alert("Lobby full");
       }
 
-      const amount = lobby.stake;
+      const stakeAmount = lobby.stake;
 
-      // 💰 SAFE OPPONENT DEDUCTION
-      await updateWallet(userId, -amount);
+      // 💰 deduct opponent
+      await deductWallet(userId, stakeAmount);
 
-      const totalPot = amount * 2;
+      // =========================
+      // POT CALCULATION (YOUR RULE)
+      // =========================
+      const totalPot = stakeAmount * 2;
+
       const adminCut = Math.floor(
         (totalPot * ADMIN_CUT_PERCENT) / 100
       );
+
       const gamePot = totalPot - adminCut;
 
-      // update lobby
+      // 👑 send admin cut immediately
+      await databases.createDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        ID.unique(),
+        {
+          userId: ADMIN_ID,
+          balance: adminCut,
+          type: "admin_cut",
+        }
+      );
+
+      // =========================
+      // UPDATE LOBBY
+      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         lobby.$id,
         {
           opponentId: userId,
-          pot: gamePot,
           status: "active",
         }
       );
 
-      // create game
+      // =========================
+      // CREATE GAME WITH FINAL POT
+      // =========================
       const game = await databases.createDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
@@ -183,6 +214,10 @@ export default function SnakeLobby() {
           matchId: lobby.$id,
           turn: "A",
           status: "playing",
+
+          // 🐍 THIS IS YOUR FINAL POT FOR WINNER
+          pot: gamePot,
+
           positions: JSON.stringify({ A: 1, B: 1 }),
           winner: "",
           history: JSON.stringify([]),
@@ -198,14 +233,16 @@ export default function SnakeLobby() {
         }
       );
 
-      // 👑 ADMIN CUT (SAFE)
-      await updateWallet(ADMIN_ID, adminCut);
-
       alert("🔥 Game started!");
       loadLobbies();
     } catch (err) {
-      console.error("JOIN ERROR:", err);
-      alert("Failed to join lobby");
+      console.error(err);
+
+      if (err.message === "INSUFFICIENT_BALANCE") {
+        alert("❌ Not enough balance");
+      } else {
+        alert("Failed to join lobby");
+      }
     }
   }
 
@@ -216,7 +253,7 @@ export default function SnakeLobby() {
     return (
       <div style={styles.container}>
         <h2>🐍 Snake Lobby</h2>
-        <p>Please login to continue</p>
+        <p>Login required</p>
       </div>
     );
   }
@@ -225,7 +262,7 @@ export default function SnakeLobby() {
     <div style={styles.container}>
       <h2>🐍 Snake Lobby (2 Players)</h2>
 
-      <div style={styles.createBox}>
+      <div style={styles.box}>
         <input
           type="number"
           value={stake}
@@ -245,8 +282,6 @@ export default function SnakeLobby() {
           <div key={lobby.$id} style={styles.card}>
             <div>Host: {lobby.hostId}</div>
             <div>Stake: ₦{lobby.stake}</div>
-            <div>Pot: ₦{lobby.pot}</div>
-            <div>Opponent: {lobby.opponentId ? "Joined" : "Waiting..."}</div>
             <div>Status: {lobby.status}</div>
 
             <button onClick={() => joinLobby(lobby)}>
@@ -271,7 +306,7 @@ const styles = {
     textAlign: "center",
   },
 
-  createBox: {
+  box: {
     display: "flex",
     gap: 10,
     justifyContent: "center",
