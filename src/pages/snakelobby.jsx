@@ -18,11 +18,11 @@ const ADMIN_CUT_PERCENT = 10;
 export default function SnakeLobby() {
   const [userId, setUserId] = useState(null);
   const [lobbies, setLobbies] = useState([]);
-  const [stake, setStake] = useState(100);
+  const [stake, setStake] = useState("");
   const [creating, setCreating] = useState(false);
 
   // =========================
-  // GET LOGGED IN USER
+  // GET USER
   // =========================
   useEffect(() => {
     account
@@ -50,15 +50,21 @@ export default function SnakeLobby() {
 
       setLobbies(res.documents || []);
     } catch (err) {
-      console.error(err);
+      console.error("LOAD ERROR:", err);
     }
   }
 
   // =========================
-  // CREATE LOBBY
+  // CREATE LOBBY (FIXED)
   // =========================
   async function createLobby() {
     if (!userId) return alert("Login required");
+
+    const safeStake = parseInt(stake);
+
+    if (!safeStake || safeStake <= 0) {
+      return alert("Enter valid stake amount");
+    }
 
     setCreating(true);
 
@@ -70,16 +76,18 @@ export default function SnakeLobby() {
         {
           hostId: userId,
           opponentId: null,
-          stake: Number(stake),
-          pot: Number(stake),
+          stake: safeStake,
+          pot: safeStake,
           status: "waiting",
           gameId: null,
         }
       );
 
+      setStake("");
       loadLobbies();
     } catch (err) {
-      console.error("Create error:", err);
+      console.error("CREATE ERROR:", err);
+      alert("Failed to create lobby");
     } finally {
       setCreating(false);
     }
@@ -100,7 +108,6 @@ export default function SnakeLobby() {
         return alert("Lobby already full");
       }
 
-      // 💰 POT + ADMIN CUT
       const totalPot = lobby.stake * 2;
       const adminCut = Math.floor(
         (totalPot * ADMIN_CUT_PERCENT) / 100
@@ -146,7 +153,7 @@ export default function SnakeLobby() {
         }
       );
 
-      // 👑 ADMIN WALLET ENTRY
+      // admin wallet entry
       await databases.createDocument(
         DATABASE_ID,
         "wallets",
@@ -163,7 +170,8 @@ export default function SnakeLobby() {
 
       loadLobbies();
     } catch (err) {
-      console.error("Join error:", err);
+      console.error("JOIN ERROR:", err);
+      alert("Failed to join lobby");
     }
   }
 
@@ -187,6 +195,7 @@ export default function SnakeLobby() {
         <input
           type="number"
           value={stake}
+          placeholder="Enter stake"
           onChange={(e) => setStake(e.target.value)}
         />
 
@@ -205,8 +214,7 @@ export default function SnakeLobby() {
             <div>Pot: ₦{lobby.pot}</div>
 
             <div>
-              Opponent:{" "}
-              {lobby.opponentId ? "Joined" : "Waiting..."}
+              Opponent: {lobby.opponentId ? "Joined" : "Waiting..."}
             </div>
 
             <div>Status: {lobby.status}</div>
