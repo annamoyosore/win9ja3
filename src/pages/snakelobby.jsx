@@ -72,6 +72,8 @@ export default function Lobby({ goGame, back }) {
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
 
+  const notifiedTurns = useRef({});
+
   useEffect(() => {
     init();
   }, []);
@@ -101,7 +103,7 @@ export default function Lobby({ goGame, back }) {
       [Query.limit(100)]
     );
 
-    // 🟡 WAITING (FIXED BULLETPROOF)
+    // 🟡 WAITING LOBBIES (FIXED)
     const waiting = res.documents.filter((m) => {
       return (
         (m.status || "").toLowerCase() === "waiting" &&
@@ -115,11 +117,7 @@ export default function Lobby({ goGame, back }) {
       return (
         (m.hostId === userId || m.opponentId === userId) &&
         m.gameId &&
-        (
-          (m.status || "").toLowerCase() === "matched" ||
-          (m.status || "").toLowerCase() === "running" ||
-          (m.status || "").toLowerCase() === "playing"
-        )
+        (m.status === "matched" || m.status === "running")
       );
     });
 
@@ -179,7 +177,7 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // JOIN LOBBY
+  // JOIN LOBBY (FIXED FLOW)
   // =========================
   async function joinMatch(lobby) {
     if (loadingJoin) return;
@@ -193,42 +191,61 @@ export default function Lobby({ goGame, back }) {
         lobby.$id
       );
 
-      if (fresh.hostId === user.$id || fresh.opponentId) {
-        throw new Error("Cannot join this lobby");
+      // 🚫 prevent self join
+      if (fresh.hostId === user.$id) {
+        throw new Error("Cannot join your own lobby");
       }
 
-      if ((wallet?.balance || 0) < fresh.stake) {
+      if (fresh.opponentId) {
+        throw new Error("Lobby already taken");
+      }
+
+      const amount = fresh.stake;
+
+      if ((wallet?.balance || 0) < amount) {
         throw new Error("Insufficient balance");
       }
 
+      // 💰 deduct opponent
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
         wallet.$id,
         {
-          balance: wallet.balance - fresh.stake
+          balance: wallet.balance - amount
         }
       );
 
-      const total = fresh.stake * 2;
-      const adminCut = Math.floor((total * ADMIN_CUT_PERCENT) / 100);
-      const finalPot = total - adminCut;
-
-      const game = await createGame(fresh, user.$id, finalPot);
-
+      // 🔒 lock lobby first
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         fresh.$id,
         {
           opponentId: user.$id,
-          status: "matched",
+          status: "matched"
+        }
+      );
+
+      const total = amount * 2;
+      const adminCut = Math.floor((total * ADMIN_CUT_PERCENT) / 100);
+      const finalPot = total - adminCut;
+
+      // 🎮 create game
+      const game = await createGame(fresh, user.$id, finalPot);
+
+      // 🔗 link game to lobby + send pot to snakegame
+      await databases.updateDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        fresh.$id,
+        {
           gameId: game.$id,
           pot: finalPot
         }
       );
 
-      goGame(game.$id, fresh.stake);
+      goGame(game.$id, amount);
 
     } catch (err) {
       alert(err.message);
@@ -283,7 +300,7 @@ export default function Lobby({ goGame, back }) {
               style={styles.resumeBtn}
               onClick={() => goGame(m.gameId, m.stake)}
             >
-              ▶ Resume Game
+              ▶ Resume
             </button>
           )}
         </div>
@@ -293,7 +310,7 @@ export default function Lobby({ goGame, back }) {
 }
 
 // =========================
-// STYLE
+// STYLES
 // =========================
 const styles = {
   container: {
@@ -312,11 +329,10 @@ const styles = {
 
   resumeBtn: {
     background: "#16a34a",
-    padding: "10px 20px",
+    padding: "10px 18px",
     borderRadius: 10,
     border: "none",
     color: "#fff",
-    fontWeight: "bold",
-    cursor: "pointer"
+    fontWeight: "bold"
   }
 };
