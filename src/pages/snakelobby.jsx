@@ -11,7 +11,7 @@ const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
 
 // 👑 ADMIN SETTINGS
-const ADMIN_ID = "";
+const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 10;
 
 export default function SnakeLobby({ userId }) {
