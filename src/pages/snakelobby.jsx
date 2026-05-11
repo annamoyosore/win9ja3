@@ -15,17 +15,17 @@ const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 12;
 
 // =========================
-// 🎵 SOUND
+// SOUND
 // =========================
 function playTurnSound() {
   try {
-    const ctx =
-      new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
 
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
     osc.type = "triangle";
+
     osc.frequency.setValueAtTime(740, ctx.currentTime);
     osc.frequency.setValueAtTime(980, ctx.currentTime + 0.15);
     osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
@@ -54,19 +54,23 @@ async function createGame(lobby, opponentId, pot) {
       status: "running",
       turn: lobby.hostId,
       payoutDone: false,
-      pot: pot // ✅ FINAL POT STORED HERE
+      pot
     }
   );
 }
 
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
+  const [activeMatches, setActiveMatches] = useState([]);
+
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
+
+  const notifiedTurns = useRef({});
 
   useEffect(() => {
     init();
@@ -84,24 +88,36 @@ export default function Lobby({ goGame, back }) {
 
     if (w.documents.length) setWallet(w.documents[0]);
 
-    loadMatches(u.$id);
+    loadLobbies(u.$id);
   }
 
   // =========================
   // LOAD LOBBIES
   // =========================
-  async function loadMatches(userId) {
+  async function loadLobbies(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       SNAKE_LOBBY_COLLECTION,
-      [Query.equal("status", "waiting")]
+      [Query.limit(100)]
     );
 
-    const available = res.documents.filter(
-      (m) => m.hostId !== userId && !m.opponentId
+    // 🟡 WAITING LOBBIES
+    const waiting = res.documents.filter(
+      (m) =>
+        m.status === "waiting" &&
+        !m.opponentId &&
+        m.hostId !== userId
     );
 
-    setMatches(available);
+    // 🔥 ACTIVE LOBBIES (FIXED)
+    const active = res.documents.filter(
+      (m) =>
+        m.status === "matched" &&
+        (m.hostId === userId || m.opponentId === userId)
+    );
+
+    setMatches(waiting);
+    setActiveMatches(active);
   }
 
   // =========================
@@ -114,7 +130,7 @@ export default function Lobby({ goGame, back }) {
       return alert("Minimum stake is ₦150");
     }
 
-    if (wallet.balance < amount) {
+    if (!wallet || wallet.balance < amount) {
       return alert("Insufficient balance");
     }
 
@@ -146,8 +162,7 @@ export default function Lobby({ goGame, back }) {
       );
 
       setStake("");
-      loadMatches(user.$id);
-
+      loadLobbies(user.$id);
     } catch (err) {
       alert(err.message);
     }
@@ -178,7 +193,6 @@ export default function Lobby({ goGame, back }) {
         throw new Error("Insufficient balance");
       }
 
-      // 💰 deduct opponent stake
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -188,21 +202,12 @@ export default function Lobby({ goGame, back }) {
         }
       );
 
-      // =========================
-      // POT CALCULATION
-      // =========================
       const total = fresh.stake * 2;
       const adminCut = Math.floor((total * ADMIN_CUT_PERCENT) / 100);
       const finalPot = total - adminCut;
 
-      // =========================
-      // CREATE GAME WITH FINAL POT
-      // =========================
       const game = await createGame(fresh, user.$id, finalPot);
 
-      // =========================
-      // UPDATE LOBBY
-      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -210,13 +215,12 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          gameId: game.$id
+          gameId: game.$id,
+          pot: finalPot
         }
       );
 
-      // =========================
-      // ADMIN CUT PAYMENT
-      // =========================
+      // admin payout
       const adminRes = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -262,18 +266,38 @@ export default function Lobby({ goGame, back }) {
         {creating ? "Creating..." : "Create Lobby"}
       </button>
 
-      <h3>Available Lobbies</h3>
+      {/* WAITING */}
+      <h3>🟡 Waiting Lobbies</h3>
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <p>₦{m.stake}</p>
 
-          <button
-            onClick={() => joinMatch(m)}
-            disabled={loadingJoin === m.$id}
-          >
-            {loadingJoin === m.$id ? "Joining..." : "Join"}
+          <button onClick={() => joinMatch(m)}>
+            Join
           </button>
+        </div>
+      ))}
+
+      {/* ACTIVE */}
+      <h3>🔥 Active Games</h3>
+
+      {activeMatches.map((m) => (
+        <div key={m.$id} style={styles.card}>
+          <div>
+            <p>₦{m.stake}</p>
+            <p>Status: {m.status}</p>
+          </div>
+
+          {/* ✅ ALWAYS SHOW RESUME IF MATCHED */}
+          {m.status === "matched" && m.gameId && (
+            <button
+              style={styles.resumeBtn}
+              onClick={() => goGame(m.gameId, m.stake)}
+            >
+              ▶ Resume Game
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -296,5 +320,15 @@ const styles = {
     padding: 10,
     margin: 10,
     borderRadius: 10
+  },
+
+  resumeBtn: {
+    background: "#16a34a",
+    padding: "10px 20px",
+    borderRadius: 10,
+    border: "none",
+    color: "#fff",
+    fontWeight: "bold",
+    cursor: "pointer"
   }
 };
