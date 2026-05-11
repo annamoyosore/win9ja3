@@ -4,11 +4,11 @@ import boardImg from "./board.png";
 
 const GAME_COLLECTION = "snakegame";
 const MATCH_COLLECTION = "snakelobby";
-const WALLET_COLLECTION = "wallets";
+
 const SIZE = 100;
 
 // =========================
-// GAME RULES
+// RULES
 // =========================
 const snakes = {
   50: 5,
@@ -59,105 +59,20 @@ function applyEffects(pos) {
 }
 
 // =========================
-// SOUND
-// =========================
-function winSound() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-    const play = (f, t) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-
-      o.frequency.value = f;
-      o.type = "sine";
-
-      o.connect(g);
-      g.connect(ctx.destination);
-
-      o.start();
-      g.gain.setValueAtTime(0.3, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t);
-
-      setTimeout(() => o.stop(), t * 1000);
-    };
-
-    play(600, 0.2);
-    setTimeout(() => play(900, 0.2), 150);
-    setTimeout(() => play(1200, 0.3), 300);
-  } catch {}
-}
-
-// =========================
-// CONFETTI
-// =========================
-function fireConfetti() {
-  const canvas = document.createElement("canvas");
-  document.body.appendChild(canvas);
-
-  canvas.style.position = "fixed";
-  canvas.style.top = 0;
-  canvas.style.left = 0;
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  canvas.style.pointerEvents = "none";
-  canvas.style.zIndex = 99999;
-
-  const ctx = canvas.getContext("2d");
-
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-
-  const pieces = Array.from({ length: 100 }).map(() => ({
-    x: Math.random() * canvas.width,
-    y: Math.random() * -canvas.height,
-    r: Math.random() * 6 + 3,
-    c: ["#facc15", "#22c55e", "#3b82f6", "#ef4444"][
-      Math.floor(Math.random() * 4)
-    ],
-    speed: Math.random() * 4 + 2,
-  }));
-
-  let frame = 0;
-
-  function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    pieces.forEach((p) => {
-      ctx.fillStyle = p.c;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
-      p.y += p.speed;
-    });
-
-    frame++;
-    if (frame < 120) requestAnimationFrame(draw);
-    else canvas.remove();
-  }
-
-  draw();
-}
-
-// =========================
-// MAIN COMPONENT
+// GAME COMPONENT
 // =========================
 export default function SnakeGame({ gameId }) {
   const [game, setGame] = useState(null);
   const [match, setMatch] = useState(null);
 
   const [positions, setPositions] = useState({ A: 1, B: 1 });
-  const [turn, setTurn] = useState("A");
+  const [turn, setTurn] = useState(null);
   const [dice, setDice] = useState(1);
 
   const [rolling, setRolling] = useState(false);
   const [moving, setMoving] = useState(false);
 
-  const [winPopup, setWinPopup] = useState(null);
-  const [countdown, setCountdown] = useState(5);
-
   const lock = useRef(false);
-  const payoutLock = useRef(false);
 
   // =========================
   // LOAD GAME
@@ -173,15 +88,15 @@ export default function SnakeGame({ gameId }) {
       );
 
       setGame(res);
-
-      setPositions(JSON.parse(res.positions || '{"A":1,"B":1}'));
       setTurn(res.turn);
 
-      if (res.matchId) {
+      setPositions(JSON.parse(res.positions || '{"A":1,"B":1}'));
+
+      if (res.lobbyId) {
         const m = await databases.getDocument(
           DATABASE_ID,
           MATCH_COLLECTION,
-          res.matchId
+          res.lobbyId
         );
         setMatch(m);
       }
@@ -191,16 +106,18 @@ export default function SnakeGame({ gameId }) {
   }, [gameId]);
 
   // =========================
-  // VALIDATE TURN
+  // REFRESH GAME STATE
   // =========================
-  async function validateTurn(player) {
+  async function refreshGame() {
     const fresh = await databases.getDocument(
       DATABASE_ID,
       GAME_COLLECTION,
       gameId
     );
 
-    return fresh.turn === player && fresh.status === "playing";
+    setGame(fresh);
+    setTurn(fresh.turn);
+    return fresh;
   }
 
   // =========================
@@ -221,11 +138,9 @@ export default function SnakeGame({ gameId }) {
   }
 
   // =========================
-  // PLAY TURN
+  // PLAY TURN (FIXED SERVER TURN)
   // =========================
   async function playTurn() {
-    const player = turn;
-
     if (!game || rolling || moving || lock.current) return;
 
     lock.current = true;
@@ -233,11 +148,14 @@ export default function SnakeGame({ gameId }) {
     setMoving(true);
 
     try {
-      const ok = await validateTurn(player);
-      if (!ok) {
-        alert("❌ Not your turn");
-        return;
-      }
+      // 🔥 ALWAYS GET FRESH GAME STATE
+      const fresh = await refreshGame();
+
+      if (fresh.status !== "running") return;
+
+      const player = fresh.turn; // ✅ SERVER CONTROLLED TURN
+
+      if (!player) return;
 
       for (let i = 0; i < 6; i++) {
         setDice(Math.floor(Math.random() * 6) + 1);
@@ -247,23 +165,23 @@ export default function SnakeGame({ gameId }) {
       const d = secureDice();
       setDice(d);
 
-      const final = await move(player, d);
+      const finalPos = await move(player, d);
 
-      const winner = final >= SIZE ? player : null;
+      const winner = finalPos >= SIZE ? player : null;
+
       const nextTurn = player === "A" ? "B" : "A";
 
       const updated = {
-        ...game,
         positions: JSON.stringify({
           ...positions,
-          [player]: final,
+          [player]: finalPos,
         }),
         turn: winner ? null : nextTurn,
-        status: winner ? "finished" : "playing",
+        status: winner ? "finished" : "running",
         winner: winner || "",
         history: [
-          `Player ${player} rolled ${d} → ${final}`,
-          ...(game.history || []),
+          `Player ${player} rolled ${d} → ${finalPos}`,
+          ...(fresh.history || []),
         ].slice(0, 6),
       };
 
@@ -278,42 +196,25 @@ export default function SnakeGame({ gameId }) {
       setTurn(res.turn);
 
       // =========================
-      // WIN EVENT
+      // WIN + POT FIXED
       // =========================
       if (winner) {
-        const pot = match?.pot || 0;
+        const pot = Number(res.pot || 0); // ✅ FROM GAME ONLY
 
-        setWinPopup({ player: winner, amount: pot });
+        alert(`🏆 Player ${winner} wins ₦${pot}`);
 
-        winSound();
-        fireConfetti();
-
-        let t = 5;
-        setCountdown(t);
-
-        const interval = setInterval(() => {
-          t--;
-          setCountdown(t);
-          if (t <= 0) clearInterval(interval);
-        }, 1000);
-
-        setTimeout(() => setWinPopup(null), 5000);
-
-        if (!payoutLock.current) {
-          payoutLock.current = true;
-
-          await databases.updateDocument(
-            DATABASE_ID,
-            MATCH_COLLECTION,
-            match.$id,
-            {
-              pot: 0,
-              status: "finished",
-              payoutDone: true,
-            }
-          );
-        }
+        await databases.updateDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          gameId,
+          {
+            status: "finished",
+            winner: winner,
+            payoutDone: true,
+          }
+        );
       }
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -322,7 +223,7 @@ export default function SnakeGame({ gameId }) {
 
       setTimeout(() => {
         lock.current = false;
-      }, 500);
+      }, 400);
     }
   }
 
@@ -337,8 +238,8 @@ export default function SnakeGame({ gameId }) {
 
       <div style={styles.top}>
         <div>🎲 Dice: {dice}</div>
-        <div>Turn: {turn}</div>
-        <div>🏦 Pot: ₦{match?.pot || 0}</div>
+        <div>Turn: {turn || "Loading..."}</div>
+        <div>🏦 Pot: ₦{game?.pot || 0}</div>
       </div>
 
       <div style={styles.boardWrapper}>
@@ -362,19 +263,9 @@ export default function SnakeGame({ gameId }) {
         🎲 Roll Dice
       </button>
 
-      {winPopup && (
-        <div style={styles.win}>
-          🏆 Player {winPopup.player} Won ₦{winPopup.amount}
-          <br />
-          Paying out in {countdown}s...
-        </div>
-      )}
-
-      <div style={styles.history}>
-        {game.history?.map((h, i) => (
-          <div key={i}>{h}</div>
-        ))}
-      </div>
+      {game.history?.map((h, i) => (
+        <div key={i}>{h}</div>
+      ))}
     </div>
   );
 }
@@ -415,23 +306,5 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     fontWeight: "bold",
-  },
-
-  win: {
-    position: "fixed",
-    top: "40%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "gold",
-    color: "#000",
-    padding: 20,
-    borderRadius: 12,
-    fontWeight: "bold",
-    zIndex: 9999,
-  },
-
-  history: {
-    marginTop: 10,
-    fontSize: 12,
   },
 };
