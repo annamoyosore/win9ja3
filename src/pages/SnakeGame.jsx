@@ -8,10 +8,15 @@ import {
 
 import boardImg from "./board.png";
 
-const GAME_COLLECTION = "snakegame";
+const SNAKE_GAME_COLLECTION = "snakegame";
+const SNAKE_LOBBY_COLLECTION = "snakelobby";
+const WALLET_COLLECTION = "wallets";
+
 const SIZE = 100;
 
-// 🐍 Snakes
+// =========================
+// SNAKES & LADDERS
+// =========================
 const snakes = {
   50: 5,
   43: 17,
@@ -22,7 +27,6 @@ const snakes = {
   98: 40,
 };
 
-// 🪜 Ladders
 const ladders = {
   2: 23,
   6: 45,
@@ -32,9 +36,9 @@ const ladders = {
   71: 92,
 };
 
-// =====================
+// =========================
 // HELPERS
-// =====================
+// =========================
 function getCoords(pos) {
   const index = pos - 1;
   const row = Math.floor(index / 10);
@@ -60,88 +64,90 @@ function applyEffects(pos) {
   return pos;
 }
 
-// =====================
-// MAIN COMPONENT
-// =====================
+// =========================
+// MAIN GAME
+// =========================
 export default function SnakeGame({ gameId }) {
   const [user, setUser] = useState(null);
   const [game, setGame] = useState(null);
+
   const [positions, setPositions] = useState({});
+  const [turn, setTurn] = useState(null);
 
   const [dice, setDice] = useState(1);
   const [rolling, setRolling] = useState(false);
 
   const lock = useRef(false);
 
-  // =====================
+  // =========================
   // LOAD USER + GAME
-  // =====================
+  // =========================
   useEffect(() => {
     async function init() {
       const u = await account.get();
       setUser(u);
 
-      const g = await databases.getDocument(
+      const res = await databases.getDocument(
         DATABASE_ID,
-        GAME_COLLECTION,
+        SNAKE_GAME_COLLECTION,
         gameId
       );
 
-      const parsed = {
-        ...g,
-        positions: g.positions
-          ? JSON.parse(g.positions)
-          : { hostId: 1, opponentId: 1 }
-      };
+      const parsedPositions = res.positions
+        ? JSON.parse(res.positions)
+        : {};
 
-      setGame(parsed);
-      setPositions(parsed.positions);
+      setGame(res);
+      setPositions(parsedPositions);
+      setTurn(res.turn);
     }
 
     init();
   }, [gameId]);
 
-  // =====================
-  // MY TURN CHECK
-  // =====================
-  const isMyTurn =
-    game?.turn === user?.$id;
+  // =========================
+  // REALTIME SYNC
+  // =========================
+  useEffect(() => {
+    if (!gameId) return;
 
-  const myKey =
-    game?.hostId === user?.$id ? "hostId" : "opponentId";
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${SNAKE_GAME_COLLECTION}.documents.${gameId}`,
+      (res) => {
+        const payload = res.payload;
 
-  const opponentKey =
-    myKey === "hostId" ? "opponentId" : "hostId";
+        setGame(payload);
 
-  // =====================
-  // MOVE ANIMATION
-  // =====================
-  async function animateMove(playerKey, start, end) {
-    let current = start;
+        setTurn(payload.turn);
 
-    while (current < end) {
-      await sleep(200);
-      current++;
+        setPositions(
+          payload.positions
+            ? JSON.parse(payload.positions)
+            : {}
+        );
+      }
+    );
 
-      setPositions((prev) => ({
-        ...prev,
-        [playerKey]: current
-      }));
-    }
+    return () => unsub();
+  }, [gameId]);
 
-    const final = applyEffects(current);
+  // =========================
+  // PLAYER ROLE
+  // =========================
+  function myPlayerKey(gameData) {
+    if (!user) return null;
 
-    setPositions((prev) => ({
-      ...prev,
-      [playerKey]: final
-    }));
+    if (user.$id === gameData.hostId) return "hostId";
+    if (user.$id === gameData.opponentId) return "opponentId";
 
-    return final;
+    return null;
   }
 
-  // =====================
-  // PLAY TURN
-  // =====================
+  const isMyTurn = game?.turn === user?.$id;
+
+  // =========================
+  // MAIN TURN LOGIC (FIXED)
+  // =========================
   async function playTurn() {
     if (!game || !user || rolling || lock.current) return;
     if (!isMyTurn) return;
@@ -150,15 +156,23 @@ export default function SnakeGame({ gameId }) {
     setRolling(true);
 
     try {
+      // 🔥 ALWAYS FRESH STATE
       const fresh = await databases.getDocument(
         DATABASE_ID,
-        GAME_COLLECTION,
+        SNAKE_GAME_COLLECTION,
         gameId
       );
 
-      const currentPos = JSON.parse(fresh.positions || "{}");
+      const pos = fresh.positions
+        ? JSON.parse(fresh.positions)
+        : {};
 
-      // 🎲 animation roll
+      const myKey = myPlayerKey(fresh);
+
+      const opponentKey =
+        myKey === "hostId" ? "opponentId" : "hostId";
+
+      // 🎲 dice animation
       for (let i = 0; i < 6; i++) {
         setDice(Math.floor(Math.random() * 6) + 1);
         await sleep(80);
@@ -167,132 +181,122 @@ export default function SnakeGame({ gameId }) {
       const rolled = rollDice();
       setDice(rolled);
 
-      const start = currentPos[myKey] || 1;
-
+      const start = pos[myKey] || 1;
       let end = start + rolled;
+
       if (end > SIZE) end = SIZE;
 
-      const finalPos = await animateMove(myKey, start, end);
+      // 🐍 animate step
+      let current = start;
+      while (current < end) {
+        await sleep(150);
+        current++;
+        setPositions((p) => ({ ...p, [myKey]: current }));
+      }
+
+      const finalPos = applyEffects(current);
+
+      setPositions((p) => ({ ...p, [myKey]: finalPos }));
 
       const winner = finalPos >= SIZE ? user.$id : null;
 
+      // 🔁 SAFE TURN SWITCH
       const nextTurn =
         fresh.turn === fresh.hostId
           ? fresh.opponentId
           : fresh.hostId;
 
+      // 🧠 MERGE POSITIONS SAFELY
+      const updatedPositions = {
+        ...pos,
+        [myKey]: finalPos
+      };
+
       const history = [
-        ...(fresh.history || []),
-        `Player ${user.name || user.$id} rolled ${rolled} → ${finalPos}`
+        ...(fresh.history
+          ? JSON.parse(fresh.history)
+          : []),
+        `🎲 ${user.$id} rolled ${rolled} → ${finalPos}`
       ].slice(-10);
 
+      // 💾 SAVE TO APPWRITE
       await databases.updateDocument(
         DATABASE_ID,
-        GAME_COLLECTION,
+        SNAKE_GAME_COLLECTION,
         gameId,
         {
-          positions: JSON.stringify({
-            ...currentPos,
-            [myKey]: finalPos
-          }),
+          positions: JSON.stringify(updatedPositions),
           turn: winner ? null : nextTurn,
-          winner: winner || "",
           status: winner ? "finished" : "running",
-          history
+          winner: winner || "",
+          history: JSON.stringify(history)
         }
       );
 
     } catch (err) {
-      console.error(err);
+      console.error("Dice error:", err);
     } finally {
       setRolling(false);
       lock.current = false;
     }
   }
 
-  // =====================
+  // =========================
   // UI
-  // =====================
-  if (!game || !user) return <div style={{ color: "#fff" }}>Loading...</div>;
+  // =========================
+  if (!game) return <div style={{ color: "#fff" }}>Loading...</div>;
 
-  const posHost = getCoords(positions.hostId || 1);
-  const posOpp = getCoords(positions.opponentId || 1);
+  const myKey = myPlayerKey(game);
+
+  const myPos = positions[myKey] || 1;
+
+  const oppKey =
+    myKey === "hostId" ? "opponentId" : "hostId";
+
+  const oppPos = positions[oppKey] || 1;
 
   return (
-    <div style={styles.container}>
+    <div style={{ textAlign: "center", background: "#0f172a", color: "#fff", minHeight: "100vh", padding: 20 }}>
+
       <h2>🐍 Snake Game</h2>
 
-      <div style={styles.boardWrapper}>
-        <img src={boardImg} style={styles.board} />
-
-        <div style={{ ...styles.token, ...posHost, background: "red" }}>A</div>
-        <div style={{ ...styles.token, ...posOpp, background: "blue" }}>B</div>
+      <div>
+        🎲 Dice: {dice}
       </div>
 
-      <div style={styles.diceBox}>
-        🎲 {dice}
+      <div>
+        Turn: {game.turn === user?.$id ? "🟢 YOU" : "🔵 OPPONENT"}
+      </div>
+
+      <div style={{ position: "relative", width: 360, height: 360, margin: "20px auto" }}>
+        <img src={boardImg} style={{ width: "100%" }} />
+
+        <div style={{ position: "absolute", ...getCoords(myPos), background: "red", width: 25, height: 25, borderRadius: "50%" }} />
+
+        <div style={{ position: "absolute", ...getCoords(oppPos), background: "blue", width: 25, height: 25, borderRadius: "50%" }} />
       </div>
 
       <button
         onClick={playTurn}
         disabled={!isMyTurn || rolling}
         style={{
-          ...styles.button,
-          opacity: isMyTurn ? 1 : 0.5
+          padding: 12,
+          background: isMyTurn ? "gold" : "gray",
+          border: "none",
+          borderRadius: 8,
+          cursor: "pointer"
         }}
       >
-        {rolling ? "Rolling..." : "Roll Dice"}
+        {rolling ? "Rolling..." : "🎲 Roll Dice"}
       </button>
 
-      <p style={{ color: "white" }}>
-        {isMyTurn ? "Your turn" : "Opponent turn"}
-      </p>
+      <div style={{ marginTop: 10 }}>
+        {game.history
+          ? JSON.parse(game.history).map((h, i) => (
+              <div key={i}>{h}</div>
+            ))
+          : null}
+      </div>
     </div>
   );
 }
-
-// =====================
-const styles = {
-  container: {
-    textAlign: "center",
-    background: "#0f172a",
-    minHeight: "100vh",
-    color: "#fff",
-    padding: 20
-  },
-  boardWrapper: {
-    position: "relative",
-    width: 360,
-    height: 360,
-    margin: "20px auto"
-  },
-  board: {
-    width: "100%",
-    height: "100%"
-  },
-  token: {
-    position: "absolute",
-    width: 28,
-    height: 28,
-    borderRadius: "50%",
-    transform: "translate(-50%, -50%)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: "bold",
-    color: "#fff"
-  },
-  diceBox: {
-    marginTop: 10,
-    fontSize: 22
-  },
-  button: {
-    marginTop: 10,
-    padding: "10px 20px",
-    background: "gold",
-    border: "none",
-    borderRadius: 8,
-    fontWeight: "bold",
-    cursor: "pointer"
-  }
-};
