@@ -186,7 +186,11 @@ export default function SnakeGame({
 
         setGame(res);
 
-        setTurn(res.turn || "A");
+        setTurn(
+          String(res.turn || "A")
+            .trim()
+            .toUpperCase()
+        );
 
         setPositions(
           JSON.parse(
@@ -217,7 +221,13 @@ export default function SnakeGame({
 
           setGame(payload);
 
-          setTurn(payload.turn);
+          setTurn(
+            String(
+              payload.turn || "A"
+            )
+              .trim()
+              .toUpperCase()
+          );
 
           setPositions(
             JSON.parse(
@@ -241,7 +251,9 @@ export default function SnakeGame({
       return "A";
     }
 
-    if (user.$id === game.opponentId) {
+    if (
+      user.$id === game.opponentId
+    ) {
       return "B";
     }
 
@@ -250,8 +262,16 @@ export default function SnakeGame({
 
   const currentPlayer = myPlayer();
 
+  const safeTurn = String(
+    turn || ""
+  )
+    .trim()
+    .toUpperCase();
+
   const isMyTurn =
-    currentPlayer === turn;
+    currentPlayer &&
+    safeTurn &&
+    currentPlayer === safeTurn;
 
   // =========================
   // PAYOUT
@@ -323,7 +343,7 @@ export default function SnakeGame({
       applyEffects(current);
 
     if (effected !== current) {
-      await sleep(400);
+      await sleep(350);
 
       setPositions((prev) => ({
         ...prev,
@@ -349,10 +369,9 @@ export default function SnakeGame({
     if (game.status === "finished")
       return;
 
-    // 🚫 block wrong player
     if (!isMyTurn) {
       return alert(
-        "❌ Not your turn"
+        "❌ Wait for your turn"
       );
     }
 
@@ -370,15 +389,23 @@ export default function SnakeGame({
         );
 
       const currentTurn =
-        fresh.turn;
+        String(
+          fresh.turn || "A"
+        )
+          .trim()
+          .toUpperCase();
 
-      // 🚫 backend validation
       const backendPlayer =
         user.$id === fresh.hostId
           ? "A"
-          : "B";
+          : user.$id ===
+            fresh.opponentId
+          ? "B"
+          : null;
 
+      // backend protection
       if (
+        !backendPlayer ||
         backendPlayer !== currentTurn
       ) {
         alert("❌ Not your turn");
@@ -386,7 +413,7 @@ export default function SnakeGame({
         return;
       }
 
-      // 🎲 rolling animation
+      // 🎲 animation
       for (let i = 0; i < 8; i++) {
         setDice(
           Math.floor(
@@ -397,7 +424,7 @@ export default function SnakeGame({
         await sleep(80);
       }
 
-      // 🎲 real dice
+      // 🎲 final roll
       const rolled =
         secureDice();
 
@@ -422,7 +449,7 @@ export default function SnakeGame({
         endPos = SIZE;
       }
 
-      // 🎬 animate movement
+      // animate tiles
       const finalPos =
         await animateMove(
           currentTurn,
@@ -442,12 +469,18 @@ export default function SnakeGame({
           ? "B"
           : "A";
 
-      // last 3 history
+      // history
       const history =
         trimHistory([
           `Player ${currentTurn} rolled ${rolled} → ${finalPos}`,
           ...(fresh.history || []),
         ]);
+
+      // updated positions
+      const updatedPositions = {
+        ...currentPositions,
+        [currentTurn]: finalPos,
+      };
 
       // save backend
       const updated =
@@ -457,14 +490,12 @@ export default function SnakeGame({
           gameId,
           {
             positions:
-              JSON.stringify({
-                ...currentPositions,
-                [currentTurn]:
-                  finalPos,
-              }),
+              JSON.stringify(
+                updatedPositions
+              ),
 
             turn: winner
-              ? null
+              ? ""
               : nextTurn,
 
             status: winner
@@ -481,12 +512,16 @@ export default function SnakeGame({
       // frontend sync
       setGame(updated);
 
-      setTurn(updated.turn);
+      setTurn(
+        String(
+          updated.turn || ""
+        )
+          .trim()
+          .toUpperCase()
+      );
 
       setPositions(
-        JSON.parse(
-          updated.positions
-        )
+        updatedPositions
       );
 
       // =========================
@@ -584,14 +619,14 @@ export default function SnakeGame({
           style={{
             ...styles.playerBox,
             border:
-              turn === "A"
+              safeTurn === "A"
                 ? "2px solid lime"
                 : "2px solid gray",
           }}
         >
           🔴 Player A
           <div>
-            {turn === "A"
+            {safeTurn === "A"
               ? "🟢 TURN"
               : "⚪ WAIT"}
           </div>
@@ -601,18 +636,33 @@ export default function SnakeGame({
           style={{
             ...styles.playerBox,
             border:
-              turn === "B"
+              safeTurn === "B"
                 ? "2px solid lime"
                 : "2px solid gray",
           }}
         >
           🔵 Player B
           <div>
-            {turn === "B"
+            {safeTurn === "B"
               ? "🟢 TURN"
               : "⚪ WAIT"}
           </div>
         </div>
+      </div>
+
+      {/* PLAYER STATUS */}
+      <div
+        style={{
+          marginBottom: 10,
+          fontWeight: "bold",
+          color: isMyTurn
+            ? "#22c55e"
+            : "#facc15",
+        }}
+      >
+        {isMyTurn
+          ? "✅ Your Turn"
+          : "⏳ Opponent Turn"}
       </div>
 
       {/* POT */}
