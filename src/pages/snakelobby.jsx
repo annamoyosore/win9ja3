@@ -27,7 +27,7 @@ async function getWallet(userId) {
 
     return res.documents?.[0] || null;
   } catch (err) {
-    console.error("Wallet fetch error:", err);
+    console.error("Wallet error:", err);
     return null;
   }
 }
@@ -44,13 +44,13 @@ export default function Snakelobby({ goGame }) {
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [loadingJoin, setLoadingJoin] = useState(null);
 
+  // =========================
+  // INIT
+  // =========================
   useEffect(() => {
     init();
   }, []);
 
-  // =========================
-  // INIT SAFE
-  // =========================
   async function init() {
     try {
       const u = await account.get();
@@ -66,7 +66,7 @@ export default function Snakelobby({ goGame }) {
   }
 
   // =========================
-  // LOAD LOBBIES (HOST + OPPONENT)
+  // LOAD LOBBIES
   // =========================
   async function loadLobbies(userId) {
     try {
@@ -76,22 +76,27 @@ export default function Snakelobby({ goGame }) {
         [Query.limit(100)]
       );
 
-      const mine = res.documents.filter((m) => {
-        return m.hostId === userId || m.opponentId === userId;
-      });
+      const all = res.documents;
 
-      const waitingLobbies = mine.filter(
+      // 🟡 WAITING → PUBLIC (everyone sees)
+      const waitingLobbies = all.filter(
         (m) => (m.status || "") === "waiting"
       );
 
-      const activeGames = mine.filter(
-        (m) => (m.status || "") === "matched" && m.gameId
-      );
+      // 🟢 MATCHED → ONLY HOST + OPPONENT SEE
+      const activeGames = all.filter((m) => {
+        return (
+          m.status === "matched" &&
+          m.gameId &&
+          (m.hostId === userId || m.opponentId === userId)
+        );
+      });
 
       setWaiting(waitingLobbies);
       setActive(activeGames);
+
     } catch (err) {
-      console.error("Load lobby error:", err);
+      console.error("Load error:", err);
     }
   }
 
@@ -148,7 +153,7 @@ export default function Snakelobby({ goGame }) {
   }
 
   // =========================
-  // JOIN → MATCHED → GAME CREATED
+  // JOIN LOBBY → MATCHED → GAME CREATED
   // =========================
   async function joinLobby(lobby) {
     if (loadingJoin) return;
@@ -178,7 +183,7 @@ export default function Snakelobby({ goGame }) {
         throw new Error("Insufficient balance");
       }
 
-      // 💰 deduct opponent wallet
+      // 💰 deduct wallet
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -233,7 +238,6 @@ export default function Snakelobby({ goGame }) {
       goGame(game.$id, amount);
 
     } catch (err) {
-      console.error(err);
       alert(err.message);
     }
 
@@ -257,10 +261,10 @@ export default function Snakelobby({ goGame }) {
         {loadingCreate ? "Creating..." : "Create Lobby"}
       </button>
 
-      {/* WAITING */}
+      {/* 🟡 WAITING (PUBLIC) */}
       <h3>Waiting Lobbies</h3>
 
-      {waiting.length === 0 && <p>No waiting lobbies</p>}
+      {waiting.length === 0 && <p>No lobbies available</p>}
 
       {waiting.map((l) => (
         <div key={l.$id} style={styles.card}>
@@ -269,7 +273,7 @@ export default function Snakelobby({ goGame }) {
             {l.hostId === user.$id ? (
               <p>⏳ Waiting for opponent...</p>
             ) : (
-              <p>Available</p>
+              <p>🟢 Available</p>
             )}
           </div>
 
@@ -284,7 +288,7 @@ export default function Snakelobby({ goGame }) {
         </div>
       ))}
 
-      {/* ACTIVE */}
+      {/* 🟢 ACTIVE (PRIVATE MATCHED ONLY) */}
       <h3>Active Games</h3>
 
       {active.length === 0 && <p>No active games</p>}
@@ -293,10 +297,10 @@ export default function Snakelobby({ goGame }) {
         <div key={l.$id} style={styles.card}>
           <div>
             <p>₦{l.stake}</p>
-            <p>Matched</p>
+            <p>Matched Game</p>
           </div>
 
-          {l.gameId && (
+          {(l.hostId === user.$id || l.opponentId === user.$id) && l.gameId && (
             <button onClick={() => goGame(l.gameId, l.stake)}>
               ▶ Resume
             </button>
