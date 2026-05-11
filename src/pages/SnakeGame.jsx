@@ -4,10 +4,13 @@ import {
   databases,
   DATABASE_ID,
   Query
-} from "../lib/appwrite";
+} from "./lib/appwrite"; // ✅ FIXED SAFE PATH (adjust if needed)
 
 import boardImg from "./board.png";
 
+// =========================
+// CONSTANTS
+// =========================
 const SNAKE_GAME_COLLECTION = "snakegame";
 const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const WALLET_COLLECTION = "wallets";
@@ -58,7 +61,7 @@ function rollDice() {
 }
 
 // =========================
-// MAIN
+// COMPONENT
 // =========================
 export default function SnakeGame({ gameId }) {
   const [user, setUser] = useState(null);
@@ -74,57 +77,61 @@ export default function SnakeGame({ gameId }) {
   // =========================
   useEffect(() => {
     async function init() {
-      const u = await account.get();
-      setUser(u);
+      try {
+        const u = await account.get();
+        setUser(u);
 
-      const g = await databases.getDocument(
-        DATABASE_ID,
-        SNAKE_GAME_COLLECTION,
-        gameId
-      );
+        const g = await databases.getDocument(
+          DATABASE_ID,
+          SNAKE_GAME_COLLECTION,
+          gameId
+        );
 
-      setGame(g);
+        setGame(g);
+      } catch (err) {
+        console.error("INIT ERROR:", err);
+      }
     }
 
     init();
   }, [gameId]);
 
   // =========================
-  // REALTIME
+  // REALTIME SAFE SUBSCRIBE
   // =========================
   useEffect(() => {
-    const unsub = databases.client.subscribe(
+    if (!gameId) return;
+
+    const unsub = databases.client?.subscribe?.(
       `databases.${DATABASE_ID}.collections.${SNAKE_GAME_COLLECTION}.documents.${gameId}`,
-      (res) => setGame(res.payload)
+      (res) => {
+        if (res?.payload) setGame(res.payload);
+      }
     );
 
-    return () => unsub();
+    return () => {
+      if (unsub) unsub();
+    };
   }, [gameId]);
 
   // =========================
   // TURN CHECK
   // =========================
-  function isMyTurn() {
+  const isMyTurn = () => {
     return game?.turn === user?.$id;
-  }
+  };
 
   // =========================
-  // MOVE ANIMATION
+  // SAFE POSITION PARSE
   // =========================
-  async function animateMove(start, end) {
-    let current = start;
-
-    while (current < end) {
-      await sleep(150);
-      current++;
+  function getPositions() {
+    try {
+      return typeof game?.positions === "string"
+        ? JSON.parse(game.positions)
+        : game?.positions || {};
+    } catch {
+      return {};
     }
-
-    let final = current;
-
-    if (snakes[final]) final = snakes[final];
-    if (ladders[final]) final = ladders[final];
-
-    return final;
   }
 
   // =========================
@@ -132,7 +139,6 @@ export default function SnakeGame({ gameId }) {
   // =========================
   async function payoutWinner(winnerId) {
     if (payoutLock.current) return;
-
     payoutLock.current = true;
 
     try {
@@ -158,7 +164,7 @@ export default function SnakeGame({ gameId }) {
         }
       );
 
-      // 💰 clear game pot + finish game
+      // 🧾 clear game + finish lobby
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
@@ -169,7 +175,6 @@ export default function SnakeGame({ gameId }) {
         }
       );
 
-      // 🧾 mark lobby finished
       if (game?.lobbyId) {
         await databases.updateDocument(
           DATABASE_ID,
@@ -181,15 +186,12 @@ export default function SnakeGame({ gameId }) {
         );
       }
 
-      // 🎉 WIN UI
       setShowWin(true);
 
-      setTimeout(() => {
-        setShowWin(false);
-      }, 3000);
+      setTimeout(() => setShowWin(false), 3000);
 
     } catch (err) {
-      console.error("payout error:", err);
+      console.error("PAYOUT ERROR:", err);
     }
   }
 
@@ -206,66 +208,71 @@ export default function SnakeGame({ gameId }) {
       const d = rollDice();
       setDice(d);
 
-      const pos = JSON.parse(game.positions || "{}");
+      const pos = getPositions();
 
       const start = pos[user.$id] || 1;
       let end = start + d;
 
       if (end > SIZE) end = SIZE;
 
-      const finalPos = await animateMove(start, end);
+      let final = end;
+
+      if (snakes[final]) final = snakes[final];
+      if (ladders[final]) final = ladders[final];
 
       const updated = {
         ...pos,
-        [user.$id]: finalPos
+        [user.$id]: final
       };
 
-      let nextTurn = game.players.find(p => p !== user.$id);
+      const opp = game.players.find(p => p !== user.$id);
 
-      const isWinner = finalPos >= SIZE;
+      const isWin = final >= SIZE;
 
-      const newGame = {
+      const updateData = {
         positions: JSON.stringify(updated),
-        turn: nextTurn
+        turn: opp
       };
 
-      if (isWinner) {
-        newGame.status = "finished";
-        newGame.winnerId = user.$id;
+      if (isWin) {
+        updateData.status = "finished";
+        updateData.winnerId = user.$id;
       }
 
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
         gameId,
-        newGame
+        updateData
       );
 
-      if (isWinner) {
+      if (isWin) {
         await payoutWinner(user.$id);
       }
 
     } catch (err) {
-      console.error(err);
+      console.error("PLAY ERROR:", err);
     } finally {
       setRolling(false);
     }
   }
 
   // =========================
-  if (!game || !user) return <div>Loading...</div>;
+  // SAFE RENDER GUARD
+  // =========================
+  if (!game || !user) {
+    return <div style={{ color: "#fff" }}>Loading...</div>;
+  }
 
-  const pos = JSON.parse(game.positions || "{}");
+  const pos = getPositions();
 
   const myPos = pos[user.$id] || 1;
   const oppId = game.players.find(p => p !== user.$id);
   const oppPos = pos[oppId] || 1;
 
-  const myCoords = getCoords(myPos);
-  const oppCoords = getCoords(oppPos);
-
   return (
     <div style={{ textAlign: "center", background: "#0f172a", color: "#fff", minHeight: "100vh" }}>
+
       <h2>🐍 Snake Game</h2>
 
       {/* 💰 POT */}
@@ -273,17 +280,20 @@ export default function SnakeGame({ gameId }) {
         💰 Pot: ₦{game?.pot || 0}
       </div>
 
+      {/* TURN */}
       <div>
         {isMyTurn() ? "🟢 Your Turn" : "⏳ Opponent Turn"}
       </div>
 
+      {/* BOARD */}
       <div style={{ position: "relative", width: 360, height: 360, margin: "auto" }}>
         <img src={boardImg} style={{ width: "100%", height: "100%" }} />
 
-        <div style={{ position: "absolute", ...myCoords, width: 25, height: 25, background: "red", borderRadius: "50%" }} />
-        <div style={{ position: "absolute", ...oppCoords, width: 25, height: 25, background: "blue", borderRadius: "50%" }} />
+        <div style={{ position: "absolute", ...getCoords(myPos), width: 25, height: 25, background: "red", borderRadius: "50%" }} />
+        <div style={{ position: "absolute", ...getCoords(oppPos), width: 25, height: 25, background: "blue", borderRadius: "50%" }} />
       </div>
 
+      {/* DICE */}
       <div>🎲 Dice: {dice}</div>
 
       <button
@@ -302,15 +312,17 @@ export default function SnakeGame({ gameId }) {
           left: "50%",
           transform: "translate(-50%, -50%)",
           background: "gold",
+          color: "#000",
           padding: 20,
           borderRadius: 12,
-          fontWeight: "bold",
           fontSize: 20,
+          fontWeight: "bold",
           zIndex: 9999
         }}>
           🏆 YOU WON ₦{game?.pot || 0}
         </div>
       )}
+
     </div>
   );
 }
