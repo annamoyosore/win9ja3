@@ -14,12 +14,12 @@ const SNAKE_LOBBY_COLLECTION = "snakelobby";
 const SNAKE_GAME_COLLECTION = "snakegame";
 const WALLET_COLLECTION = "wallets";
 
-// 👑 ADMIN SETTINGS
+// 👑 ADMIN
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ADMIN_CUT_PERCENT = 10;
 
 // =========================
-// WALLET HELPERS
+// WALLET SAFE SYSTEM
 // =========================
 async function getOrCreateWallet(userId) {
   const res = await databases.listDocuments(
@@ -103,7 +103,7 @@ export default function Snakelobby() {
   }
 
   // =========================
-  // STAKE & HOST
+  // HOST GAME
   // =========================
   async function stakeAndHost() {
     if (!userId) return alert("Login required");
@@ -138,7 +138,7 @@ export default function Snakelobby() {
       if (err.message === "INSUFFICIENT_BALANCE") {
         alert("❌ Insufficient wallet balance");
       } else {
-        alert("Failed to create lobby");
+        alert("❌ Failed to create lobby");
       }
 
       console.error(err);
@@ -148,51 +148,48 @@ export default function Snakelobby() {
   }
 
   // =========================
-  // JOIN LOBBY (POT LOGIC FIXED)
+  // JOIN GAME (FULL FIXED FLOW)
   // =========================
   async function joinLobby(lobby) {
     if (!userId) return alert("Login required");
 
+    setLoading(true);
+
     try {
-      if (lobby.hostId === userId) {
-        return alert("You are host");
+      // 🔥 ALWAYS REFRESH LOBBY (fix race condition)
+      const freshLobby = await databases.getDocument(
+        DATABASE_ID,
+        SNAKE_LOBBY_COLLECTION,
+        lobby.$id
+      );
+
+      // ❌ already joined
+      if (freshLobby.opponentId) {
+        return alert("❌ Lobby already full");
       }
 
-      if (lobby.opponentId) {
-        return alert("Lobby full");
+      // ❌ prevent self join
+      if (freshLobby.hostId === userId) {
+        return alert("❌ You cannot join your own lobby");
       }
 
-      const stakeAmount = lobby.stake;
+      const stakeAmount = Number(freshLobby.stake);
+
+      if (!stakeAmount || stakeAmount <= 0) {
+        return alert("Invalid stake");
+      }
 
       // 💰 deduct opponent
       await deductWallet(userId, stakeAmount);
 
       // =========================
-      // POT CALCULATION (YOUR RULE)
+      // POT CALCULATION
       // =========================
       const totalPot = stakeAmount * 2;
-
-      const adminCut = Math.floor(
-        (totalPot * ADMIN_CUT_PERCENT) / 100
-      );
-
+      const adminCut = Math.floor((totalPot * ADMIN_CUT_PERCENT) / 100);
       const gamePot = totalPot - adminCut;
 
-      // 👑 send admin cut immediately
-      await databases.createDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        ID.unique(),
-        {
-          userId: ADMIN_ID,
-          balance: adminCut,
-          type: "admin_cut",
-        }
-      );
-
-      // =========================
-      // UPDATE LOBBY
-      // =========================
+      // 👑 UPDATE LOBBY FIRST (LOCK IT)
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -203,9 +200,7 @@ export default function Snakelobby() {
         }
       );
 
-      // =========================
-      // CREATE GAME WITH FINAL POT
-      // =========================
+      // 🎮 CREATE GAME
       const game = await databases.createDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
@@ -214,16 +209,14 @@ export default function Snakelobby() {
           matchId: lobby.$id,
           turn: "A",
           status: "playing",
-
-          // 🐍 THIS IS YOUR FINAL POT FOR WINNER
           pot: gamePot,
-
           positions: JSON.stringify({ A: 1, B: 1 }),
           winner: "",
           history: JSON.stringify([]),
         }
       );
 
+      // link game
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -233,16 +226,18 @@ export default function Snakelobby() {
         }
       );
 
-      alert("🔥 Game started!");
+      alert("🔥 Joined successfully!");
       loadLobbies();
     } catch (err) {
-      console.error(err);
+      console.error("JOIN ERROR:", err);
 
       if (err.message === "INSUFFICIENT_BALANCE") {
         alert("❌ Not enough balance");
       } else {
-        alert("Failed to join lobby");
+        alert("❌ Failed to join lobby");
       }
+    } finally {
+      setLoading(false);
     }
   }
 
