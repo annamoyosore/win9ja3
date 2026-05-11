@@ -15,7 +15,7 @@ const ADMIN_CUT_PERCENT = 12;
 const MIN_STAKE = 150;
 
 // =========================
-// WALLET SAFE FETCH
+// WALLET FETCH SAFE
 // =========================
 async function getWallet(userId) {
   try {
@@ -27,7 +27,7 @@ async function getWallet(userId) {
 
     return res.documents?.[0] || null;
   } catch (err) {
-    console.error("Wallet error:", err);
+    console.error(err);
     return null;
   }
 }
@@ -61,7 +61,7 @@ export default function Snakelobby({ goGame }) {
 
       await loadLobbies(u.$id);
     } catch (err) {
-      console.error("Init error:", err);
+      console.error(err);
     }
   }
 
@@ -78,12 +78,12 @@ export default function Snakelobby({ goGame }) {
 
       const all = res.documents;
 
-      // 🟡 WAITING → PUBLIC (everyone sees)
+      // 🟡 PUBLIC WAITING
       const waitingLobbies = all.filter(
-        (m) => (m.status || "") === "waiting"
+        (m) => m.status === "waiting"
       );
 
-      // 🟢 MATCHED → ONLY HOST + OPPONENT SEE
+      // 🟢 ACTIVE (ONLY PLAYERS)
       const activeGames = all.filter((m) => {
         return (
           m.status === "matched" &&
@@ -96,7 +96,7 @@ export default function Snakelobby({ goGame }) {
       setActive(activeGames);
 
     } catch (err) {
-      console.error("Load error:", err);
+      console.error(err);
     }
   }
 
@@ -135,7 +135,7 @@ export default function Snakelobby({ goGame }) {
           opponentId: null,
           stake: amount,
           status: "waiting",
-          gameId: null,
+          gameId: "",
           pot: amount,
           refundDone: false
         }
@@ -153,7 +153,7 @@ export default function Snakelobby({ goGame }) {
   }
 
   // =========================
-  // JOIN LOBBY → MATCHED → GAME CREATED
+  // JOIN LOBBY + GAME CREATE
   // =========================
   async function joinLobby(lobby) {
     if (loadingJoin) return;
@@ -175,7 +175,7 @@ export default function Snakelobby({ goGame }) {
         throw new Error("Already matched");
       }
 
-      const amount = Number(fresh.stake);
+      const amount = Number(fresh.stake || 0);
 
       const freshWallet = await getWallet(user.$id);
 
@@ -183,7 +183,7 @@ export default function Snakelobby({ goGame }) {
         throw new Error("Insufficient balance");
       }
 
-      // 💰 deduct wallet
+      // 💰 deduct opponent
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -193,7 +193,7 @@ export default function Snakelobby({ goGame }) {
         }
       );
 
-      // 🔒 SET MATCHED
+      // 🔒 lock lobby
       const matchedLobby = await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
@@ -204,11 +204,18 @@ export default function Snakelobby({ goGame }) {
         }
       );
 
-      const total = amount * 2;
+      // =========================
+      // SAFE POT CALCULATION
+      // =========================
+      const total = Number(amount) * 2;
       const adminCut = Math.floor((total * ADMIN_CUT_PERCENT) / 100);
-      const finalPot = total - adminCut;
+      const finalPot = Number(total - adminCut);
 
-      // 🎮 CREATE GAME
+      console.log("FINAL POT:", finalPot);
+
+      // =========================
+      // CREATE GAME (SAFE)
+      // =========================
       const game = await databases.createDocument(
         DATABASE_ID,
         SNAKE_GAME_COLLECTION,
@@ -224,20 +231,22 @@ export default function Snakelobby({ goGame }) {
         }
       );
 
-      // 🔗 LINK GAME
+      // =========================
+      // LINK GAME ONLY
+      // =========================
       await databases.updateDocument(
         DATABASE_ID,
         SNAKE_LOBBY_COLLECTION,
         matchedLobby.$id,
         {
-          gameId: game.$id,
-          pot: finalPot
+          gameId: game.$id
         }
       );
 
       goGame(game.$id, amount);
 
     } catch (err) {
+      console.error(err);
       alert(err.message);
     }
 
@@ -261,46 +270,35 @@ export default function Snakelobby({ goGame }) {
         {loadingCreate ? "Creating..." : "Create Lobby"}
       </button>
 
-      {/* 🟡 WAITING (PUBLIC) */}
+      {/* WAITING */}
       <h3>Waiting Lobbies</h3>
-
-      {waiting.length === 0 && <p>No lobbies available</p>}
 
       {waiting.map((l) => (
         <div key={l.$id} style={styles.card}>
           <div>
             <p>₦{l.stake}</p>
-            {l.hostId === user.$id ? (
-              <p>⏳ Waiting for opponent...</p>
-            ) : (
-              <p>🟢 Available</p>
-            )}
+            <p>{l.hostId === user.$id ? "Waiting..." : "Open"}</p>
           </div>
 
           {l.hostId !== user.$id && (
-            <button
-              onClick={() => joinLobby(l)}
-              disabled={loadingJoin === l.$id}
-            >
+            <button onClick={() => joinLobby(l)}>
               Join
             </button>
           )}
         </div>
       ))}
 
-      {/* 🟢 ACTIVE (PRIVATE MATCHED ONLY) */}
+      {/* ACTIVE */}
       <h3>Active Games</h3>
-
-      {active.length === 0 && <p>No active games</p>}
 
       {active.map((l) => (
         <div key={l.$id} style={styles.card}>
           <div>
             <p>₦{l.stake}</p>
-            <p>Matched Game</p>
+            <p>Matched</p>
           </div>
 
-          {(l.hostId === user.$id || l.opponentId === user.$id) && l.gameId && (
+          {l.gameId && (
             <button onClick={() => goGame(l.gameId, l.stake)}>
               ▶ Resume
             </button>
