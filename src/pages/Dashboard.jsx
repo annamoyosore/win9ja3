@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+pimport { useEffect, useState } from "react";
 import {
   account,
   databases,
@@ -103,7 +103,7 @@ export default function Dashboard({
       <div style={styles.menu}>
 
         <div style={styles.menuBtn} onClick={goWallet}>
-          💰 Wallet
+          💰 Wallet Balance
         </div>
 
         <div style={styles.menuBtn} onClick={goTransactions}>
