@@ -13,6 +13,10 @@ import {
 
 import { account } from "./lib/appwrite";
 
+// 🔔 TURN NOTIFICATION SYSTEM (ADDED)
+import { TurnProvider } from "./context/TurnContext";
+import NotificationBell from "./components/NotificationBell";
+
 // PAGES
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
@@ -153,10 +157,7 @@ function AppRoutes() {
               goWallet={() => navigate("/wallet")}
               goTransactions={() => navigate("/transactions")}
               goCasino={() => navigate("/casino")}
-
-              // ✅ FIXED SNAKE NAVIGATION
               goSnakeLobby={() => navigate("/snake-lobby")}
-
               goAdmin={() => navigate("/admin")}
               logout={async () => {
                 await account.deleteSession("current");
@@ -228,7 +229,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SnakeLobby
-              // ✅ THIS FIX IS IMPORTANT
               goGame={(gameId) =>
                 navigate(`/snake-game/${gameId}`)
               }
@@ -266,12 +266,19 @@ function AppRoutes() {
 }
 
 // =========================
-// APP ROOT
+// APP ROOT (FIXED)
 // =========================
 export default function App() {
   return (
-    <HashRouter>
-      <AppRoutes />
-    </HashRouter>
+    <TurnProvider>
+
+      {/* 🔔 GLOBAL TURN SYSTEM UI */}
+      <NotificationBell />
+
+      <HashRouter>
+        <AppRoutes />
+      </HashRouter>
+
+    </TurnProvider>
   );
 }
