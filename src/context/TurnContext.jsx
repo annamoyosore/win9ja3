@@ -18,46 +18,36 @@ const TurnContext = createContext();
 
 export function TurnProvider({ children }) {
 
-  // 🔴 red notification count
+  // 🔴 red notification counter
   const [turnAlerts, setTurnAlerts] = useState(0);
 
-  // prevent duplicate notifications
+  // prevent duplicate alerts per game
   const notified = useRef({});
 
-  // reminder intervals
+  // store reminder intervals per game
   const reminderIntervals = useRef({});
 
   // =========================
-  // 🗣️ TALKING TURN VOICE
+  // 🗣️ VOICE ALERT
   // =========================
   function speakTurnReminder() {
-
     try {
-
       window.speechSynthesis.cancel();
 
-      const speech =
-        new SpeechSynthesisUtterance(
-          "It is your turn"
-        );
+      const speech = new SpeechSynthesisUtterance("It is your turn");
 
-      // talking style
       speech.rate = 0.9;
       speech.pitch = 1.4;
       speech.volume = 1;
 
-      const voices =
-        window.speechSynthesis.getVoices();
+      const voices = window.speechSynthesis.getVoices();
 
-      // try to find better voice
       const preferredVoice = voices.find(v =>
         v.name.toLowerCase().includes("google") ||
         v.name.toLowerCase().includes("female")
       );
 
-      if (preferredVoice) {
-        speech.voice = preferredVoice;
-      }
+      if (preferredVoice) speech.voice = preferredVoice;
 
       window.speechSynthesis.speak(speech);
 
@@ -76,24 +66,22 @@ export function TurnProvider({ children }) {
 
         const user = await account.get();
 
-        // notification permission
+        // request notification permission once
         if ("Notification" in window) {
           await Notification.requestPermission();
         }
 
-        // realtime listener
+        // =========================
+        // REALTIME LISTENER
+        // =========================
         unsubscribe = databases.client.subscribe(
           `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
           (response) => {
 
             const game = response.payload;
-
             if (!game) return;
 
-            // not part of this game
-            if (!game.players?.includes(user.$id)) {
-              return;
-            }
+            if (!game.players?.includes(user.$id)) return;
 
             // =========================
             // 🎯 YOUR TURN
@@ -103,14 +91,11 @@ export function TurnProvider({ children }) {
               game.status !== "finished"
             ) {
 
-              // already reminding
-              if (
-                reminderIntervals.current[game.$id]
-              ) {
+              // prevent duplicate interval
+              if (reminderIntervals.current[game.$id]) {
                 return;
               }
 
-              // prevent spam
               if (!notified.current[game.$id]) {
 
                 notified.current[game.$id] = true;
@@ -118,15 +103,15 @@ export function TurnProvider({ children }) {
                 // 🔴 RED SIGNAL
                 setTurnAlerts(prev => prev + 1);
 
-                // 🔊 TALK
+                // 🔊 VOICE
                 speakTurnReminder();
 
-                // 📳 vibrate
+                // 📳 VIBRATION
                 if (navigator.vibrate) {
                   navigator.vibrate([300, 120, 300]);
                 }
 
-                // 🔔 browser notification
+                // 🔔 NOTIFICATION
                 if (
                   "Notification" in window &&
                   Notification.permission === "granted"
@@ -135,6 +120,14 @@ export function TurnProvider({ children }) {
                     body: "It is your turn!",
                     icon: "/icon192.png",
                     requireInteraction: true
+                  });
+                }
+
+                // 🚀 SERVICE WORKER PUSH (PWA STYLE)
+                if (navigator.serviceWorker?.controller) {
+                  navigator.serviceWorker.controller.postMessage({
+                    type: "TURN_ALERT",
+                    body: "It is your turn to play!"
                   });
                 }
               }
@@ -148,25 +141,24 @@ export function TurnProvider({ children }) {
                   speakTurnReminder();
 
                   if (navigator.vibrate) {
-                    navigator.vibrate([
-                      200,
-                      100,
-                      200
-                    ]);
+                    navigator.vibrate([200, 100, 200]);
                   }
 
                   if (
                     "Notification" in window &&
                     Notification.permission === "granted"
                   ) {
-                    new Notification(
-                      "🎮 WIN9JA",
-                      {
-                        body:
-                          "Opponent is waiting for you",
-                        icon: "/icon192.png"
-                      }
-                    );
+                    new Notification("🎮 WIN9JA", {
+                      body: "Opponent is waiting for you",
+                      icon: "/icon192.png"
+                    });
+                  }
+
+                  if (navigator.serviceWorker?.controller) {
+                    navigator.serviceWorker.controller.postMessage({
+                      type: "TURN_ALERT",
+                      body: "Opponent is waiting for your move!"
+                    });
                   }
 
                 }, 2 * 60 * 60 * 1000);
@@ -174,24 +166,14 @@ export function TurnProvider({ children }) {
             } else {
 
               // =========================
-              // ✅ PLAYER PLAYED
+              // ✅ TURN ENDED
               // =========================
 
               notified.current[game.$id] = false;
 
-              if (
-                reminderIntervals.current[game.$id]
-              ) {
-
-                clearInterval(
-                  reminderIntervals.current[
-                    game.$id
-                  ]
-                );
-
-                delete reminderIntervals.current[
-                  game.$id
-                ];
+              if (reminderIntervals.current[game.$id]) {
+                clearInterval(reminderIntervals.current[game.$id]);
+                delete reminderIntervals.current[game.$id];
               }
             }
           }
@@ -206,15 +188,11 @@ export function TurnProvider({ children }) {
 
     return () => {
 
-      // unsubscribe realtime
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      if (unsubscribe) unsubscribe();
 
-      // clear all intervals
-      Object.values(
-        reminderIntervals.current
-      ).forEach(clearInterval);
+      // cleanup intervals
+      Object.values(reminderIntervals.current)
+        .forEach(clearInterval);
     };
 
   }, []);
