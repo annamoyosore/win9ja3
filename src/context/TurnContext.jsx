@@ -18,17 +18,20 @@ const TurnContext = createContext();
 
 export function TurnProvider({ children }) {
 
-  // 🔴 red notification counter
+  // 🔴 red badge counter
   const [turnAlerts, setTurnAlerts] = useState(0);
 
   // prevent duplicate alerts per game
   const notified = useRef({});
 
-  // store reminder intervals per game
-  const reminderIntervals = useRef({});
+  // per-game turn state tracker
+  const turnState = useRef({});
+
+  // activity tracking
+  const lastActivityRef = useRef(Date.now());
 
   // =========================
-  // 🗣️ VOICE ALERT
+  // 🗣 VOICE ALERT
   // =========================
   function speakTurnReminder() {
     try {
@@ -56,6 +59,32 @@ export function TurnProvider({ children }) {
     }
   }
 
+  // =========================
+  // TRACK USER ACTIVITY
+  // =========================
+  useEffect(() => {
+
+    const updateActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+
+    window.addEventListener("click", updateActivity);
+    window.addEventListener("keydown", updateActivity);
+    window.addEventListener("mousemove", updateActivity);
+    window.addEventListener("touchstart", updateActivity);
+
+    return () => {
+      window.removeEventListener("click", updateActivity);
+      window.removeEventListener("keydown", updateActivity);
+      window.removeEventListener("mousemove", updateActivity);
+      window.removeEventListener("touchstart", updateActivity);
+    };
+
+  }, []);
+
+  // =========================
+  // MAIN REALTIME LISTENER
+  // =========================
   useEffect(() => {
 
     let unsubscribe;
@@ -66,14 +95,10 @@ export function TurnProvider({ children }) {
 
         const user = await account.get();
 
-        // request notification permission once
         if ("Notification" in window) {
           await Notification.requestPermission();
         }
 
-        // =========================
-        // REALTIME LISTENER
-        // =========================
         unsubscribe = databases.client.subscribe(
           `databases.${DATABASE_ID}.collections.${GAME_COLLECTION}.documents`,
           (response) => {
@@ -84,97 +109,65 @@ export function TurnProvider({ children }) {
             if (!game.players?.includes(user.$id)) return;
 
             // =========================
-            // 🎯 YOUR TURN
+            // 🎯 YOUR TURN LOGIC
             // =========================
             if (
               game.turn === user.$id &&
               game.status !== "finished"
             ) {
 
-              // prevent duplicate interval
-              if (reminderIntervals.current[game.$id]) {
-                return;
-              }
+              const now = Date.now();
 
-              if (!notified.current[game.$id]) {
+              const state =
+                turnState.current[game.$id] || {
+                  firstAlertSent: false,
+                  lastAlertTime: 0
+                };
 
-                notified.current[game.$id] = true;
+              const inactiveTime =
+                now - lastActivityRef.current;
 
-                // 🔴 RED SIGNAL
-                setTurnAlerts(prev => prev + 1);
+              const isFirstAlertTime =
+                inactiveTime >= 3 * 60 * 1000;
 
-                // 🔊 VOICE
-                speakTurnReminder();
+              const isRepeatAlertTime =
+                now - state.lastAlertTime >=
+                2 * 60 * 60 * 1000;
 
-                // 📳 VIBRATION
-                if (navigator.vibrate) {
-                  navigator.vibrate([300, 120, 300]);
-                }
+              // =========================
+              // FIRST ALERT (3 MIN RULE)
+              // =========================
+              if (!state.firstAlertSent && isFirstAlertTime) {
 
-                // 🔔 NOTIFICATION
-                if (
-                  "Notification" in window &&
-                  Notification.permission === "granted"
-                ) {
-                  new Notification("🎮 WIN9JA", {
-                    body: "It is your turn!",
-                    icon: "/icon192.png",
-                    requireInteraction: true
-                  });
-                }
+                triggerTurnAlert();
 
-                // 🚀 SERVICE WORKER PUSH (PWA STYLE)
-                if (navigator.serviceWorker?.controller) {
-                  navigator.serviceWorker.controller.postMessage({
-                    type: "TURN_ALERT",
-                    body: "It is your turn to play!"
-                  });
-                }
+                turnState.current[game.$id] = {
+                  firstAlertSent: true,
+                  lastAlertTime: now
+                };
               }
 
               // =========================
-              // ⏰ REPEAT EVERY 2 HOURS
+              // REPEAT ALERT (2 HOURS)
               // =========================
-              reminderIntervals.current[game.$id] =
-                setInterval(() => {
+              else if (
+                state.firstAlertSent &&
+                isRepeatAlertTime
+              ) {
 
-                  speakTurnReminder();
+                triggerTurnAlert();
 
-                  if (navigator.vibrate) {
-                    navigator.vibrate([200, 100, 200]);
-                  }
-
-                  if (
-                    "Notification" in window &&
-                    Notification.permission === "granted"
-                  ) {
-                    new Notification("🎮 WIN9JA", {
-                      body: "Opponent is waiting for you",
-                      icon: "/icon192.png"
-                    });
-                  }
-
-                  if (navigator.serviceWorker?.controller) {
-                    navigator.serviceWorker.controller.postMessage({
-                      type: "TURN_ALERT",
-                      body: "Opponent is waiting for your move!"
-                    });
-                  }
-
-                }, 2 * 60 * 60 * 1000);
+                turnState.current[game.$id].lastAlertTime = now;
+              }
 
             } else {
 
               // =========================
-              // ✅ TURN ENDED
+              // RESET WHEN TURN ENDS
               // =========================
 
               notified.current[game.$id] = false;
-
-              if (reminderIntervals.current[game.$id]) {
-                clearInterval(reminderIntervals.current[game.$id]);
-                delete reminderIntervals.current[game.$id];
-              }
+              delete turnState.current[game.$id];
             }
           }
         );
@@ -187,23 +180,45 @@ export function TurnProvider({ children }) {
     init();
 
     return () => {
-
       if (unsubscribe) unsubscribe();
-
-      // cleanup intervals
-      Object.values(reminderIntervals.current)
-        .forEach(clearInterval);
     };
 
   }, []);
 
+  // =========================
+  // 🔥 ALERT FUNCTION
+  // =========================
+  function triggerTurnAlert() {
+
+    setTurnAlerts(prev => prev + 1);
+
+    speakTurnReminder();
+
+    if (navigator.vibrate) {
+      navigator.vibrate([300, 120, 300]);
+    }
+
+    if (
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
+      new Notification("🎮 WIN9JA", {
+        body: "It is your turn!",
+        icon: "/icon192.png",
+        requireInteraction: true
+      });
+    }
+
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: "TURN_ALERT",
+        body: "It is your turn to play!"
+      });
+    }
+  }
+
   return (
-    <TurnContext.Provider
-      value={{
-        turnAlerts,
-        setTurnAlerts
-      }}
-    >
+    <TurnContext.Provider value={{ turnAlerts, setTurnAlerts }}>
       {children}
     </TurnContext.Provider>
   );
