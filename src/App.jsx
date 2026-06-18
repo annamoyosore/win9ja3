@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import { useEffect, useState } from "react";
 import {
   HashRouter,
@@ -13,7 +10,7 @@ import {
 
 import { account } from "./lib/appwrite";
 
-// 🔔 TURN NOTIFICATION SYSTEM (ADDED)
+// 🔔 TURN NOTIFICATION SYSTEM
 import { TurnProvider } from "./context/TurnContext";
 import NotificationBell from "./components/NotificationBell";
 
@@ -33,11 +30,12 @@ import CasinoWheel from "./pages/CasinoWheel";
 import SnakeLobby from "./pages/snakelobby";
 import SnakeGame from "./pages/SnakeGame";
 
+// 💣 MINES GAME (NEW)
+import MineGame from "./pages/MineGame";
+
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
-// =========================
-// AUTH HOOK
-// =========================
+// ================= AUTH HOOK =================
 function useAuth() {
   const [loading, setLoading] = useState(true);
   const [authed, setAuthed] = useState(false);
@@ -53,9 +51,7 @@ function useAuth() {
   return { loading, authed };
 }
 
-// =========================
-// USER HOOK
-// =========================
+// ================= USER HOOK =================
 function useUser() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -71,9 +67,7 @@ function useUser() {
   return { user, loading };
 }
 
-// =========================
-// ROUTE GUARDS
-// =========================
+// ================= ROUTE GUARDS =================
 function ProtectedRoute({ children }) {
   const { loading, authed } = useAuth();
   if (loading) return <p style={{ color: "white" }}>Loading...</p>;
@@ -97,9 +91,7 @@ function PublicRoute({ children }) {
   return authed ? <Navigate to="/dashboard" replace /> : children;
 }
 
-// =========================
-// WHOT WRAPPER
-// =========================
+// ================= WRAPPERS =================
 function GameWrapper() {
   const { gameId, stake } = useParams();
   const navigate = useNavigate();
@@ -113,9 +105,6 @@ function GameWrapper() {
   );
 }
 
-// =========================
-// SNAKE GAME WRAPPER
-// =========================
 function SnakeGameWrapper() {
   const { gameId } = useParams();
   const navigate = useNavigate();
@@ -128,9 +117,7 @@ function SnakeGameWrapper() {
   );
 }
 
-// =========================
-// ROUTES
-// =========================
+// ================= ROUTES =================
 function AppRoutes() {
   const navigate = useNavigate();
 
@@ -158,6 +145,7 @@ function AppRoutes() {
               goTransactions={() => navigate("/transactions")}
               goCasino={() => navigate("/casino")}
               goSnakeLobby={() => navigate("/snake-lobby")}
+              goMineGame={() => navigate("/mines")}   // 🔥 ADDED
               goAdmin={() => navigate("/admin")}
               logout={async () => {
                 await account.deleteSession("current");
@@ -174,6 +162,16 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CasinoWheel />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 💣 MINES GAME ROUTE (NEW) */}
+      <Route
+        path="/mines"
+        element={
+          <ProtectedRoute>
+            <MineGame />
           </ProtectedRoute>
         }
       />
@@ -223,7 +221,7 @@ function AppRoutes() {
         }
       />
 
-      {/* 🐍 SNAKE LOBBY */}
+      {/* SNAKE LOBBY */}
       <Route
         path="/snake-lobby"
         element={
@@ -238,7 +236,7 @@ function AppRoutes() {
         }
       />
 
-      {/* 🐍 SNAKE GAME */}
+      {/* SNAKE GAME */}
       <Route
         path="/snake-game/:gameId"
         element={
@@ -265,14 +263,11 @@ function AppRoutes() {
   );
 }
 
-// =========================
-// APP ROOT (FIXED)
-// =========================
+// ================= APP ROOT =================
 export default function App() {
   return (
     <TurnProvider>
 
-      {/* 🔔 GLOBAL TURN SYSTEM UI */}
       <NotificationBell />
 
       <HashRouter>
