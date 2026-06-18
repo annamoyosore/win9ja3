@@ -1,4 +1,4 @@
-pimport { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   account,
   databases,
@@ -7,7 +7,6 @@ import {
   Query
 } from "../lib/appwrite";
 
-// 🔒 ADMIN ID
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 export default function Dashboard({
@@ -17,6 +16,7 @@ export default function Dashboard({
   goTransactions,
   goAdmin,
   goSnakeLobby,
+  goMineGame,   // 🔥 ADDED
   logout
 }) {
   const [user, setUser] = useState(null);
@@ -93,6 +93,15 @@ export default function Dashboard({
         <div style={{ ...styles.gameCard, background: "#f59e0b" }} onClick={goCasino}>
           <div style={styles.logo}>🎰 Jackpot</div>
           <p>Spin & win rewards</p>
+        </div>
+
+        {/* 💣 MINES GAME (NEW) */}
+        <div
+          style={{ ...styles.gameCard, background: "#ef4444" }}
+          onClick={goMineGame}
+        >
+          <div style={styles.logo}>💣 Mines</div>
+          <p>Risk & reward mining game</p>
         </div>
 
       </div>
