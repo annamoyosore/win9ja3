@@ -3,7 +3,7 @@
 // =========================
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { account, databases, DATABASE_ID, WALLET_COLLECTION } from "../lib/appwrite";
+import { account, databases, DATABASE_ID } from "../lib/appwrite";
 import { getWallet } from "../lib/wallet";
 import { ID, Query } from "appwrite";
 
@@ -17,19 +17,13 @@ export default function Wallet() {
 
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  // 💬 ZANGI CONTACT STATE
-  const [zangiContact, setZangiContact] = useState("");
-
-  const [promoStats, setPromoStats] = useState({
-    code: null,
-    usedCount: 0
-  });
+  const [promo, setPromo] = useState(null);
 
   // Deposit
   const [showDeposit, setShowDeposit] = useState(false);
   const [amount, setAmount] = useState("");
   const [name, setName] = useState("");
+  const [depositLoading, setDepositLoading] = useState(false);
 
   // Withdraw
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -37,12 +31,8 @@ export default function Wallet() {
   const [bank, setBank] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
 
-  const [processing, setProcessing] = useState(false);
-
-  // =========================
-  // LOAD WALLET
-  // =========================
   useEffect(() => {
     load();
   }, []);
@@ -50,12 +40,8 @@ export default function Wallet() {
   async function load() {
     try {
       const user = await account.get();
-
       const w = await getWallet(user.$id);
       setWallet(w);
-
-      // 💬 load zangi contact from wallet
-      setZangiContact(w?.zangiContact || "");
 
       const res = await databases.listDocuments(
         DATABASE_ID,
@@ -64,13 +50,8 @@ export default function Wallet() {
       );
 
       if (res.documents.length > 0) {
-        const promo = res.documents[0];
-        setPromoStats({
-          code: promo.code,
-          usedCount: promo.usedCount || 0
-        });
+        setPromo(res.documents[0]);
       }
-
     } catch (err) {
       console.error(err);
     } finally {
@@ -78,59 +59,22 @@ export default function Wallet() {
     }
   }
 
-  // =========================
-  // SAVE ZANGI CONTACT
-  // =========================
-  async function saveZangi() {
-    if (processing) return;
-    if (!wallet) return;
+  // ================= PROMO =================
+  function generateCode(name) {
+    const base = (name || "USER")
+      .replace(/\s+/g, "")
+      .toUpperCase()
+      .slice(0, 5);
 
-    setProcessing(true);
-
-    try {
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          zangiContact: zangiContact
-        }
-      );
-
-      alert("Zangi contact saved ✅");
-
-    } catch (err) {
-      alert(err.message);
-    }
-
-    setProcessing(false);
-  }
-
-  // =========================
-  // PROMO CODE
-  // =========================
-  function generatePromoCode(name) {
-    const safe = name || "USER";
-    const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    return clean + rand;
+    return base + Math.floor(1000 + Math.random() * 9000);
   }
 
   async function createPromo() {
-    if (processing) return;
-
-    if (promoStats.code) {
-      alert("You already have a promo code");
-      return;
-    }
-
     try {
-      setProcessing(true);
-
       const user = await account.get();
-      const code = generatePromoCode(wallet?.name);
+      const code = generateCode(wallet?.name);
 
-      await databases.createDocument(
+      const doc = await databases.createDocument(
         DATABASE_ID,
         PROMO_COLLECTION,
         ID.unique(),
@@ -142,27 +86,33 @@ export default function Wallet() {
         }
       );
 
-      setPromoStats({ code, usedCount: 0 });
-      alert("Promo code created ✅");
-
+      setPromo(doc);
+      alert("Promo created ✅");
     } catch (err) {
       alert(err.message);
-    } finally {
-      setProcessing(false);
     }
   }
 
   function copyCode() {
-    if (!promoStats.code) return;
-    navigator.clipboard.writeText(promoStats.code);
+    if (!promo?.code) return;
+    navigator.clipboard.writeText(promo.code);
     alert("Copied ✅");
   }
 
-  // =========================
-  // DEPOSIT
-  // =========================
+  function copyInvite() {
+    if (!promo?.code) return alert("Generate code first");
+
+    const text = `Join Win9ja 🎮
+Use my promo code: ${promo.code}
+https://win9jalife.vercel.app`;
+
+    navigator.clipboard.writeText(text);
+    alert("Invite copied ✅");
+  }
+
+  // ================= DEPOSIT =================
   async function makeDeposit() {
-    if (processing) return;
+    if (depositLoading) return;
 
     if (!amount || Number(amount) < 200) {
       return alert("Minimum deposit ₦200");
@@ -172,7 +122,7 @@ export default function Wallet() {
       return alert("Enter full name");
     }
 
-    setProcessing(true);
+    setDepositLoading(true);
 
     try {
       const user = await account.get();
@@ -192,20 +142,18 @@ export default function Wallet() {
         }
       );
 
-      window.location.href = `https://flutterwave.com/pay/qiattof2hy2w`;
-
+      window.location.href =
+        "https://flutterwave.com/pay/qiattof2hy2w";
     } catch (err) {
       alert(err.message);
     }
 
-    setProcessing(false);
+    setDepositLoading(false);
   }
 
-  // =========================
-  // WITHDRAW
-  // =========================
+  // ================= WITHDRAW =================
   async function requestWithdraw() {
-    if (processing) return;
+    if (withdrawLoading) return;
 
     if (!withdrawAmount || Number(withdrawAmount) < 1500) {
       return alert("Minimum withdrawal ₦1500");
@@ -216,10 +164,11 @@ export default function Wallet() {
     }
 
     if (!bank) return alert("Enter bank name");
-    if (!accountNumber || accountNumber.length < 10) return alert("Enter valid account number");
+    if (!accountNumber || accountNumber.length < 10)
+      return alert("Enter valid account number");
     if (!accountName) return alert("Enter account name");
 
-    setProcessing(true);
+    setWithdrawLoading(true);
 
     try {
       const user = await account.get();
@@ -246,81 +195,52 @@ export default function Wallet() {
       setBank("");
       setAccountNumber("");
       setAccountName("");
-
     } catch (err) {
       alert(err.message);
     }
 
-    setProcessing(false);
+    setWithdrawLoading(false);
   }
 
-  // =========================
-  // LOADING
-  // =========================
   if (loading) {
     return (
       <div style={styles.container}>
+        <h2>💳 Wallet</h2>
         <p>Loading wallet...</p>
       </div>
     );
   }
 
-  // =========================
-  // UI
-  // =========================
   return (
     <div style={styles.container}>
+      <h1>
+        💳 Wallet{" "}
+        {promo ? (
+          <>
+            <span style={{ fontSize: 12 }}>{promo.code}</span>
+            <span onClick={copyCode} style={{ cursor: "pointer" }}>
+              {" "}
+              📋
+            </span>
+          </>
+        ) : (
+          <span onClick={createPromo} style={{ cursor: "pointer" }}>
+            +Code
+          </span>
+        )}
+      </h1>
 
-      {/* HEADER */}
-      <div style={styles.header}>
-        <h1>💳 Wallet</h1>
+      {promo && (
+        <p style={{ fontSize: 12 }}>
+          👥 {promo.usedCount || 0} users joined
+        </p>
+      )}
 
-        <div style={styles.promoHeader}>
-          {promoStats.code ? (
-            <>
-              <span style={styles.code}>{promoStats.code}</span>
-              <button style={styles.copyBtn} onClick={copyCode}>📋</button>
-            </>
-          ) : (
-            <button style={styles.genBtn} onClick={createPromo}>
-              + Code
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* 💬 ZANGI SECTION */}
-      <div style={styles.card}>
-        <h3>💬 Zangi Contact</h3>
-
-        <input
-          style={styles.input}
-          placeholder="Enter Zangi number"
-          value={zangiContact}
-          onChange={(e) => setZangiContact(e.target.value)}
-        />
-
-        <button style={styles.btn} onClick={saveZangi}>
-          💾 Save Contact
-        </button>
-
-        <a
-          href="https://zangi.com/"
-          target="_blank"
-          rel="noreferrer"
-          style={styles.link}
-        >
-          📥 Download Zangi App
-        </a>
-      </div>
-
-      {/* WALLET */}
       <div style={styles.card}>
         <p>💰 Balance: ₦{Number(wallet?.balance || 0).toLocaleString()}</p>
         <p>🔒 Locked: ₦{Number(wallet?.locked || 0).toLocaleString()}</p>
       </div>
 
-      {/* ACTIONS */}
       <button style={styles.btn} onClick={() => setShowDeposit(true)}>
         ➕ Deposit
       </button>
@@ -329,11 +249,100 @@ export default function Wallet() {
         ➖ Withdraw
       </button>
 
-      {/* BACK */}
-      <button style={styles.back} onClick={() => navigate("/dashboard")}>
-        ⬅ Back
+      <button style={styles.btn} onClick={copyInvite}>
+        📋 Copy Invite
       </button>
 
+      {/* ================= DEPOSIT MODAL ================= */}
+      {showDeposit && (
+        <div style={styles.modal}>
+          <div style={styles.card}>
+            <h3>➕ Deposit</h3>
+
+            <input
+              style={styles.input}
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+
+            <input
+              style={styles.input}
+              placeholder="Amount"
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+
+            <button
+              style={styles.btn}
+              onClick={makeDeposit}
+              disabled={depositLoading}
+            >
+              {depositLoading ? "Processing..." : "Proceed"}
+            </button>
+
+            <button
+              style={styles.cancel}
+              onClick={() => setShowDeposit(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================= WITHDRAW MODAL ================= */}
+      {showWithdraw && (
+        <div style={styles.modal}>
+          <div style={styles.card}>
+            <h3>➖ Withdraw</h3>
+
+            <input
+              style={styles.input}
+              placeholder="Amount"
+              value={withdrawAmount}
+              onChange={(e) => setWithdrawAmount(e.target.value)}
+            />
+
+            <input
+              style={styles.input}
+              placeholder="Bank"
+              value={bank}
+              onChange={(e) => setBank(e.target.value)}
+            />
+
+            <input
+              style={styles.input}
+              placeholder="Account Number"
+              value={accountNumber}
+              onChange={(e) => setAccountNumber(e.target.value)}
+            />
+
+            <input
+              style={styles.input}
+              placeholder="Account Name"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+            />
+
+            <button
+              style={styles.btn}
+              onClick={requestWithdraw}
+              disabled={withdrawLoading}
+            >
+              {withdrawLoading ? "Processing..." : "Submit"}
+            </button>
+
+            <button
+              style={styles.cancel}
+              onClick={() => setShowWithdraw(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -348,43 +357,10 @@ const styles = {
     color: "white",
     minHeight: "100vh"
   },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center"
-  },
-  promoHeader: {
-    display: "flex",
-    gap: 5
-  },
-  code: {
-    background: "#111827",
-    padding: "6px 10px",
-    borderRadius: 6
-  },
-  copyBtn: {
-    background: "#22c55e",
-    border: "none",
-    borderRadius: 6,
-    padding: "6px 10px"
-  },
-  genBtn: {
-    background: "gold",
-    border: "none",
-    borderRadius: 6,
-    padding: "6px 10px"
-  },
   card: {
-    padding: 20,
     background: "#111827",
+    padding: 20,
     borderRadius: 10,
-    marginTop: 20
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    borderRadius: 6,
-    border: "none",
     marginTop: 10
   },
   btn: {
@@ -395,14 +371,31 @@ const styles = {
     border: "none",
     borderRadius: 8
   },
-  back: {
-    marginTop: 20,
-    padding: 10
-  },
-  link: {
-    display: "block",
+  input: {
+    width: "100%",
+    padding: 10,
     marginTop: 10,
-    color: "#38bdf8",
-    textDecoration: "none"
+    borderRadius: 6,
+    border: "none"
+  },
+  cancel: {
+    width: "100%",
+    padding: 10,
+    marginTop: 10,
+    background: "red",
+    color: "white",
+    border: "none",
+    borderRadius: 8
+  },
+  modal: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    background: "rgba(0,0,0,0.7)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
   }
 };
