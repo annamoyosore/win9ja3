@@ -260,7 +260,7 @@ export default function Lobby({ goGame, back }) {
       `zangi://chat?number=${encodeURIComponent(zangi)}`;
 
     setTimeout(() => {
-      window.open("https://zangi.com/", "_blank");
+      window.open("https://services.zangi.com/dl/conversation/", "_blank");
     }, 1500);
   }
 
