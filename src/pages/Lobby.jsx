@@ -15,16 +15,16 @@ const ADMIN_ID = "69ef9fe863a02a7490b4";
 const ZANGI_LINK = "https://services.zangi.com/dl/conversation/";
 
 // =========================
-// 🎵 SOUND
+// SOUND
 // =========================
 function playTurnSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
     osc.type = "triangle";
-
     osc.frequency.setValueAtTime(740, ctx.currentTime);
     osc.frequency.setValueAtTime(980, ctx.currentTime + 0.15);
     osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
@@ -36,13 +36,11 @@ function playTurnSound() {
 
     osc.start();
     osc.stop(ctx.currentTime + 0.45);
-  } catch {
-    console.log("Sound failed");
-  }
+  } catch {}
 }
 
 // =========================
-// CREATE GAME
+// GAME CREATION
 // =========================
 async function createGame(match, opponentId) {
   return await databases.createDocument(
@@ -58,7 +56,6 @@ async function createGame(match, opponentId) {
     }
   );
 }
-
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
@@ -79,24 +76,23 @@ export default function Lobby({ goGame, back }) {
   }, []);
 
   async function init() {
-    const u = await account.get();
+    try {
+      const u = await account.get();
+      setUser(u);
 
-    if ("Notification" in window) {
-      Notification.requestPermission();
+      const w = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", u.$id), Query.limit(1)]
+      );
+
+      if (w.documents.length) setWallet(w.documents[0]);
+
+      await autoRefundExpiredMatches(u.$id);
+      refresh(u.$id);
+    } catch (e) {
+      console.log(e);
     }
-
-    setUser(u);
-
-    const w = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", u.$id), Query.limit(1)]
-    );
-
-    if (w.documents.length) setWallet(w.documents[0]);
-
-    await autoRefundExpiredMatches(u.$id);
-    refresh(u.$id);
   }
 
   useEffect(() => {
@@ -109,7 +105,8 @@ export default function Lobby({ goGame, back }) {
 
     return () => unsub();
   }, [user]);
-// =========================
+
+  // =========================
   // TURN ALERT
   // =========================
   useEffect(() => {
@@ -123,23 +120,9 @@ export default function Lobby({ goGame, back }) {
         if (notifiedTurns.current[m.gameId]) return;
 
         notifiedTurns.current[m.gameId] = true;
-
         playTurnSound();
 
-        if (navigator.vibrate) {
-          navigator.vibrate([300, 120, 300]);
-        }
-
-        if (
-          document.hidden &&
-          "Notification" in window &&
-          Notification.permission === "granted"
-        ) {
-          new Notification("🎮 Win9ja", {
-            body: "It's your turn!",
-            icon: "/icon192.png"
-          });
-        }
+        if (navigator.vibrate) navigator.vibrate([300, 120, 300]);
       } else {
         notifiedTurns.current[m.gameId] = false;
       }
@@ -149,110 +132,17 @@ export default function Lobby({ goGame, back }) {
   async function refresh(userId) {
     await Promise.all([loadMatches(userId), loadActiveMatches(userId)]);
   }
-
-  async function loadMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [Query.limit(100)]
-    );
-
-    setMatches(
-      res.documents.filter(
-        (m) => m.status === "waiting" && !m.opponentId && m.hostId !== userId
-      )
-    );
-  }
-
-  async function loadActiveMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [Query.limit(100), Query.orderDesc("$createdAt")]
-    );
-
-    const mine = res.documents.filter(
-      (m) => m.hostId === userId || m.opponentId === userId
-    );
-
-    setActiveMatches(mine);
-
-    const map = {};
-    const ids = [];
-
-    await Promise.all(
-      mine.map(async (m) => {
-        if (m.gameId) {
-          try {
-            const g = await databases.getDocument(
-              DATABASE_ID,
-              GAME_COLLECTION,
-              m.gameId
-            );
-            map[m.gameId] = g;
-          } catch {}
-        }
-
-        if (m.hostId) ids.push(m.hostId);
-        if (m.opponentId) ids.push(m.opponentId);
-      })
-    );
-
-    setGameMap(map);
-    await loadWalletZangi([...new Set(ids)]);
-  }
-
-  async function loadWalletZangi(userIds) {
-    if (!userIds.length) return;
-
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [Query.equal("userId", userIds)]
-    );
-
-    const map = {};
-    res.documents.forEach((w) => {
-      map[w.userId] = w.zangi || "";
-    });
-
-    setZangiMap(map);
-  }
-
-  function openZangi(userId) {
-    const contact = zangiMap[userId];
-    if (!contact) return alert("No Zangi contact found");
-
-    window.open(`${ZANGI_LINK}${contact}`, "_blank");
-  }
-
-  function canPlayMore() {
-    return activeMatches.filter((m) => m.status !== "finished").length < 7;
-  }
 return (
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
 
-      <h2>Your Matches</h2>
+      <h2>🔥 Your Matches</h2>
 
       {activeMatches.map((m) => {
         const game = gameMap[m.gameId];
+        const opponent = m.hostId === user?.$id ? m.opponentId : m.hostId;
 
-        let turnLabel = null;
-        let color = "#999";
-
-        if (game && game.status !== "finished") {
-          if (game.turn === user?.$id) {
-            turnLabel = "Your Turn";
-            color = "#22c55e"; // GREEN
-          } else {
-            turnLabel = "Opponent Turn";
-            color = "#ef4444"; // RED
-          }
-        }
-
-        const opponent =
-          m.hostId === user?.$id ? m.opponentId : m.hostId;
+        const isYourTurn = game?.turn === user?.$id;
 
         return (
           <div key={m.$id} style={styles.card}>
@@ -260,17 +150,15 @@ return (
               <p>₦{m.stake}</p>
               <p>{m.status}</p>
 
-              {turnLabel && (
-                <p style={{ color, fontWeight: "bold" }}>
-                  {turnLabel}
-                </p>
-              )}
+              <p style={{ color: isYourTurn ? "lime" : "red" }}>
+                {isYourTurn ? "🟢 Your Turn" : "🔴 Opponent Turn"}
+              </p>
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
               {opponent && (
                 <button
-                  style={styles.chatBtn}
+                  style={styles.zangiBtn}
                   onClick={() => openZangi(opponent)}
                 >
                   💬 Chat
@@ -290,7 +178,7 @@ return (
         );
       })}
 
-      <h2>Available</h2>
+      <h2>🎯 Available</h2>
 
       {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
@@ -299,7 +187,6 @@ return (
           <button
             onClick={() => joinMatch(m)}
             style={styles.joinBtn}
-            disabled={loadingJoin === m.$id}
           >
             Join
           </button>
@@ -308,12 +195,12 @@ return (
 
       <input
         type="number"
+        placeholder="Stake ₦"
         value={stake}
         onChange={(e) => setStake(e.target.value)}
-        placeholder="Stake ₦"
       />
 
-      {/* 🔴 CREATE BUTTON FIXED */}
+      {/* 🔴 RED CREATE BUTTON */}
       <button onClick={createMatch} style={styles.createBtn}>
         {creating ? "Creating..." : "Create Match"}
       </button>
@@ -333,6 +220,7 @@ const styles = {
     color: "#fff",
     minHeight: "100vh"
   },
+
   card: {
     background: "#111827",
     padding: 12,
@@ -341,33 +229,37 @@ const styles = {
     justifyContent: "space-between",
     borderRadius: 12
   },
+
   joinBtn: {
     background: "gold",
     padding: "10px 18px",
     borderRadius: 10,
-    border: "none",
-    fontWeight: "bold"
+    border: "none"
   },
+
   resumeBtn: {
     background: "#16a34a",
-    color: "#fff",
-    padding: "10px 16px",
+    padding: "10px 18px",
     borderRadius: 10,
+    color: "#fff",
     border: "none"
   },
-  chatBtn: {
+
+  zangiBtn: {
     background: "#0ea5e9",
-    color: "#fff",
     padding: "10px 14px",
     borderRadius: 10,
+    color: "#fff",
     border: "none"
   },
+
+  // 🔴 RED CREATE BUTTON
   createBtn: {
     background: "red",
-    color: "#fff",
     padding: "12px 18px",
     borderRadius: 10,
     border: "none",
+    color: "#fff",
     fontWeight: "bold",
     marginTop: 10
   }
