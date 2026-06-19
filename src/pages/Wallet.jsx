@@ -3,7 +3,7 @@
 // =========================
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { account, databases, DATABASE_ID } from "../lib/appwrite";
+import { account, databases, DATABASE_ID, WALLET_COLLECTION } from "../lib/appwrite";
 import { getWallet } from "../lib/wallet";
 import { ID, Query } from "appwrite";
 
@@ -18,17 +18,20 @@ export default function Wallet() {
   const [wallet, setWallet] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // 💬 ZANGI CONTACT STATE
+  const [zangiContact, setZangiContact] = useState("");
+
   const [promoStats, setPromoStats] = useState({
     code: null,
     usedCount: 0
   });
 
-  // Deposit states
+  // Deposit
   const [showDeposit, setShowDeposit] = useState(false);
   const [amount, setAmount] = useState("");
   const [name, setName] = useState("");
 
-  // Withdraw states
+  // Withdraw
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [bank, setBank] = useState("");
@@ -37,6 +40,9 @@ export default function Wallet() {
 
   const [processing, setProcessing] = useState(false);
 
+  // =========================
+  // LOAD WALLET
+  // =========================
   useEffect(() => {
     load();
   }, []);
@@ -47,6 +53,9 @@ export default function Wallet() {
 
       const w = await getWallet(user.$id);
       setWallet(w);
+
+      // 💬 load zangi contact from wallet
+      setZangiContact(w?.zangiContact || "");
 
       const res = await databases.listDocuments(
         DATABASE_ID,
@@ -69,6 +78,37 @@ export default function Wallet() {
     }
   }
 
+  // =========================
+  // SAVE ZANGI CONTACT
+  // =========================
+  async function saveZangi() {
+    if (processing) return;
+    if (!wallet) return;
+
+    setProcessing(true);
+
+    try {
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          zangiContact: zangiContact
+        }
+      );
+
+      alert("Zangi contact saved ✅");
+
+    } catch (err) {
+      alert(err.message);
+    }
+
+    setProcessing(false);
+  }
+
+  // =========================
+  // PROMO CODE
+  // =========================
   function generatePromoCode(name) {
     const safe = name || "USER";
     const clean = safe.replace(/\s+/g, "").toUpperCase().slice(0, 5);
@@ -103,7 +143,6 @@ export default function Wallet() {
       );
 
       setPromoStats({ code, usedCount: 0 });
-
       alert("Promo code created ✅");
 
     } catch (err) {
@@ -177,14 +216,8 @@ export default function Wallet() {
     }
 
     if (!bank) return alert("Enter bank name");
-
-    if (!accountNumber || accountNumber.length < 10) {
-      return alert("Enter valid account number");
-    }
-
-    if (!accountName) {
-      return alert("Enter account name");
-    }
+    if (!accountNumber || accountNumber.length < 10) return alert("Enter valid account number");
+    if (!accountName) return alert("Enter account name");
 
     setProcessing(true);
 
@@ -221,6 +254,9 @@ export default function Wallet() {
     setProcessing(false);
   }
 
+  // =========================
+  // LOADING
+  // =========================
   if (loading) {
     return (
       <div style={styles.container}>
@@ -229,6 +265,9 @@ export default function Wallet() {
     );
   }
 
+  // =========================
+  // UI
+  // =========================
   return (
     <div style={styles.container}>
 
@@ -250,11 +289,30 @@ export default function Wallet() {
         </div>
       </div>
 
-      {promoStats.code && (
-        <p style={styles.usedText}>
-          👥 {promoStats.usedCount} users joined
-        </p>
-      )}
+      {/* 💬 ZANGI SECTION */}
+      <div style={styles.card}>
+        <h3>💬 Zangi Contact</h3>
+
+        <input
+          style={styles.input}
+          placeholder="Enter Zangi number"
+          value={zangiContact}
+          onChange={(e) => setZangiContact(e.target.value)}
+        />
+
+        <button style={styles.btn} onClick={saveZangi}>
+          💾 Save Contact
+        </button>
+
+        <a
+          href="https://zangi.com/"
+          target="_blank"
+          rel="noreferrer"
+          style={styles.link}
+        >
+          📥 Download Zangi App
+        </a>
+      </div>
 
       {/* WALLET */}
       <div style={styles.card}>
@@ -271,116 +329,11 @@ export default function Wallet() {
         ➖ Withdraw
       </button>
 
-      {/* ================= DEPOSIT MODAL ================= */}
-      {showDeposit && (
-        <div style={styles.modal}>
-          <h3>Deposit</h3>
-
-          <input
-            placeholder="Min ₦200"
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Full Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={styles.input}
-          />
-
-          <button style={styles.btn} onClick={makeDeposit}>
-            Make Payment
-          </button>
-
-          <button style={styles.cancel} onClick={() => setShowDeposit(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
-
-      {/* ================= WITHDRAW MODAL ================= */}
-      {showWithdraw && (
-        <div style={styles.modal}>
-          <h3>Withdraw</h3>
-
-          <input
-            placeholder="Min ₦1500"
-            type="number"
-            value={withdrawAmount}
-            onChange={(e) => setWithdrawAmount(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Bank Name"
-            value={bank}
-            onChange={(e) => setBank(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Account Number"
-            value={accountNumber}
-            onChange={(e) => setAccountNumber(e.target.value)}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Account Name"
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-            style={styles.input}
-          />
-
-          <button style={styles.btn} onClick={requestWithdraw}>
-            Submit Request
-          </button>
-
-          <button style={styles.cancel} onClick={() => setShowWithdraw(false)}>
-            Cancel
-          </button>
-        </div>
-      )}
-
       {/* BACK */}
       <button style={styles.back} onClick={() => navigate("/dashboard")}>
         ⬅ Back
       </button>
 
-      {/* INVITE TEXT */}
-      {promoStats.code && (
-        <div style={styles.inviteBox}>
-          <p style={styles.inviteText}>
-            Join Win9ja and earn rewards 🎮{"\n"}
-            Use my promo code: {promoStats.code}{"\n"}
-            https://win9jalife.vercel.app
-          </p>
-
-          <button
-            style={styles.copyInviteBtn}
-            onClick={() => {
-              const text = `Join Win9ja and earn rewards 🎮\nUse my promo code: ${promoStats.code}\nhttps://win9jalife.vercel.app`;
-              navigator.clipboard.writeText(text);
-              alert("Invite text copied ✅");
-            }}
-          >
-            📋 Copy Invite
-          </button>
-        </div>
-      )}
-
-      {/* WHATSAPP GROUP */}
-      <a
-        href="https://chat.whatsapp.com/JX0vmuEcEUvLeYCXVIBn1L"
-        target="_blank"
-        rel="noreferrer"
-        style={styles.whatsapp}
-      >
-        💬 Join WhatsApp Updates Group
-      </a>
     </div>
   );
 }
@@ -391,7 +344,6 @@ export default function Wallet() {
 const styles = {
   container: {
     padding: 20,
-    paddingBottom: 80,
     background: "#0f172a",
     color: "white",
     minHeight: "100vh"
@@ -422,15 +374,18 @@ const styles = {
     borderRadius: 6,
     padding: "6px 10px"
   },
-  usedText: {
-    fontSize: 12,
-    color: "#9ca3af"
-  },
   card: {
     padding: 20,
     background: "#111827",
     borderRadius: 10,
     marginTop: 20
+  },
+  input: {
+    width: "100%",
+    padding: 10,
+    borderRadius: 6,
+    border: "none",
+    marginTop: 10
   },
   btn: {
     width: "100%",
@@ -440,65 +395,14 @@ const styles = {
     border: "none",
     borderRadius: 8
   },
-  modal: {
-    position: "fixed",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: "#111827",
-    padding: 20,
-    borderRadius: 10,
-    width: "85%",
-    maxWidth: 320,
-    display: "flex",
-    flexDirection: "column",
-    gap: 10
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    borderRadius: 6,
-    border: "none"
-  },
-  cancel: {
-    padding: 10,
-    background: "#ef4444",
-    border: "none",
-    borderRadius: 6,
-    color: "#fff"
-  },
   back: {
     marginTop: 20,
     padding: 10
   },
-  inviteBox: {
-    marginTop: 20,
-    background: "#111827",
-    padding: 12,
-    borderRadius: 8
-  },
-  inviteText: {
-    fontSize: 13,
-    color: "#e5e7eb",
-    whiteSpace: "pre-line",
-    marginBottom: 10
-  },
-  copyInviteBtn: {
-    width: "100%",
-    padding: 10,
-    background: "#22c55e",
-    border: "none",
-    borderRadius: 6,
-    color: "#fff",
-    fontWeight: "bold"
-  },
-  whatsapp: {
-    position: "fixed",
-    bottom: 0,
-    width: "100%",
-    padding: 14,
-    background: "#128C7E",
-    textAlign: "center",
-    color: "#fff"
+  link: {
+    display: "block",
+    marginTop: 10,
+    color: "#38bdf8",
+    textDecoration: "none"
   }
 };
