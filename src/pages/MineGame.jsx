@@ -8,6 +8,9 @@ import {
   ID
 } from "../lib/appwrite";
 
+// 🔥 ADMIN WALLET ID (RESTORED)
+const ADMIN_WALLET_ID = "69f2482600125d496354";
+
 // ================= ORIGINAL LOGIC (UNCHANGED) =================
 const SIZE = 5;
 
@@ -37,7 +40,7 @@ export default function MineGame() {
   const [wallet, setWallet] = useState(null);
   const [activeGameId, setActiveGameId] = useState(null);
 
-  // 🎬 INTRO COUNTDOWN STATE
+  // 🎬 INTRO COUNTDOWN
   const [countdown, setCountdown] = useState(5);
   const [inIntro, setInIntro] = useState(true);
 
@@ -83,7 +86,7 @@ export default function MineGame() {
     }
   }
 
-  // ================= COUNTDOWN START =================
+  // ================= COUNTDOWN =================
   useEffect(() => {
     if (!wallet) return;
 
@@ -101,11 +104,12 @@ export default function MineGame() {
     }
   }, [countdown, inIntro, wallet]);
 
-  // ================= AUTO START GAME =================
+  // ================= START GAME =================
   const startGame = async () => {
     try {
       let gameId = activeGameId || wallet.activeGameId;
 
+      // create game if none exists
       if (!gameId) {
         gameId = ID.unique();
 
@@ -163,6 +167,7 @@ export default function MineGame() {
         fontSize: 30,
         fontWeight: "bold"
       }}>
+
         💣 Mines Game
 
         <div style={{
@@ -176,6 +181,7 @@ export default function MineGame() {
         <p style={{ fontSize: 14, opacity: 0.7 }}>
           Entering game room...
         </p>
+
       </div>
     );
   }
