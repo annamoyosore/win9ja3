@@ -12,18 +12,19 @@ import {
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
-const ZANGI_BASE = "https://services.zangi.com/dl/conversation/";
-
 // =========================
-// SOUND
+// 🎵 WIN9JA TURN SOUND
 // =========================
 function playTurnSound() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx =
+      new (window.AudioContext || window.webkitAudioContext)();
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
     osc.type = "triangle";
+
     osc.frequency.setValueAtTime(740, ctx.currentTime);
     osc.frequency.setValueAtTime(980, ctx.currentTime + 0.15);
     osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
@@ -35,14 +36,17 @@ function playTurnSound() {
 
     osc.start();
     osc.stop(ctx.currentTime + 0.45);
-  } catch {}
+
+  } catch (err) {
+    console.log("Sound failed");
+  }
 }
 
 // =========================
 // CREATE GAME
 // =========================
 async function createGame(match, opponentId) {
-  return databases.createDocument(
+  return await databases.createDocument(
     DATABASE_ID,
     GAME_COLLECTION,
     ID.unique(),
@@ -61,67 +65,190 @@ export default function Lobby({ goGame, back }) {
   const [activeMatches, setActiveMatches] = useState([]);
   const [gameMap, setGameMap] = useState({});
   const [stake, setStake] = useState("");
-
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
 
-  // 🔔 turn tracker
+  // 🔔 TURN ALERT TRACKER
   const notifiedTurns = useRef({});
-
-  // 🟢 NEW: opponent zangi map
-  const [zangiMap, setZangiMap] = useState({});
 
   useEffect(() => {
     init();
   }, []);
 
   async function init() {
-    try {
-      const u = await account.get();
-      setUser(u);
+    const u = await account.get();
 
-      if ("Notification" in window) {
-        Notification.requestPermission();
-      }
-
-      const w = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id), Query.limit(1)]
-      );
-
-      if (w.documents.length) setWallet(w.documents[0]);
-
-      await refresh(u.$id);
-    } catch (e) {
-      console.log("Init failed", e);
+    // 🔔 notification permission
+    if ("Notification" in window) {
+      Notification.requestPermission();
     }
+
+    setUser(u);
+
+    const w = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [Query.equal("userId", u.$id), Query.limit(1)]
+    );
+
+    if (w.documents.length) setWallet(w.documents[0]);
+
+    await autoRefundExpiredMatches(u.$id);
+    refresh(u.$id);
   }
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsub = databases.client.subscribe(
+      `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
+      () => refresh(user.$id)
+    );
+
+    return () => unsub();
+  }, [user]);
+
+  // =========================
+  // 🔔 TURN ALERT
+  // =========================
+  useEffect(() => {
+    if (!user) return;
+
+    activeMatches.forEach((m) => {
+      const game = gameMap[m.gameId];
+
+      if (!game) return;
+
+      if (game.status === "finished") return;
+
+      // 🎯 user's turn
+      if (game.turn === user.$id) {
+
+        // prevent repeat spam
+        if (notifiedTurns.current[m.gameId]) return;
+
+        notifiedTurns.current[m.gameId] = true;
+
+        // 🔊 sound
+        playTurnSound();
+
+        // 📳 vibrate
+        if (navigator.vibrate) {
+          navigator.vibrate([300, 120, 300]);
+        }
+
+        // 🔔 notification
+        if (
+          document.hidden &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
+          new Notification("🎮 Win9ja", {
+            body: "It's your turn to play!",
+            icon: "/icon192.png"
+          });
+        }
+
+      } else {
+        notifiedTurns.current[m.gameId] = false;
+      }
+    });
+
+  }, [activeMatches, gameMap, user]);
 
   async function refresh(userId) {
     await Promise.all([
       loadMatches(userId),
-      loadActiveMatches(userId),
-      loadOpponentZangi(userId)
+      loadActiveMatches(userId)
     ]);
   }
-async function loadMatches(userId) {
+
+  // =========================
+  // AUTO REFUND (78 HOURS)
+  // =========================
+  async function autoRefundExpiredMatches(userId) {
+    try {
+      const res = await databases.listDocuments(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        [
+          Query.equal("hostId", userId),
+          Query.equal("status", "waiting"),
+          Query.equal("refundDone", false),
+          Query.limit(100)
+        ]
+      );
+
+      const now = Date.now();
+
+      for (const m of res.documents) {
+        if (m.opponentId) continue;
+
+        const created = new Date(m.$createdAt).getTime();
+        const diff = (now - created) / (1000 * 60 * 60);
+
+        if (diff < 78) continue;
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          MATCH_COLLECTION,
+          m.$id,
+          {
+            status: "expired",
+            refundDone: true
+          }
+        );
+
+        const walletRes = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [Query.equal("userId", m.hostId), Query.limit(1)]
+        );
+
+        if (!walletRes.documents.length) continue;
+
+        const w = walletRes.documents[0];
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          w.$id,
+          {
+            balance: Number(w.balance || 0) + Number(m.stake || 0)
+          }
+        );
+      }
+    } catch (err) {
+      console.error("Refund error:", err);
+    }
+  }
+
+  // =========================
+  // AVAILABLE MATCHES
+  // =========================
+  async function loadMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       MATCH_COLLECTION,
       [Query.limit(100)]
     );
 
-    setMatches(
-      res.documents.filter(
-        (m) => m.status === "waiting" && !m.opponentId && m.hostId !== userId
-      )
+    const available = res.documents.filter(
+      (m) =>
+        m.status === "waiting" &&
+        !m.opponentId &&
+        m.hostId !== userId
     );
+
+    setMatches(available);
   }
 
+  // =========================
+  // ACTIVE MATCHES
+  // =========================
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -130,7 +257,8 @@ async function loadMatches(userId) {
     );
 
     const mine = res.documents.filter(
-      (m) => m.hostId === userId || m.opponentId === userId
+      (m) =>
+        (m.hostId === userId || m.opponentId === userId)
     );
 
     setActiveMatches(mine);
@@ -156,142 +284,233 @@ async function loadMatches(userId) {
   }
 
   // =========================
-  // NEW: load opponent zangi only
+  // LIMIT CHECK
   // =========================
-  async function loadOpponentZangi(userId) {
+  function canPlayMore() {
+    const running = activeMatches.filter(
+      (m) => m.status !== "finished"
+    );
+    return running.length < 7;
+  }
+
+  // =========================
+  // JOIN MATCH
+  // =========================
+  async function joinMatch(match) {
+    if (loadingJoin) return;
+
+    if (!canPlayMore()) {
+      return alert("Max 7 running matches reached");
+    }
+
+    setLoadingJoin(match.$id);
+
     try {
-      const res = await databases.listDocuments(
+      const fresh = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
-        [Query.limit(100)]
+        match.$id
       );
 
-      const opponentIds = [];
+      if (fresh.status !== "waiting" || fresh.opponentId) {
+        throw new Error("Already taken");
+      }
 
-      res.documents.forEach((m) => {
-        if (m.hostId === userId && m.opponentId) {
-          opponentIds.push(m.opponentId);
-        }
-        if (m.opponentId === userId) {
-          opponentIds.push(m.hostId);
-        }
-      });
+      if ((wallet?.balance || 0) < fresh.stake) {
+        throw new Error("Insufficient balance");
+      }
 
-      if (!opponentIds.length) return;
-
-      const wallets = await databases.listDocuments(
+      await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
-        [Query.limit(100)]
+        wallet.$id,
+        {
+          balance: wallet.balance - fresh.stake
+        }
       );
 
-      const map = {};
+      const total = fresh.pot + fresh.stake;
+      const adminCut = Math.floor(total * 0.1);
+      const finalPot = total - adminCut;
 
-      wallets.documents.forEach((w) => {
-        if (opponentIds.includes(w.userId)) {
-          map[w.userId] = w.zangiContact || "";
+      const adminRes = await databases.listDocuments(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        [Query.equal("userId", ADMIN_ID), Query.limit(1)]
+      );
+
+      if (adminRes.documents.length) {
+        const adminWallet = adminRes.documents[0];
+
+        await databases.updateDocument(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          adminWallet.$id,
+          {
+            balance: Number(adminWallet.balance || 0) + adminCut
+          }
+        );
+      }
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        fresh.$id,
+        {
+          opponentId: user.$id,
+          status: "matched",
+          pot: finalPot
         }
-      });
+      );
 
-      setZangiMap(map);
+      const game = await createGame(fresh, user.$id);
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        fresh.$id,
+        { gameId: game.$id }
+      );
+
+      goGame(game.$id, fresh.stake);
+
     } catch (err) {
-      console.log("Zangi load failed", err);
+      alert(err.message);
     }
+
+    setLoadingJoin(null);
   }
 
   // =========================
-  // CHAT ZANGI
+  // CREATE MATCH
   // =========================
-  function openZangi(opponentId) {
-    const contact = zangiMap[opponentId];
+  async function createMatch() {
+    if (creating) return;
 
-    if (!contact) return;
+    if (!canPlayMore()) {
+      return alert("Max 7 running matches");
+    }
 
-    const msg = encodeURIComponent(
-      "Hey! Let’s chat securely on Zangi and complete our game."
-    );
+    const amount = Number(stake);
 
-    window.open(`${ZANGI_BASE}${contact}?text=${msg}`, "_blank");
+    if (!amount || amount < 50) {
+      return alert("Minimum ₦50");
+    }
+
+    if ((wallet?.balance || 0) < amount) {
+      return alert("Insufficient balance");
+    }
+
+    setCreating(true);
+
+    try {
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        wallet.$id,
+        {
+          balance: wallet.balance - amount
+        }
+      );
+
+      await databases.createDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        ID.unique(),
+        {
+          hostId: user.$id,
+          opponentId: null,
+          stake: amount,
+          pot: amount,
+          status: "waiting",
+          refundDone: false
+        }
+      );
+
+      setStake("");
+
+    } catch (err) {
+      alert(err.message);
+    }
+
+    setCreating(false);
   }
-return (
+
+  // =========================
+  // UI
+  // =========================
+  return (
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
 
+      <p>
+        Running Matches: {
+          activeMatches.filter(m => m.status !== "finished").length
+        } / 7
+      </p>
+
       <h2>🔥 Your Matches</h2>
 
-      {activeMatches.map((m) => {
+      {activeMatches.map(m => {
         const game = gameMap[m.gameId];
 
-        const opponentId =
-          m.hostId === user?.$id ? m.opponentId : m.hostId;
+        let turnLabel = "";
 
-        const canChat = !!zangiMap[opponentId];
+        if (game && game.status !== "finished") {
+          turnLabel =
+            game.turn === user.$id
+              ? "🟢 Your Turn"
+              : "🔴 Opponent Turn";
+        }
 
         return (
           <div key={m.$id} style={styles.card}>
             <div>
               <p>₦{m.stake}</p>
               <p>{m.status}</p>
-
-              {game && (
-                <p>
-                  {game.turn === user?.$id
-                    ? "🟢 Your Turn"
-                    : "🔴 Opponent Turn"}
-                </p>
-              )}
+              {turnLabel && <p>{turnLabel}</p>}
             </div>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              {canChat && (
-                <button
-                  style={styles.chatBtn}
-                  onClick={() => openZangi(opponentId)}
-                >
-                  💬 Chat
-                </button>
-              )}
-
-              {m.gameId && (
-                <button
-                  style={styles.resumeBtn}
-                  onClick={() => goGame(m.gameId, m.stake)}
-                >
-                  ▶ Play
-                </button>
-              )}
-            </div>
+            {m.status === "finished" ? (
+              <button style={styles.finishedBtn} disabled>
+                ✅ Finished
+              </button>
+            ) : m.gameId ? (
+              <button
+                style={styles.resumeBtn}
+                onClick={() => goGame(m.gameId, m.stake)}
+              >
+                ▶ Resume
+              </button>
+            ) : null}
           </div>
         );
       })}
 
       <h2>🎯 Available</h2>
 
-      {matches.map((m) => (
+      {matches.map(m => (
         <div key={m.$id} style={styles.card}>
           <span>₦{m.stake}</span>
 
           <button
             onClick={() => joinMatch(m)}
+            disabled={loadingJoin === m.$id}
             style={styles.joinBtn}
           >
-            Join
+            {loadingJoin === m.$id ? "Joining..." : "Join"}
           </button>
         </div>
       ))}
 
       <input
-        value={stake}
-        onChange={(e) => setStake(e.target.value)}
+        type="number"
         placeholder="Stake ₦"
+        value={stake}
+        onChange={e => setStake(e.target.value)}
       />
 
-      {/* 🔴 CREATE BUTTON (RED AS REQUESTED) */}
-      <button
-        onClick={createMatch}
-        disabled={creating}
-        style={styles.createBtn}
-      >
+      <button onClick={createMatch} disabled={creating}>
         {creating ? "Creating..." : "Create Match"}
       </button>
 
@@ -323,36 +542,31 @@ const styles = {
 
   joinBtn: {
     background: "gold",
-    padding: "10px 16px",
+    padding: "10px 18px",
     borderRadius: 10,
     border: "none",
-    fontWeight: "bold"
+    fontWeight: "bold",
+    cursor: "pointer"
   },
 
+  // ✅ updated rectangle shape
   resumeBtn: {
     background: "#16a34a",
-    padding: "10px 16px",
-    borderRadius: 10,
-    border: "none",
-    color: "#fff"
-  },
-
-  chatBtn: {
-    background: "#2563eb",
-    padding: "10px 14px",
-    borderRadius: 10,
-    border: "none",
-    color: "#fff"
-  },
-
-  // 🔴 requested red create button
-  createBtn: {
-    background: "#dc2626",
-    padding: "12px 18px",
+    padding: "10px 20px",
     borderRadius: 12,
-    border: "none",
     color: "#fff",
+    border: "none",
     fontWeight: "bold",
-    marginTop: 10
+    cursor: "pointer",
+    minWidth: 110
+  },
+
+  finishedBtn: {
+    background: "#16a34a",
+    padding: "10px 18px",
+    borderRadius: 10,
+    color: "#fff",
+    border: "none",
+    fontWeight: "bold"
   }
 };
