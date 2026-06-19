@@ -12,9 +12,11 @@ import {
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
-// =========================
-// SOUND
-// =========================
+/* =========================
+   UTILITIES
+========================= */
+
+// 🎵 Turn sound
 function playTurnSound() {
   try {
     const ctx =
@@ -36,14 +38,10 @@ function playTurnSound() {
 
     osc.start();
     osc.stop(ctx.currentTime + 0.45);
-  } catch (err) {
-    console.log("Sound failed");
-  }
+  } catch (err) {}
 }
 
-// =========================
-// GAME CREATION
-// =========================
+// 🎮 Game creator
 async function createGame(match, opponentId) {
   return await databases.createDocument(
     DATABASE_ID,
@@ -59,13 +57,16 @@ async function createGame(match, opponentId) {
   );
 }
 
-// =========================
-// ZANGI URL BUILDER
-// =========================
+// 💬 Zangi link builder
 function buildZangiUrl(id) {
   if (!id) return "";
   return `https://services.zangi.com/dl/conversation/${id}`;
 }
+
+/* =========================
+   LOBBY COMPONENT
+========================= */
+
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
@@ -78,6 +79,10 @@ export default function Lobby({ goGame, back }) {
   const [creating, setCreating] = useState(false);
 
   const notifiedTurns = useRef({});
+
+  /* =========================
+     INIT
+  ========================= */
 
   useEffect(() => {
     init();
@@ -122,12 +127,14 @@ export default function Lobby({ goGame, back }) {
     ]);
   }
 
-  // =========================
-  // CORE FUNCTIONS (RESTORED)
-  // =========================
+  /* =========================
+     CORE MATCH LOGIC
+  ========================= */
+
   function canPlayMore() {
-    const running = activeMatches.filter(m => m.status !== "finished");
-    return running.length < 7;
+    return (
+      activeMatches.filter(m => m.status !== "finished").length < 7
+    );
   }
 
   async function loadMatches(userId) {
@@ -139,7 +146,10 @@ export default function Lobby({ goGame, back }) {
 
     setMatches(
       res.documents.filter(
-        m => m.status === "waiting" && !m.opponentId && m.hostId !== userId
+        m =>
+          m.status === "waiting" &&
+          !m.opponentId &&
+          m.hostId !== userId
       )
     );
   }
@@ -228,21 +238,22 @@ export default function Lobby({ goGame, back }) {
           }
         );
       }
-    } catch (err) {
-      console.error("Refund error:", err);
-    }
+    } catch {}
   }
 
-  // =========================
-  // CREATE MATCH
-  // =========================
+  /* =========================
+     CREATE MATCH
+  ========================= */
+
   async function createMatch() {
     if (creating) return;
     if (!canPlayMore()) return alert("Max 7 running matches");
 
     const amount = Number(stake);
+
     if (!amount || amount < 50) return alert("Minimum ₦50");
-    if ((wallet?.balance || 0) < amount) return alert("Insufficient balance");
+    if ((wallet?.balance || 0) < amount)
+      return alert("Insufficient balance");
 
     setCreating(true);
 
@@ -279,9 +290,10 @@ export default function Lobby({ goGame, back }) {
     setCreating(false);
   }
 
-  // =========================
-  // JOIN MATCH
-  // =========================
+  /* =========================
+     JOIN MATCH
+  ========================= */
+
   async function joinMatch(match) {
     if (loadingJoin) return;
     if (!canPlayMore()) return alert("Max 7 running matches reached");
@@ -295,13 +307,11 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      if (fresh.status !== "waiting" || fresh.opponentId) {
+      if (fresh.status !== "waiting" || fresh.opponentId)
         throw new Error("Already taken");
-      }
 
-      if ((wallet?.balance || 0) < fresh.stake) {
+      if ((wallet?.balance || 0) < fresh.stake)
         throw new Error("Insufficient balance");
-      }
 
       await databases.updateDocument(
         DATABASE_ID,
@@ -364,9 +374,10 @@ export default function Lobby({ goGame, back }) {
     setLoadingJoin(null);
   }
 
-  // =========================
-  // UI
-  // =========================
+  /* =========================
+     UI
+  ========================= */
+
   return (
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
@@ -381,22 +392,18 @@ export default function Lobby({ goGame, back }) {
       {activeMatches.map(m => {
         const game = gameMap[m.gameId];
 
-        let turnLabel = "";
-
-        if (game && game.status !== "finished") {
-          turnLabel =
-            game.turn === user.$id
+        const turnLabel =
+          game && game.status !== "finished"
+            ? game.turn === user.$id
               ? "🟢 Your Turn"
-              : "🔴 Opponent Turn";
-        }
+              : "🔴 Opponent Turn"
+            : "";
 
         const isHost = m.hostId === user.$id;
 
-        const zangiId = isHost
-          ? m.opponentZangiContact
-          : m.hostZangiContact;
-
-        const zangiUrl = buildZangiUrl(zangiId);
+        const zangiUrl = buildZangiUrl(
+          isHost ? m.opponentZangiContact : m.hostZangiContact
+        );
 
         return (
           <div key={m.$id} style={styles.card}>
@@ -471,6 +478,11 @@ export default function Lobby({ goGame, back }) {
     </div>
   );
 }
+
+/* =========================
+   STYLES
+========================= */
+
 const styles = {
   container: {
     padding: 20,
