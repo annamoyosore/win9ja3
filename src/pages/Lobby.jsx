@@ -254,7 +254,7 @@ export default function Lobby({ goGame, back }) {
     }
 
     navigator.clipboard.writeText(zangi);
-    alert("Copied ✔ Opening chat...");
+    alert("Opponent zangi ID Copied ✔ Opening chat...");
 
     window.location.href =
       `zangi://chat?number=${encodeURIComponent(zangi)}`;
@@ -362,7 +362,7 @@ export default function Lobby({ goGame, back }) {
               style={{ ...styles.btn, ...styles.chatBtn }}
               onClick={() => openZangi(m)}
             >
-              💬 Chat Opponent
+              💬 Chat/call Opponent on Zangi Messenger
             </button>
 
             {m.gameId && (
