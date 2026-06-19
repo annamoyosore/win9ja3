@@ -37,12 +37,16 @@ export default function MineGame() {
   const [wallet, setWallet] = useState(null);
   const [activeGameId, setActiveGameId] = useState(null);
 
-  const [showIntro, setShowIntro] = useState(false);
+  // 🎬 INTRO COUNTDOWN STATE
+  const [countdown, setCountdown] = useState(5);
+  const [inIntro, setInIntro] = useState(true);
 
   const [difficulty] = useState(1);
-  const [stake, setStake] = useState("");
+  const minesCount = mineMap[difficulty];
 
+  const [stake, setStake] = useState("");
   const [board, setBoard] = useState([]);
+
   const [gameStarted, setGameStarted] = useState(false);
 
   const [gameOver, setGameOver] = useState(false);
@@ -51,10 +55,6 @@ export default function MineGame() {
   const [step, setStep] = useState(0);
   const [multi, setMulti] = useState(1);
   const [cashout, setCashout] = useState(0);
-
-  const [starting, setStarting] = useState(false);
-
-  const minesCount = mineMap[difficulty];
 
   // ================= LOAD WALLET =================
   useEffect(() => {
@@ -76,32 +76,36 @@ export default function MineGame() {
       const w = res.documents[0];
 
       setWallet(w);
-
-      // 🔥 AUTO FLOW FIX
-      if (w.activeGameId) {
-        setActiveGameId(w.activeGameId);
-        resumeGame(w.activeGameId);
-        setShowIntro(false);
-      } else {
-        setShowIntro(true);
-      }
+      setActiveGameId(w.activeGameId || null);
 
     } catch (err) {
-      console.error("Wallet load error:", err);
+      console.error(err);
     }
   }
 
-  // ================= START GAME (AUTO FIXED FLOW) =================
-  const startNewGame = async () => {
-    if (starting) return;
+  // ================= COUNTDOWN START =================
+  useEffect(() => {
     if (!wallet) return;
 
-    setStarting(true);
+    if (inIntro) {
+      if (countdown <= 0) {
+        startGame();
+        return;
+      }
 
+      const timer = setTimeout(() => {
+        setCountdown((prev) => prev - 1);
+      }, 1000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [countdown, inIntro, wallet]);
+
+  // ================= AUTO START GAME =================
+  const startGame = async () => {
     try {
       let gameId = activeGameId || wallet.activeGameId;
 
-      // 🔥 CREATE GAME IF NONE EXISTS
       if (!gameId) {
         gameId = ID.unique();
 
@@ -117,24 +121,15 @@ export default function MineGame() {
 
       setActiveGameId(gameId);
 
-      // 🎮 OPEN GAME IMMEDIATELY
       setBoard(createBoard(minesCount));
       resetStates();
 
       setGameStarted(true);
-      setShowIntro(false);
+      setInIntro(false);
 
     } catch (err) {
-      console.error("Start game error:", err);
-    } finally {
-      setStarting(false);
+      console.error("Start error:", err);
     }
-  };
-
-  const resumeGame = async (gameId) => {
-    setBoard(createBoard(minesCount)); // placeholder (later DB restore upgrade)
-    setGameStarted(true);
-    resetStates();
   };
 
   const resetStates = () => {
@@ -145,92 +140,77 @@ export default function MineGame() {
     setCashout(0);
   };
 
-  // ================= LOADING GUARD =================
+  // ================= LOADING =================
   if (!wallet) {
     return (
-      <div style={{
-        color: "white",
-        textAlign: "center",
-        marginTop: 100
-      }}>
+      <div style={{ color: "white", textAlign: "center", marginTop: 100 }}>
         Loading wallet...
       </div>
     );
   }
 
   // ================= INTRO SCREEN =================
-  if (showIntro) {
+  if (inIntro) {
     return (
       <div style={{
         height: "100vh",
-        background: "black",
+        background: "#000",
         color: "white",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
         alignItems: "center",
-        textAlign: "center",
-        position: "relative"
+        fontSize: 30,
+        fontWeight: "bold"
       }}>
+        💣 Mines Game
 
-        <canvas
-          style={{
-            position: "absolute",
-            width: "100%",
-            height: "100%",
-            top: 0,
-            left: 0,
-            pointerEvents: "none" // 🔥 FIX: allows button click
-          }}
-        />
+        <div style={{
+          marginTop: 20,
+          fontSize: 60,
+          color: "gold"
+        }}>
+          {countdown}
+        </div>
 
-        <h1>💣 Mines Game</h1>
-
-        <p>✔ Pick safe tiles</p>
-        <p>✔ Avoid bombs</p>
-        <p>✔ Cash out anytime</p>
-        <p>✔ Higher risk = higher reward</p>
-
-        <button
-          onClick={startNewGame}
-          disabled={starting}
-          style={{
-            position: "relative",
-            zIndex: 10,
-            padding: "12px 25px",
-            marginTop: 20,
-            background: starting ? "#555" : "gold",
-            border: "none",
-            cursor: "pointer",
-            fontWeight: "bold"
-          }}
-        >
-          {starting ? "STARTING..." : "START GAME"}
-        </button>
+        <p style={{ fontSize: 14, opacity: 0.7 }}>
+          Entering game room...
+        </p>
       </div>
     );
   }
 
-  // ================= GAME UI =================
+  // ================= GAME BOARD =================
   return (
     <div style={{ textAlign: "center", padding: 20 }}>
 
-      <h2>💣 Mines Game</h2>
+      {/* 💰 WALLET DISPLAY */}
+      <div style={{
+        background: "#111",
+        color: "gold",
+        padding: 10,
+        borderRadius: 10,
+        marginBottom: 10,
+        fontWeight: "bold"
+      }}>
+        💰 Balance: ₦{wallet?.balance || 0}
+      </div>
 
-      <h3>Balance: ₦{wallet?.balance || 0}</h3>
+      <h2>💣 Mines Game</h2>
 
       <input
         type="number"
         value={stake}
-        disabled={gameStarted}
         onChange={(e) => setStake(e.target.value)}
+        placeholder="Enter stake"
       />
 
-      <div>
+      <div style={{ margin: "10px 0" }}>
         Multiplier: {multi.toFixed(2)}x <br />
         Cashout: ₦{cashout.toFixed(2)}
       </div>
 
+      {/* BOARD */}
       <div style={{
         display: "grid",
         gridTemplateColumns: `repeat(${SIZE}, 50px)`,
@@ -241,7 +221,10 @@ export default function MineGame() {
           <div key={i} style={{
             width: 50,
             height: 50,
-            background: c.revealed ? (c.isMine ? "red" : "#333") : "#666"
+            background: c.revealed ? (c.isMine ? "red" : "#333") : "#666",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
           }}>
             {c.revealed ? (c.isMine ? "💣" : "💎") : "?"}
           </div>
