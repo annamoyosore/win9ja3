@@ -13,16 +13,28 @@ const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
-// ZANGI CHAT HELPER
+// 🎵 TURN SOUND (UNCHANGED)
 // =========================
-function openZangi(contact) {
-  if (!contact) {
-    alert("This user has no Zangi contact");
-    return;
-  }
+function playTurnSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
-  const link = `https://services.zangi.com/dl/conversation/${contact}`;
-  window.open(link, "_blank");
+    osc.type = "triangle";
+
+    osc.frequency.setValueAtTime(740, ctx.currentTime);
+    osc.frequency.setValueAtTime(980, ctx.currentTime + 0.15);
+    osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.45);
+  } catch (err) {}
 }
 
 // =========================
@@ -45,6 +57,8 @@ export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
   const [gameMap, setGameMap] = useState({});
+  const [walletMap, setWalletMap] = useState({}); // 🆕 Zangi + opponent data
+
   const [stake, setStake] = useState("");
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
@@ -60,7 +74,6 @@ export default function Lobby({ goGame, back }) {
 
   async function init() {
     const u = await account.get();
-
     setUser(u);
 
     const w = await databases.listDocuments(
@@ -71,47 +84,13 @@ export default function Lobby({ goGame, back }) {
 
     if (w.documents.length) setWallet(w.documents[0]);
 
-    await refresh(u.$id);
+    refresh(u.$id);
   }
 
-  useEffect(() => {
-    if (!user) return;
-
-    const unsub = databases.client.subscribe(
-      `databases.${DATABASE_ID}.collections.${MATCH_COLLECTION}.documents`,
-      () => refresh(user.$id)
-    );
-
-    return () => unsub();
-  }, [user]);
-
+  // =========================
+  // LOAD DATA
+  // =========================
   async function refresh(userId) {
-    await Promise.all([
-      loadMatches(userId),
-      loadActiveMatches(userId)
-    ]);
-  }
-
-  // =========================
-  async function loadMatches(userId) {
-    const res = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [Query.limit(100)]
-    );
-
-    setMatches(
-      res.documents.filter(
-        (m) =>
-          m.status === "waiting" &&
-          !m.opponentId &&
-          m.hostId !== userId
-      )
-    );
-  }
-
-  // =========================
-  async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       MATCH_COLLECTION,
@@ -125,226 +104,167 @@ export default function Lobby({ goGame, back }) {
     setActiveMatches(mine);
 
     const map = {};
+    const wmap = {};
 
     await Promise.all(
       mine.map(async (m) => {
-        if (!m.gameId) return;
+        if (m.gameId) {
+          try {
+            const g = await databases.getDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              m.gameId
+            );
+            map[m.gameId] = g;
+          } catch {}
+        }
 
-        try {
-          const g = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            m.gameId
-          );
-          map[m.gameId] = g;
-        } catch {}
+        // =========================
+        // FETCH OPPONENT WALLET (ZANGI)
+        // =========================
+        const opponentId =
+          m.hostId === userId ? m.opponentId : m.hostId;
+
+        if (opponentId) {
+          try {
+            const ow = await databases.listDocuments(
+              DATABASE_ID,
+              WALLET_COLLECTION,
+              [Query.equal("userId", opponentId), Query.limit(1)]
+            );
+
+            if (ow.documents.length) {
+              wmap[opponentId] = ow.documents[0];
+            }
+          } catch {}
+        }
       })
     );
 
     setGameMap(map);
+    setWalletMap(wmap);
   }
 
   // =========================
-  function canPlayMore() {
-    return activeMatches.filter(m => m.status !== "finished").length < 7;
-  }
+  // TURN INDICATOR (UNCHANGED)
+  // =========================
+  useEffect(() => {
+    if (!user) return;
+
+    activeMatches.forEach((m) => {
+      const game = gameMap[m.gameId];
+      if (!game || game.status === "finished") return;
+
+      if (game.turn === user.$id) {
+        if (notifiedTurns.current[m.gameId]) return;
+
+        notifiedTurns.current[m.gameId] = true;
+        playTurnSound();
+
+        if (navigator.vibrate) {
+          navigator.vibrate([300, 120, 300]);
+        }
+      } else {
+        notifiedTurns.current[m.gameId] = false;
+      }
+    });
+  }, [activeMatches, gameMap, user]);
 
   // =========================
-  async function joinMatch(match) {
-    if (loadingJoin) return;
+  // 💬 ZANGI CHAT
+  // =========================
+  function openZangiChat(opponentId) {
+    const opp = walletMap[opponentId];
 
-    setLoadingJoin(match.$id);
+    const number = opp?.zangiContact;
 
-    try {
-      const fresh = await databases.getDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        match.$id
-      );
+    const message =
+      "Hey! Let’s chat securely on Zangi Messenger. " +
+      "Let’s connect and finish the game if you're away. " +
+      "Download Zangi → https://services.zangi.com/dl/conversation/";
 
-      if ((wallet?.balance || 0) < fresh.stake) {
-        throw new Error("Insufficient balance");
-      }
-
-      // deduct wallet
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: wallet.balance - fresh.stake
-        }
-      );
-
-      const total = fresh.pot + fresh.stake;
-      const adminCut = Math.floor(total * 0.1);
-      const finalPot = total - adminCut;
-
-      const adminRes = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", ADMIN_ID), Query.limit(1)]
-      );
-
-      if (adminRes.documents.length) {
-        const adminWallet = adminRes.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          adminWallet.$id,
-          {
-            balance: Number(adminWallet.balance || 0) + adminCut
-          }
-        );
-      }
-
-      const opponentZangi = wallet?.zangiContact || "";
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        fresh.$id,
-        {
-          opponentId: user.$id,
-          opponentZangi,
-          status: "matched",
-          pot: finalPot
-        }
-      );
-
-      const game = await createGame(fresh, user.$id);
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        fresh.$id,
-        {
-          gameId: game.$id
-        }
-      );
-
-      goGame(game.$id, fresh.stake);
-
-    } catch (err) {
-      alert(err.message);
+    if (!number) {
+      alert("Opponent has no Zangi contact set");
+      return;
     }
 
-    setLoadingJoin(null);
+    const url =
+      `https://services.zangi.com/dl/conversation/?phone=${number}&text=${encodeURIComponent(message)}`;
+
+    window.open(url, "_blank");
   }
 
   // =========================
-  async function createMatch() {
-    if (creating) return;
-
-    const amount = Number(stake);
-    if (!amount || amount < 50) return;
-
-    setCreating(true);
-
-    try {
-      const hostZangi = wallet?.zangiContact || "";
-
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        {
-          balance: wallet.balance - amount
-        }
-      );
-
-      await databases.createDocument(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        ID.unique(),
-        {
-          hostId: user.$id,
-          hostZangi,
-          opponentId: null,
-          opponentZangi: null,
-          stake: amount,
-          pot: amount,
-          status: "waiting",
-          refundDone: false
-        }
-      );
-
-      setStake("");
-
-    } catch (err) {
-      alert(err.message);
-    }
-
-    setCreating(false);
-  }
-
-  // ========================= UI =========================
+  // UI
+  // =========================
   return (
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
 
-      <h2>🔥 Active Matches</h2>
+      {/* ACTIVE COUNT (UNCHANGED) */}
+      <p>
+        Running Matches:{" "}
+        {activeMatches.filter((m) => m.status !== "finished").length} / 7
+      </p>
+
+      <h2>🔥 Your Matches</h2>
 
       {activeMatches.map((m) => {
         const game = gameMap[m.gameId];
 
-        const opponentZangi =
-          m.hostId === user.$id ? m.opponentZangi : m.hostZangi;
+        const opponentId =
+          m.hostId === user.$id ? m.opponentId : m.hostId;
+
+        let turnLabel = "";
+        if (game && game.status !== "finished") {
+          turnLabel =
+            game.turn === user.$id
+              ? "🟢 Your Turn"
+              : "🔴 Opponent Turn";
+        }
+
+        const oppWallet = walletMap[opponentId];
 
         return (
           <div key={m.$id} style={styles.card}>
             <div>
               <p>₦{m.stake}</p>
               <p>{m.status}</p>
+              {turnLabel && <p>{turnLabel}</p>}
 
-              <p>Host Zangi: {m.hostZangi || "N/A"}</p>
-              <p>Opponent Zangi: {m.opponentZangi || "Waiting..."}</p>
+              {/* 🆕 ZANGI DISPLAY */}
+              {oppWallet?.zangiContact && (
+                <p style={{ fontSize: 12, color: "#9ca3af" }}>
+                  Zangi: {oppWallet.zangiContact}
+                </p>
+              )}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {m.gameId && (
-                <button
-                  style={styles.resumeBtn}
-                  onClick={() => goGame(m.gameId, m.stake)}
-                >
-                  ▶ Resume
-                </button>
-              )}
-
-              {/* 💬 CHAT BUTTON */}
+            {/* CHAT BUTTON */}
+            {opponentId && (
               <button
                 style={styles.chatBtn}
-                onClick={() => openZangi(opponentZangi)}
+                onClick={() => openZangiChat(opponentId)}
               >
                 💬 Chat
               </button>
-            </div>
+            )}
+
+            {m.status === "finished" ? (
+              <button style={styles.finishedBtn} disabled>
+                ✅ Finished
+              </button>
+            ) : m.gameId ? (
+              <button
+                style={styles.resumeBtn}
+                onClick={() => goGame(m.gameId, m.stake)}
+              >
+                ▶ Resume
+              </button>
+            ) : null}
           </div>
         );
       })}
-
-      <h2>Available Matches</h2>
-
-      {matches.map((m) => (
-        <div key={m.$id} style={styles.card}>
-          <span>₦{m.stake}</span>
-
-          <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
-            Join
-          </button>
-        </div>
-      ))}
-
-      <input
-        value={stake}
-        onChange={(e) => setStake(e.target.value)}
-        placeholder="Stake"
-      />
-
-      <button onClick={createMatch} disabled={creating}>
-        Create Match
-      </button>
 
       <button onClick={back}>Back</button>
     </div>
@@ -352,7 +272,7 @@ export default function Lobby({ goGame, back }) {
 }
 
 // =========================
-// STYLES
+// STYLES (UNCHANGED + ADD CHAT)
 // =========================
 const styles = {
   container: {
@@ -365,34 +285,40 @@ const styles = {
   card: {
     background: "#111827",
     padding: 12,
-    margin: 10,
-    borderRadius: 12,
+    margin: "10px 0",
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center"
+    alignItems: "center",
+    borderRadius: 12
   },
 
-  joinBtn: {
-    background: "gold",
-    padding: 10,
+  chatBtn: {
+    background: "#3b82f6",
+    padding: "8px 12px",
+    borderRadius: 10,
     border: "none",
-    borderRadius: 8
+    color: "#fff",
+    fontWeight: "bold",
+    cursor: "pointer",
+    marginRight: 8
   },
 
   resumeBtn: {
     background: "#16a34a",
-    padding: 10,
-    border: "none",
+    padding: "10px 20px",
+    borderRadius: 12,
     color: "#fff",
-    borderRadius: 8
+    border: "none",
+    fontWeight: "bold",
+    cursor: "pointer"
   },
 
-  chatBtn: {
-    background: "#2563eb",
-    padding: 10,
-    border: "none",
+  finishedBtn: {
+    background: "#16a34a",
+    padding: "10px 18px",
+    borderRadius: 10,
     color: "#fff",
-    borderRadius: 8,
-    cursor: "pointer"
+    border: "none",
+    fontWeight: "bold"
   }
 };
