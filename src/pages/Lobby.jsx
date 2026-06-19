@@ -12,13 +12,14 @@ import {
 const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
+const ZANGI_LINK = "https://services.zangi.com/dl/conversation/";
+
 // =========================
-// 🎵 WIN9JA TURN SOUND
+// 🎵 TURN SOUND
 // =========================
 function playTurnSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -57,7 +58,6 @@ async function createGame(match, opponentId) {
     }
   );
 }
-
 export default function Lobby({ goGame, back }) {
   const [matches, setMatches] = useState([]);
   const [activeMatches, setActiveMatches] = useState([]);
@@ -66,14 +66,15 @@ export default function Lobby({ goGame, back }) {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
-  // ✅ ZANGI MAP (NEW)
-  const [zangiMap, setZangiMap] = useState({});
-
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
 
+  // ✅ ZANGI MAP (SAFE)
+  const [zangiMap, setZangiMap] = useState({});
+
   const notifiedTurns = useRef({});
-useEffect(() => {
+
+  useEffect(() => {
     init();
   }, []);
 
@@ -109,30 +110,32 @@ useEffect(() => {
     return () => unsub();
   }, [user]);
 
-  // =========================
-  // REFRESH
-  // =========================
   async function refresh(userId) {
-    await Promise.all([loadMatches(userId), loadActiveMatches(userId)]);
+    await Promise.all([
+      loadMatches(userId),
+      loadActiveMatches(userId)
+    ]);
   }
 
   // =========================
-  // LOAD WALLET + ZANGI CONTACT (NEW FIX)
+  // LOAD ZANGI CONTACTS (SAFE)
   // =========================
-  async function loadWalletZangi(userIds) {
+  async function loadZangiContacts(userIds) {
     if (!userIds.length) return;
 
     try {
       const res = await databases.listDocuments(
         DATABASE_ID,
         WALLET_COLLECTION,
-        [Query.equal("userId", userIds)]
+        [Query.limit(100)]
       );
 
       const map = {};
 
       res.documents.forEach((w) => {
-        map[w.userId] = w.zangiContact || w.zangi || "";
+        if (userIds.includes(w.userId)) {
+          map[w.userId] = w.zangiContact || "";
+        }
       });
 
       setZangiMap(map);
@@ -140,10 +143,23 @@ useEffect(() => {
       console.log("Zangi load error", err);
     }
   }
+async function loadMatches(userId) {
+    const res = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [Query.limit(100)]
+    );
 
-  // =========================
-  // LOAD ACTIVE MATCHES
-  // =========================
+    const available = res.documents.filter(
+      (m) =>
+        m.status === "waiting" &&
+        !m.opponentId &&
+        m.hostId !== userId
+    );
+
+    setMatches(available);
+  }
+
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -158,45 +174,45 @@ useEffect(() => {
     setActiveMatches(mine);
 
     const map = {};
-    const users = [];
+    const ids = [];
 
-    for (const m of mine) {
-      if (m.gameId) {
-        try {
-          const g = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            m.gameId
-          );
-          map[m.gameId] = g;
-        } catch {}
-      }
+    await Promise.all(
+      mine.map(async (m) => {
+        if (m.gameId) {
+          try {
+            const g = await databases.getDocument(
+              DATABASE_ID,
+              GAME_COLLECTION,
+              m.gameId
+            );
+            map[m.gameId] = g;
+          } catch {}
+        }
 
-      if (m.hostId) users.push(m.hostId);
-      if (m.opponentId) users.push(m.opponentId);
-    }
+        if (m.hostId) ids.push(m.hostId);
+        if (m.opponentId) ids.push(m.opponentId);
+      })
+    );
 
     setGameMap(map);
-    await loadWalletZangi([...new Set(users)]);
+    await loadZangiContacts([...new Set(ids)]);
   }
-// =========================
+
+  // =========================
   // OPEN ZANGI CHAT
   // =========================
-  function openZangi(userId) {
-    const contact = zangiMap[userId];
+  function openZangi(opponentId) {
+    const zangi = zangiMap[opponentId];
 
-    if (!contact) {
-      return alert("This user has no Zangi contact saved");
+    if (!zangi) {
+      return alert("Opponent has no Zangi contact yet.");
     }
 
     const msg = encodeURIComponent(
-      "Hey! Let’s chat securely on Zangi Messenger and complete our Win9ja match."
+      "Hey! Let's chat on Zangi and continue our match."
     );
 
-    window.open(
-      `https://services.zangi.com/dl/conversation/${contact}?text=${msg}`,
-      "_blank"
-    );
+    window.open(`${ZANGI_LINK}${zangi}?text=${msg}`, "_blank");
   }
 
   return (
@@ -207,7 +223,8 @@ useEffect(() => {
 
       {activeMatches.map((m) => {
         const game = gameMap[m.gameId];
-        const opponent =
+
+        const opponentId =
           m.hostId === user?.$id ? m.opponentId : m.hostId;
 
         return (
@@ -215,6 +232,7 @@ useEffect(() => {
             <div>
               <p>₦{m.stake}</p>
               <p>{m.status}</p>
+
               {game && (
                 <p>
                   {game.turn === user?.$id
@@ -225,22 +243,21 @@ useEffect(() => {
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
-              {/* 🟢 ZANGI BUTTON ADDED */}
-              {opponent && (
-                <button
-                  style={styles.zangiBtn}
-                  onClick={() => openZangi(opponent)}
-                >
-                  💬 Chat
-                </button>
-              )}
-
               {m.gameId && (
                 <button
                   style={styles.resumeBtn}
                   onClick={() => goGame(m.gameId, m.stake)}
                 >
                   ▶ Resume
+                </button>
+              )}
+
+              {m.opponentId && (
+                <button
+                  style={styles.zangiBtn}
+                  onClick={() => openZangi(opponentId)}
+                >
+                  💬 Chat
                 </button>
               )}
             </div>
@@ -255,23 +272,27 @@ useEffect(() => {
           <span>₦{m.stake}</span>
 
           <button
-            onClick={() => joinMatch(m)}
             style={styles.joinBtn}
+            onClick={() => joinMatch(m)}
+            disabled={loadingJoin === m.$id}
           >
-            Join
+            {loadingJoin === m.$id ? "Joining..." : "Join"}
           </button>
         </div>
       ))}
 
       <input
         type="number"
-        placeholder="Stake ₦"
         value={stake}
         onChange={(e) => setStake(e.target.value)}
+        placeholder="Stake ₦"
       />
 
-      {/* 🔴 CREATE BUTTON (RED AS REQUESTED) */}
-      <button onClick={createMatch} style={styles.createBtn}>
+      <button
+        style={styles.createBtn}
+        onClick={createMatch}
+        disabled={creating}
+      >
         {creating ? "Creating..." : "Create Match"}
       </button>
 
@@ -295,45 +316,47 @@ const styles = {
     background: "#111827",
     padding: 12,
     margin: "10px 0",
+    borderRadius: 12,
     display: "flex",
     justifyContent: "space-between",
-    borderRadius: 12
+    alignItems: "center"
   },
 
   joinBtn: {
     background: "gold",
-    padding: "10px 18px",
-    borderRadius: 10,
+    padding: "8px 14px",
+    borderRadius: 8,
     border: "none",
     fontWeight: "bold"
   },
 
   resumeBtn: {
     background: "#16a34a",
-    padding: "10px 16px",
-    borderRadius: 10,
     color: "#fff",
-    border: "none"
-  },
-
-  // 🟢 NEW ZANGI BUTTON
-  zangiBtn: {
-    background: "#0ea5e9",
-    padding: "10px 14px",
-    borderRadius: 10,
+    padding: "8px 14px",
+    borderRadius: 8,
     border: "none",
-    color: "#fff",
     fontWeight: "bold"
   },
 
-  // 🔴 CREATE BUTTON RED (FIXED REQUEST)
+  // 🔴 RED CREATE BUTTON (as requested earlier)
   createBtn: {
     background: "#dc2626",
-    padding: "12px 18px",
-    borderRadius: 12,
-    border: "none",
     color: "#fff",
+    padding: "10px 16px",
+    borderRadius: 10,
+    border: "none",
     fontWeight: "bold",
     marginTop: 10
+  },
+
+  // 🔵 ZANGI CHAT BUTTON
+  zangiBtn: {
+    background: "#0ea5e9",
+    color: "#fff",
+    padding: "8px 12px",
+    borderRadius: 8,
+    border: "none",
+    fontWeight: "bold"
   }
 };
