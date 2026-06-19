@@ -13,37 +13,18 @@ const GAME_COLLECTION = "games";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 
 // =========================
-// 🎵 WIN9JA TURN SOUND
+// ZANGI CHAT HELPER
 // =========================
-function playTurnSound() {
-  try {
-    const ctx =
-      new (window.AudioContext || window.webkitAudioContext)();
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = "triangle";
-
-    osc.frequency.setValueAtTime(740, ctx.currentTime);
-    osc.frequency.setValueAtTime(980, ctx.currentTime + 0.15);
-    osc.frequency.setValueAtTime(620, ctx.currentTime + 0.3);
-
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start();
-    osc.stop(ctx.currentTime + 0.45);
-
-  } catch (err) {
-    console.log("Sound failed");
+function openZangi(contact) {
+  if (!contact) {
+    alert("This user has no Zangi contact");
+    return;
   }
+
+  const link = `https://services.zangi.com/dl/conversation/${contact}`;
+  window.open(link, "_blank");
 }
 
-// =========================
-// CREATE GAME
 // =========================
 async function createGame(match, opponentId) {
   return await databases.createDocument(
@@ -71,7 +52,6 @@ export default function Lobby({ goGame, back }) {
   const [loadingJoin, setLoadingJoin] = useState(null);
   const [creating, setCreating] = useState(false);
 
-  // 🔔 TURN ALERT TRACKER
   const notifiedTurns = useRef({});
 
   useEffect(() => {
@@ -80,11 +60,6 @@ export default function Lobby({ goGame, back }) {
 
   async function init() {
     const u = await account.get();
-
-    // 🔔 notification permission
-    if ("Notification" in window) {
-      Notification.requestPermission();
-    }
 
     setUser(u);
 
@@ -96,8 +71,7 @@ export default function Lobby({ goGame, back }) {
 
     if (w.documents.length) setWallet(w.documents[0]);
 
-    await autoRefundExpiredMatches(u.$id);
-    refresh(u.$id);
+    await refresh(u.$id);
   }
 
   useEffect(() => {
@@ -111,54 +85,6 @@ export default function Lobby({ goGame, back }) {
     return () => unsub();
   }, [user]);
 
-  // =========================
-  // 🔔 TURN ALERT
-  // =========================
-  useEffect(() => {
-    if (!user) return;
-
-    activeMatches.forEach((m) => {
-      const game = gameMap[m.gameId];
-
-      if (!game) return;
-
-      if (game.status === "finished") return;
-
-      // 🎯 user's turn
-      if (game.turn === user.$id) {
-
-        // prevent repeat spam
-        if (notifiedTurns.current[m.gameId]) return;
-
-        notifiedTurns.current[m.gameId] = true;
-
-        // 🔊 sound
-        playTurnSound();
-
-        // 📳 vibrate
-        if (navigator.vibrate) {
-          navigator.vibrate([300, 120, 300]);
-        }
-
-        // 🔔 notification
-        if (
-          document.hidden &&
-          "Notification" in window &&
-          Notification.permission === "granted"
-        ) {
-          new Notification("🎮 Win9ja", {
-            body: "It's your turn to play!",
-            icon: "/icon192.png"
-          });
-        }
-
-      } else {
-        notifiedTurns.current[m.gameId] = false;
-      }
-    });
-
-  }, [activeMatches, gameMap, user]);
-
   async function refresh(userId) {
     await Promise.all([
       loadMatches(userId),
@@ -167,68 +93,6 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // AUTO REFUND (78 HOURS)
-  // =========================
-  async function autoRefundExpiredMatches(userId) {
-    try {
-      const res = await databases.listDocuments(
-        DATABASE_ID,
-        MATCH_COLLECTION,
-        [
-          Query.equal("hostId", userId),
-          Query.equal("status", "waiting"),
-          Query.equal("refundDone", false),
-          Query.limit(100)
-        ]
-      );
-
-      const now = Date.now();
-
-      for (const m of res.documents) {
-        if (m.opponentId) continue;
-
-        const created = new Date(m.$createdAt).getTime();
-        const diff = (now - created) / (1000 * 60 * 60);
-
-        if (diff < 78) continue;
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          m.$id,
-          {
-            status: "expired",
-            refundDone: true
-          }
-        );
-
-        const walletRes = await databases.listDocuments(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          [Query.equal("userId", m.hostId), Query.limit(1)]
-        );
-
-        if (!walletRes.documents.length) continue;
-
-        const w = walletRes.documents[0];
-
-        await databases.updateDocument(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          w.$id,
-          {
-            balance: Number(w.balance || 0) + Number(m.stake || 0)
-          }
-        );
-      }
-    } catch (err) {
-      console.error("Refund error:", err);
-    }
-  }
-
-  // =========================
-  // AVAILABLE MATCHES
-  // =========================
   async function loadMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
@@ -236,29 +100,26 @@ export default function Lobby({ goGame, back }) {
       [Query.limit(100)]
     );
 
-    const available = res.documents.filter(
-      (m) =>
-        m.status === "waiting" &&
-        !m.opponentId &&
-        m.hostId !== userId
+    setMatches(
+      res.documents.filter(
+        (m) =>
+          m.status === "waiting" &&
+          !m.opponentId &&
+          m.hostId !== userId
+      )
     );
-
-    setMatches(available);
   }
 
-  // =========================
-  // ACTIVE MATCHES
   // =========================
   async function loadActiveMatches(userId) {
     const res = await databases.listDocuments(
       DATABASE_ID,
       MATCH_COLLECTION,
-      [Query.limit(100), Query.orderDesc("$createdAt")]
+      [Query.limit(100)]
     );
 
     const mine = res.documents.filter(
-      (m) =>
-        (m.hostId === userId || m.opponentId === userId)
+      (m) => m.hostId === userId || m.opponentId === userId
     );
 
     setActiveMatches(mine);
@@ -284,24 +145,13 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // LIMIT CHECK
-  // =========================
   function canPlayMore() {
-    const running = activeMatches.filter(
-      (m) => m.status !== "finished"
-    );
-    return running.length < 7;
+    return activeMatches.filter(m => m.status !== "finished").length < 7;
   }
 
   // =========================
-  // JOIN MATCH
-  // =========================
   async function joinMatch(match) {
     if (loadingJoin) return;
-
-    if (!canPlayMore()) {
-      return alert("Max 7 running matches reached");
-    }
 
     setLoadingJoin(match.$id);
 
@@ -312,14 +162,11 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      if (fresh.status !== "waiting" || fresh.opponentId) {
-        throw new Error("Already taken");
-      }
-
       if ((wallet?.balance || 0) < fresh.stake) {
         throw new Error("Insufficient balance");
       }
 
+      // deduct wallet
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -352,12 +199,15 @@ export default function Lobby({ goGame, back }) {
         );
       }
 
+      const opponentZangi = wallet?.zangiContact || "";
+
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
         {
           opponentId: user.$id,
+          opponentZangi,
           status: "matched",
           pot: finalPot
         }
@@ -369,7 +219,9 @@ export default function Lobby({ goGame, back }) {
         DATABASE_ID,
         MATCH_COLLECTION,
         fresh.$id,
-        { gameId: game.$id }
+        {
+          gameId: game.$id
+        }
       );
 
       goGame(game.$id, fresh.stake);
@@ -382,28 +234,17 @@ export default function Lobby({ goGame, back }) {
   }
 
   // =========================
-  // CREATE MATCH
-  // =========================
   async function createMatch() {
     if (creating) return;
 
-    if (!canPlayMore()) {
-      return alert("Max 7 running matches");
-    }
-
     const amount = Number(stake);
-
-    if (!amount || amount < 50) {
-      return alert("Minimum ₦50");
-    }
-
-    if ((wallet?.balance || 0) < amount) {
-      return alert("Insufficient balance");
-    }
+    if (!amount || amount < 50) return;
 
     setCreating(true);
 
     try {
+      const hostZangi = wallet?.zangiContact || "";
+
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -419,7 +260,9 @@ export default function Lobby({ goGame, back }) {
         ID.unique(),
         {
           hostId: user.$id,
+          hostZangi,
           opponentId: null,
+          opponentZangi: null,
           stake: amount,
           pot: amount,
           status: "waiting",
@@ -436,82 +279,71 @@ export default function Lobby({ goGame, back }) {
     setCreating(false);
   }
 
-  // =========================
-  // UI
-  // =========================
+  // ========================= UI =========================
   return (
     <div style={styles.container}>
       <h1>🎮 Lobby</h1>
 
-      <p>
-        Running Matches: {
-          activeMatches.filter(m => m.status !== "finished").length
-        } / 7
-      </p>
+      <h2>🔥 Active Matches</h2>
 
-      <h2>🔥 Your Matches</h2>
-
-      {activeMatches.map(m => {
+      {activeMatches.map((m) => {
         const game = gameMap[m.gameId];
 
-        let turnLabel = "";
-
-        if (game && game.status !== "finished") {
-          turnLabel =
-            game.turn === user.$id
-              ? "🟢 Your Turn"
-              : "🔴 Opponent Turn";
-        }
+        const opponentZangi =
+          m.hostId === user.$id ? m.opponentZangi : m.hostZangi;
 
         return (
           <div key={m.$id} style={styles.card}>
             <div>
               <p>₦{m.stake}</p>
               <p>{m.status}</p>
-              {turnLabel && <p>{turnLabel}</p>}
+
+              <p>Host Zangi: {m.hostZangi || "N/A"}</p>
+              <p>Opponent Zangi: {m.opponentZangi || "Waiting..."}</p>
             </div>
 
-            {m.status === "finished" ? (
-              <button style={styles.finishedBtn} disabled>
-                ✅ Finished
-              </button>
-            ) : m.gameId ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {m.gameId && (
+                <button
+                  style={styles.resumeBtn}
+                  onClick={() => goGame(m.gameId, m.stake)}
+                >
+                  ▶ Resume
+                </button>
+              )}
+
+              {/* 💬 CHAT BUTTON */}
               <button
-                style={styles.resumeBtn}
-                onClick={() => goGame(m.gameId, m.stake)}
+                style={styles.chatBtn}
+                onClick={() => openZangi(opponentZangi)}
               >
-                ▶ Resume
+                💬 Chat
               </button>
-            ) : null}
+            </div>
           </div>
         );
       })}
 
-      <h2>🎯 Available</h2>
+      <h2>Available Matches</h2>
 
-      {matches.map(m => (
+      {matches.map((m) => (
         <div key={m.$id} style={styles.card}>
           <span>₦{m.stake}</span>
 
-          <button
-            onClick={() => joinMatch(m)}
-            disabled={loadingJoin === m.$id}
-            style={styles.joinBtn}
-          >
-            {loadingJoin === m.$id ? "Joining..." : "Join"}
+          <button onClick={() => joinMatch(m)} style={styles.joinBtn}>
+            Join
           </button>
         </div>
       ))}
 
       <input
-        type="number"
-        placeholder="Stake ₦"
         value={stake}
-        onChange={e => setStake(e.target.value)}
+        onChange={(e) => setStake(e.target.value)}
+        placeholder="Stake"
       />
 
       <button onClick={createMatch} disabled={creating}>
-        {creating ? "Creating..." : "Create Match"}
+        Create Match
       </button>
 
       <button onClick={back}>Back</button>
@@ -533,40 +365,34 @@ const styles = {
   card: {
     background: "#111827",
     padding: 12,
-    margin: "10px 0",
+    margin: 10,
+    borderRadius: 12,
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
-    borderRadius: 12
+    alignItems: "center"
   },
 
   joinBtn: {
     background: "gold",
-    padding: "10px 18px",
-    borderRadius: 10,
+    padding: 10,
     border: "none",
-    fontWeight: "bold",
-    cursor: "pointer"
+    borderRadius: 8
   },
 
-  // ✅ updated rectangle shape
   resumeBtn: {
     background: "#16a34a",
-    padding: "10px 20px",
-    borderRadius: 12,
-    color: "#fff",
+    padding: 10,
     border: "none",
-    fontWeight: "bold",
-    cursor: "pointer",
-    minWidth: 110
+    color: "#fff",
+    borderRadius: 8
   },
 
-  finishedBtn: {
-    background: "#16a34a",
-    padding: "10px 18px",
-    borderRadius: 10,
-    color: "#fff",
+  chatBtn: {
+    background: "#2563eb",
+    padding: 10,
     border: "none",
-    fontWeight: "bold"
+    color: "#fff",
+    borderRadius: 8,
+    cursor: "pointer"
   }
 };
