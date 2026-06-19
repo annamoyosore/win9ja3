@@ -11,7 +11,47 @@ const ADMIN_WALLET_ID = "69f2482600125d496354";
 const MIN_STAKE = 100;
 const SIZE = 5;
 
-// ================= BOARD =================
+/* =========================
+   SOUND + VIBRATION
+========================= */
+
+function playMineSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "square";
+
+    osc.frequency.setValueAtTime(180, ctx.currentTime);
+    osc.frequency.setValueAtTime(90, ctx.currentTime + 0.15);
+
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.45);
+  } catch (e) {
+    console.log("Sound blocked:", e);
+  }
+}
+
+function vibrateMine() {
+  try {
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 300]);
+    }
+  } catch (e) {}
+}
+
+/* =========================
+   BOARD GENERATOR
+========================= */
+
 function createBoard(minesCount) {
   const total = SIZE * SIZE;
   const mineSet = new Set();
@@ -22,7 +62,7 @@ function createBoard(minesCount) {
 
   return Array.from({ length: total }, (_, i) => ({
     isMine: mineSet.has(i),
-    revealed: false,
+    revealed: false
   }));
 }
 
@@ -32,14 +72,16 @@ function calcMultiplier(step, difficulty) {
 
 const mineMap = { 1: 8, 2: 12, 3: 16, 4: 20 };
 
+/* =========================
+   MAIN COMPONENT
+========================= */
+
 export default function MineGame() {
 
-  // ================= STATE =================
   const [wallet, setWallet] = useState(null);
   const [admin, setAdmin] = useState(null);
 
   const [difficulty, setDifficulty] = useState(1);
-
   const [stakeInput, setStakeInput] = useState("");
   const [activeStake, setActiveStake] = useState(null);
 
@@ -57,7 +99,10 @@ export default function MineGame() {
 
   const minesCount = mineMap[difficulty];
 
-  // ================= LOAD WALLET =================
+  /* =========================
+     LOAD WALLET
+  ========================= */
+
   useEffect(() => {
     loadData();
   }, []);
@@ -83,12 +128,16 @@ export default function MineGame() {
       }
 
       setAdmin(adminRes);
+
     } catch (e) {
       console.error("LOAD ERROR:", e);
     }
   }
 
-  // ================= STAKE CONFIRM =================
+  /* =========================
+     STAKE
+  ========================= */
+
   const confirmStake = () => {
     const stake = Number(stakeInput);
 
@@ -99,18 +148,18 @@ export default function MineGame() {
     setActiveStake(stake);
   };
 
-  // ================= START GAME =================
+  /* =========================
+     START GAME
+  ========================= */
+
   const startGame = async () => {
     if (loadingStart || gameActive) return;
     if (!activeStake || !wallet || !admin) return;
 
-    const stake = Number(activeStake);
-
     setLoadingStart(true);
 
     try {
-      // 1. deduct user wallet
-      const newBalance = wallet.balance - stake;
+      const newBalance = wallet.balance - activeStake;
 
       await databases.updateDocument(
         DATABASE_ID,
@@ -119,24 +168,8 @@ export default function MineGame() {
         { balance: newBalance }
       );
 
-      setWallet((p) => ({ ...p, balance: newBalance }));
+      setWallet(p => ({ ...p, balance: newBalance }));
 
-      // 2. send to admin profit
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        ADMIN_WALLET_ID,
-        {
-          minesProfit: (admin.minesProfit || 0) + stake
-        }
-      );
-
-      setAdmin((p) => ({
-        ...p,
-        minesProfit: (p?.minesProfit || 0) + stake
-      }));
-
-      // 3. start game session
       setBoard(createBoard(minesCount));
       setGameActive(true);
       setGameOver(false);
@@ -146,15 +179,29 @@ export default function MineGame() {
       setCashout(0);
 
     } catch (e) {
-      console.error("START ERROR:", e);
+      console.error(e);
     }
 
     setLoadingStart(false);
   };
 
-  // ================= REVEAL CELL =================
+  /* =========================
+     REVEAL ALL (GAME OVER)
+  ========================= */
+
+  const revealAll = (data) => {
+    return data.map(cell => ({
+      ...cell,
+      revealed: true
+    }));
+  };
+
+  /* =========================
+     CELL CLICK
+  ========================= */
+
   const revealCell = (i) => {
-    if (!gameActive) return;
+    if (!gameActive || gameOver) return;
 
     const newBoard = [...board];
     const cell = newBoard[i];
@@ -163,10 +210,17 @@ export default function MineGame() {
 
     cell.revealed = true;
 
+    // 💥 MINE HIT
     if (cell.isMine) {
+      playMineSound();
+      vibrateMine();
+
+      const full = revealAll(newBoard);
+
+      setBoard(full);
       setGameOver(true);
       setGameActive(false);
-      setBoard(newBoard);
+
       return;
     }
 
@@ -180,7 +234,10 @@ export default function MineGame() {
     setBoard(newBoard);
   };
 
-  // ================= CASHOUT =================
+  /* =========================
+     CASHOUT
+  ========================= */
+
   const cashOutNow = async () => {
     if (!gameActive || gameOver || step === 0) return;
 
@@ -197,24 +254,16 @@ export default function MineGame() {
       { balance: newBalance }
     );
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      ADMIN_WALLET_ID,
-      {
-        minesReserve: (admin.minesReserve || 0) - payout
-      }
-    );
-
-    setWallet((p) => ({ ...p, balance: newBalance }));
+    setWallet(p => ({ ...p, balance: newBalance }));
 
     setWon(true);
     setGameActive(false);
   };
 
-  const locked = !gameActive;
+  /* =========================
+     UI
+  ========================= */
 
-  // ================= UI =================
   return (
     <div style={{
       textAlign: "center",
@@ -224,90 +273,28 @@ export default function MineGame() {
       color: "white"
     }}>
 
-      <h2 style={{ color: "gold" }}>💣 Mines Game</h2>
+      <h2>💣 Mines Game</h2>
 
-      {/* WALLET */}
-      <div style={{ marginBottom: 10 }}>
-        💰 Balance: ₦{wallet?.balance || 0}
-      </div>
+      <div>💰 Balance: ₦{wallet?.balance || 0}</div>
 
-      {/* STAKE */}
-      <div style={{
-        padding: 10,
-        background: "#111",
-        borderRadius: 10,
-        marginBottom: 10
-      }}>
-        <input
-          type="number"
-          placeholder={`Min ₦${MIN_STAKE}`}
-          value={stakeInput}
-          onChange={(e) => setStakeInput(e.target.value)}
-        />
+      <input
+        type="number"
+        value={stakeInput}
+        onChange={(e) => setStakeInput(e.target.value)}
+        placeholder="Enter stake"
+      />
 
-        <button onClick={confirmStake} style={{ marginLeft: 10 }}>
-          SET STAKE
-        </button>
+      <button onClick={confirmStake}>SET STAKE</button>
 
-        {activeStake && (
-          <div>🎯 Stake: ₦{activeStake}</div>
-        )}
-      </div>
-
-      {/* DIFFICULTY */}
-      <div style={{ marginBottom: 10 }}>
-        Difficulty:
-        <select
-          value={difficulty}
-          onChange={(e) => setDifficulty(Number(e.target.value))}
-        >
-          <option value={1}>x1</option>
-          <option value={2}>x2</option>
-          <option value={3}>x3</option>
-          <option value={4}>x4</option>
-        </select>
-      </div>
-
-      {/* START */}
-      <button
-        onClick={startGame}
-        disabled={!activeStake || gameActive}
-        style={{
-          padding: "10px 18px",
-          background: activeStake ? "#22c55e" : "#555",
-          color: "white",
-          border: "none",
-          borderRadius: 8,
-          cursor: "pointer"
-        }}
-      >
-        {loadingStart ? "STARTING..." : "START GAME"}
+      <button onClick={startGame} disabled={!activeStake}>
+        START
       </button>
 
-      {/* CASHOUT */}
-      <button
-        onClick={cashOutNow}
-        style={{
-          marginLeft: 10,
-          padding: "10px 18px",
-          background: "#f59e0b",
-          border: "none",
-          borderRadius: 8
-        }}
-      >
-        CASH OUT
-      </button>
-
-      {/* INFO */}
-      <div style={{ marginTop: 10 }}>
-        💣 Bombs: {mineMap[difficulty]} <br />
-        📈 Multiplier: {multi.toFixed(2)}x <br />
-        💰 Cashout: ₦{cashout.toFixed(2)}
-      </div>
-
-      {/* STATUS */}
-      {gameOver && <h3 style={{ color: "red" }}>💥 BOOM!</h3>}
-      {won && <h3 style={{ color: "lime" }}>🎉 WIN ₦{cashout.toFixed(2)}</h3>}
+      {gameOver && (
+        <h3 style={{ color: "red" }}>
+          💥 BOOM! Mine hit — board revealed
+        </h3>
+      )}
 
       {/* BOARD */}
       <div style={{
@@ -315,9 +302,7 @@ export default function MineGame() {
         gridTemplateColumns: `repeat(${SIZE}, 55px)`,
         justifyContent: "center",
         gap: 6,
-        marginTop: 20,
-        opacity: gameActive ? 1 : 0.4,
-        pointerEvents: gameActive ? "auto" : "none"
+        marginTop: 20
       }}>
         {board.map((cell, i) => (
           <div
@@ -333,14 +318,14 @@ export default function MineGame() {
               alignItems: "center",
               justifyContent: "center",
               borderRadius: 8,
-              cursor: "pointer"
+              cursor: "pointer",
+              fontSize: 18
             }}
           >
             {cell.revealed ? (cell.isMine ? "💣" : "💎") : "?"}
           </div>
         ))}
       </div>
-
     </div>
   );
 }
