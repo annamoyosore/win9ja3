@@ -1,331 +1,351 @@
 import React, { useState, useEffect } from "react";
 import {
-  databases,
-  DATABASE_ID,
-  WALLET_COLLECTION,
-  account,
-  Query
+databases,
+DATABASE_ID,
+WALLET_COLLECTION,
+account,
+Query
 } from "../lib/appwrite";
 
 const ADMIN_WALLET_ID = "69f2482600125d496354";
 const MIN_STAKE = 100;
 const SIZE = 5;
 
-/* =========================
-   SOUND + VIBRATION
-========================= */
-
-function playMineSound() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = "square";
-
-    osc.frequency.setValueAtTime(180, ctx.currentTime);
-    osc.frequency.setValueAtTime(90, ctx.currentTime + 0.15);
-
-    gain.gain.setValueAtTime(0.25, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start();
-    osc.stop(ctx.currentTime + 0.45);
-  } catch (e) {
-    console.log("Sound blocked:", e);
-  }
-}
-
-function vibrateMine() {
-  try {
-    if (navigator.vibrate) {
-      navigator.vibrate([200, 100, 300]);
-    }
-  } catch (e) {}
-}
-
-/* =========================
-   BOARD GENERATOR
-========================= */
-
+// ================= BOARD =================
 function createBoard(minesCount) {
-  const total = SIZE * SIZE;
-  const mineSet = new Set();
+const total = SIZE * SIZE;
+const mineSet = new Set();
 
-  while (mineSet.size < minesCount) {
-    mineSet.add(Math.floor(Math.random() * total));
-  }
+while (mineSet.size < minesCount) {
+mineSet.add(Math.floor(Math.random() * total));
+}
 
-  return Array.from({ length: total }, (_, i) => ({
-    isMine: mineSet.has(i),
-    revealed: false
-  }));
+return Array.from({ length: total }, (_, i) => ({
+isMine: mineSet.has(i),
+revealed: false,
+}));
 }
 
 function calcMultiplier(step, difficulty) {
-  return 1 + step * (0.25 * difficulty);
+return 1 + step * (0.25 * difficulty);
 }
 
 const mineMap = { 1: 8, 2: 12, 3: 16, 4: 20 };
 
-/* =========================
-   MAIN COMPONENT
-========================= */
-
 export default function MineGame() {
 
-  const [wallet, setWallet] = useState(null);
-  const [admin, setAdmin] = useState(null);
+// ================= STATE =================
+const [wallet, setWallet] = useState(null);
+const [admin, setAdmin] = useState(null);
 
-  const [difficulty, setDifficulty] = useState(1);
-  const [stakeInput, setStakeInput] = useState("");
-  const [activeStake, setActiveStake] = useState(null);
+const [difficulty, setDifficulty] = useState(1);
 
-  const [board, setBoard] = useState([]);
+const [stakeInput, setStakeInput] = useState("");
+const [activeStake, setActiveStake] = useState(null);
 
-  const [gameActive, setGameActive] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
-  const [won, setWon] = useState(false);
+const [board, setBoard] = useState([]);
 
-  const [step, setStep] = useState(0);
-  const [multi, setMulti] = useState(1);
-  const [cashout, setCashout] = useState(0);
+const [gameActive, setGameActive] = useState(false);
+const [gameOver, setGameOver] = useState(false);
+const [won, setWon] = useState(false);
 
-  const [loadingStart, setLoadingStart] = useState(false);
+const [step, setStep] = useState(0);
+const [multi, setMulti] = useState(1);
+const [cashout, setCashout] = useState(0);
 
-  const minesCount = mineMap[difficulty];
+const [loadingStart, setLoadingStart] = useState(false);
 
-  /* =========================
-     LOAD WALLET
-  ========================= */
+const minesCount = mineMap[difficulty];
 
-  useEffect(() => {
-    loadData();
-  }, []);
+// ================= LOAD WALLET =================
+useEffect(() => {
+loadData();
+}, []);
 
-  async function loadData() {
-    try {
-      const u = await account.get();
+async function loadData() {
+try {
+const u = await account.get();
 
-      const userRes = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [Query.equal("userId", u.$id)]
-      );
+const userRes = await databases.listDocuments(
+DATABASE_ID,
+WALLET_COLLECTION,
+[Query.equal("userId", u.$id)]
+);
 
-      const adminRes = await databases.getDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        ADMIN_WALLET_ID
-      );
+const adminRes = await databases.getDocument(
+DATABASE_ID,
+WALLET_COLLECTION,
+ADMIN_WALLET_ID
+);
 
-      if (userRes.documents.length) {
-        setWallet(userRes.documents[0]);
-      }
+if (userRes.documents.length) {
+setWallet(userRes.documents[0]);
+}
 
-      setAdmin(adminRes);
+setAdmin(adminRes);
+} catch (e) {
+console.error("LOAD ERROR:", e);
+}
 
-    } catch (e) {
-      console.error("LOAD ERROR:", e);
-    }
-  }
+}
 
-  /* =========================
-     STAKE
-  ========================= */
+// ================= STAKE CONFIRM =================
+const confirmStake = () => {
+const stake = Number(stakeInput);
 
-  const confirmStake = () => {
-    const stake = Number(stakeInput);
+if (!wallet) return;
+if (!stake || stake < MIN_STAKE) return;
+if (wallet.balance < stake) return;
 
-    if (!wallet) return;
-    if (!stake || stake < MIN_STAKE) return;
-    if (wallet.balance < stake) return;
+setActiveStake(stake);
 
-    setActiveStake(stake);
-  };
+};
 
-  /* =========================
-     START GAME
-  ========================= */
+// ================= START GAME =================
+const startGame = async () => {
+if (loadingStart || gameActive) return;
+if (!activeStake || !wallet || !admin) return;
 
-  const startGame = async () => {
-    if (loadingStart || gameActive) return;
-    if (!activeStake || !wallet || !admin) return;
+const stake = Number(activeStake);
 
-    setLoadingStart(true);
+setLoadingStart(true);
 
-    try {
-      const newBalance = wallet.balance - activeStake;
+try {
+// 1. deduct user wallet
+const newBalance = wallet.balance - stake;
 
-      await databases.updateDocument(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        wallet.$id,
-        { balance: newBalance }
-      );
+await databases.updateDocument(
+DATABASE_ID,
+WALLET_COLLECTION,
+wallet.$id,
+{ balance: newBalance }
+);
 
-      setWallet(p => ({ ...p, balance: newBalance }));
+setWallet((p) => ({ ...p, balance: newBalance }));
 
-      setBoard(createBoard(minesCount));
-      setGameActive(true);
-      setGameOver(false);
-      setWon(false);
-      setStep(0);
-      setMulti(1);
-      setCashout(0);
+// 2. send to admin profit
+await databases.updateDocument(
+DATABASE_ID,
+WALLET_COLLECTION,
+ADMIN_WALLET_ID,
+{
+minesProfit: (admin.minesProfit || 0) + stake
+}
+);
 
-    } catch (e) {
-      console.error(e);
-    }
+setAdmin((p) => ({
+...p,
+minesProfit: (p?.minesProfit || 0) + stake
+}));
 
-    setLoadingStart(false);
-  };
+// 3. start game session
+setBoard(createBoard(minesCount));
+setGameActive(true);
+setGameOver(false);
+setWon(false);
+setStep(0);
+setMulti(1);
+setCashout(0);
 
-  /* =========================
-     REVEAL ALL (GAME OVER)
-  ========================= */
+} catch (e) {
+console.error("START ERROR:", e);
+}
 
-  const revealAll = (data) => {
-    return data.map(cell => ({
-      ...cell,
-      revealed: true
-    }));
-  };
+setLoadingStart(false);
 
-  /* =========================
-     CELL CLICK
-  ========================= */
+};
 
-  const revealCell = (i) => {
-    if (!gameActive || gameOver) return;
+// ================= REVEAL CELL =================
+const revealCell = (i) => {
+if (!gameActive) return;
 
-    const newBoard = [...board];
-    const cell = newBoard[i];
+const newBoard = [...board];
+const cell = newBoard[i];
 
-    if (cell.revealed) return;
+if (cell.revealed) return;
 
-    cell.revealed = true;
+cell.revealed = true;
 
-    // 💥 MINE HIT
-    if (cell.isMine) {
-      playMineSound();
-      vibrateMine();
+if (cell.isMine) {
 
-      const full = revealAll(newBoard);
+  // 💥 REVEAL ALL TILES (ONLY ADDITION)
+  const revealedBoard = newBoard.map((c) => ({
+    ...c,
+    revealed: true
+  }));
 
-      setBoard(full);
-      setGameOver(true);
-      setGameActive(false);
+  setBoard(revealedBoard);
+  setGameOver(true);
+  setGameActive(false);
 
-      return;
-    }
+  return;
+}
 
-    const newStep = step + 1;
-    const newMulti = calcMultiplier(newStep, difficulty);
+const newStep = step + 1;
+const newMulti = calcMultiplier(newStep, difficulty);
 
-    setStep(newStep);
-    setMulti(newMulti);
+setStep(newStep);
+setMulti(newMulti);
 
-    setCashout(activeStake * newMulti);
-    setBoard(newBoard);
-  };
+setCashout(activeStake * newMulti);
+setBoard(newBoard);
 
-  /* =========================
-     CASHOUT
-  ========================= */
+};
 
-  const cashOutNow = async () => {
-    if (!gameActive || gameOver || step === 0) return;
+// ================= CASHOUT =================
+const cashOutNow = async () => {
+if (!gameActive || gameOver || step === 0) return;
 
-    const payout = cashout;
+const payout = cashout;
 
-    if ((admin.minesReserve || 0) < payout) return;
+if ((admin.minesReserve || 0) < payout) return;
 
-    const newBalance = wallet.balance + payout;
+const newBalance = wallet.balance + payout;
 
-    await databases.updateDocument(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      wallet.$id,
-      { balance: newBalance }
-    );
+await databases.updateDocument(
+DATABASE_ID,
+WALLET_COLLECTION,
+wallet.$id,
+{ balance: newBalance }
+);
 
-    setWallet(p => ({ ...p, balance: newBalance }));
+await databases.updateDocument(
+DATABASE_ID,
+WALLET_COLLECTION,
+ADMIN_WALLET_ID,
+{
+minesReserve: (admin.minesReserve || 0) - payout
+}
+);
 
-    setWon(true);
-    setGameActive(false);
-  };
+setWallet((p) => ({ ...p, balance: newBalance }));
 
-  /* =========================
-     UI
-  ========================= */
+setWon(true);
+setGameActive(false);
 
-  return (
-    <div style={{
-      textAlign: "center",
-      padding: 20,
-      background: "#0b0f1a",
-      minHeight: "100vh",
-      color: "white"
-    }}>
+};
 
-      <h2>💣 Mines Game</h2>
+const locked = !gameActive;
 
-      <div>💰 Balance: ₦{wallet?.balance || 0}</div>
+// ================= UI =================
+return (
 
-      <input
-        type="number"
-        value={stakeInput}
-        onChange={(e) => setStakeInput(e.target.value)}
-        placeholder="Enter stake"
-      />
+<div style={{  
+textAlign: "center",  
+padding: 20,  
+background: "#0b0f1a",  
+minHeight: "100vh",  
+color: "white"  
+}}>  <h2 style={{ color: "gold" }}>💣 Mines Game</h2>    {/* WALLET */}
 
-      <button onClick={confirmStake}>SET STAKE</button>
+  <div style={{ marginBottom: 10 }}>    
+    💰 Balance: ₦{wallet?.balance || 0}    
+  </div>    {/* STAKE */}
 
-      <button onClick={startGame} disabled={!activeStake}>
-        START
-      </button>
+  <div style={{    
+    padding: 10,    
+    background: "#111",    
+    borderRadius: 10,    
+    marginBottom: 10    
+  }}>    
+    <input    
+      type="number"    
+      placeholder={`Min ₦${MIN_STAKE}`}    
+      value={stakeInput}    
+      onChange={(e) => setStakeInput(e.target.value)}    
+    />    <button onClick={confirmStake} style={{ marginLeft: 10 }}>    
+  SET STAKE    
+</button>    
 
-      {gameOver && (
-        <h3 style={{ color: "red" }}>
-          💥 BOOM! Mine hit — board revealed
-        </h3>
-      )}
+{activeStake && (    
+  <div>🎯 Stake: ₦{activeStake}</div>    
+)}
 
-      {/* BOARD */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: `repeat(${SIZE}, 55px)`,
-        justifyContent: "center",
-        gap: 6,
-        marginTop: 20
-      }}>
-        {board.map((cell, i) => (
-          <div
-            key={i}
-            onClick={() => revealCell(i)}
-            style={{
-              width: 55,
-              height: 55,
-              background: cell.revealed
-                ? cell.isMine ? "red" : "#222"
-                : "#444",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 18
-            }}
-          >
-            {cell.revealed ? (cell.isMine ? "💣" : "💎") : "?"}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  </div>    {/* DIFFICULTY */}
+
+  <div style={{ marginBottom: 10 }}>    
+    Difficulty:    
+    <select    
+      value={difficulty}    
+      onChange={(e) => setDifficulty(Number(e.target.value))}    
+    >    
+      <option value={1}>x1</option>    
+      <option value={2}>x2</option>    
+      <option value={3}>x3</option>    
+      <option value={4}>x4</option>    
+    </select>    
+  </div>    {/* START */}
+<button
+onClick={startGame}
+disabled={!activeStake || gameActive}
+style={{
+padding: "10px 18px",
+background: activeStake ? "#22c55e" : "#555",
+color: "white",
+border: "none",
+borderRadius: 8,
+cursor: "pointer"
+}}
+
+> 
+
+{loadingStart ? "STARTING..." : "START GAME"}
+
+  </button>    {/* CASHOUT */}
+<button
+onClick={cashOutNow}
+style={{
+marginLeft: 10,
+padding: "10px 18px",
+background: "#f59e0b",
+border: "none",
+borderRadius: 8
+}}
+
+> 
+
+CASH OUT
+
+  </button>    {/* INFO */}
+
+  <div style={{ marginTop: 10 }}>    
+    💣 Bombs: {mineMap[difficulty]} <br />    
+    📈 Multiplier: {multi.toFixed(2)}x <br />    
+    💰 Cashout: ₦{cashout.toFixed(2)}    
+  </div>    {/* STATUS */}
+{gameOver && <h3 style={{ color: "red" }}>💥 BOOM!</h3>}
+{won && <h3 style={{ color: "lime" }}>🎉 WIN ₦{cashout.toFixed(2)}</h3>}
+
+{/* BOARD */}
+
+  <div style={{    
+    display: "grid",    
+    gridTemplateColumns: `repeat(${SIZE}, 55px)`,    
+    justifyContent: "center",    
+    gap: 6,    
+    marginTop: 20,    
+    opacity: gameActive ? 1 : 0.4,    
+    pointerEvents: gameActive ? "auto" : "none"    
+  }}>    
+    {board.map((cell, i) => (    
+      <div    
+        key={i}    
+        onClick={() => revealCell(i)}    
+        style={{    
+          width: 55,    
+          height: 55,    
+          background: cell.revealed    
+            ? cell.isMine ? "red" : "#222"    
+            : "#444",    
+          display: "flex",    
+          alignItems: "center",    
+          justifyContent: "center",    
+          borderRadius: 8,    
+          cursor: "pointer"    
+        }}    
+      >    
+        {cell.revealed ? (cell.isMine ? "💣" : "💎") : "?"}    
+      </div>    
+    ))}    
+  </div>    </div>  );
 }
