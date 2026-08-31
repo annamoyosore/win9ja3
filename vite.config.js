@@ -1,24 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const port = Number(process.env.PORT || 5173);
+
 export default defineConfig({
+  base: "/",
   plugins: [react()],
-
-  server: {
-    port: 5173,
-    open: true
-  },
-
-  preview: {
-    port: 5173,
-    strictPort: true
-  },
-
-  build: {
-    outDir: "dist",
-    sourcemap: false
-  },
-
-  // 🔥 IMPORTANT FOR PWA SERVICE WORKER PATH FIXES
-  base: "/"
+  server: { port, strictPort: true, host: "0.0.0.0", allowedHosts: true },
+  preview: { port, strictPort: true, host: "0.0.0.0", allowedHosts: true },
+  build: { outDir: "dist", sourcemap: false },
 });

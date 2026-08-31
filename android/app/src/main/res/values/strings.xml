@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Win9jaLife</string>
+    <string name="title_activity_main">Win9jaLife</string>
+    <string name="package_name">com.win9jalife.app</string>
+    <string name="custom_url_scheme">com.win9jalife.app</string>
+</resources>
