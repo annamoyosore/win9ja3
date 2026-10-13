@@ -7,7 +7,6 @@ import {
   DATABASE_ID,
   WALLET_COLLECTION,
   PROMO_COLLECTION,
-  DEPOSIT_COLLECTION,
   WITHDRAW_COLLECTION,
   ID,
   Query
@@ -16,33 +15,39 @@ import {
 import { getWallet } from "../lib/wallet";
 
 // =====================================
-// STYLES
+// THEME-AWARE STYLES
+// App.jsx will control the global theme.
 // =====================================
 
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "#07111f",
-    color: "#ffffff",
+    background: "var(--app-bg, #07111f)",
+    color: "var(--app-text, #ffffff)",
     padding: "20px",
-    fontFamily: "Arial, sans-serif"
+    fontFamily: "Arial, sans-serif",
+    boxSizing: "border-box",
+    transition: "background 0.2s, color 0.2s"
   },
 
   container: {
     maxWidth: "760px",
+    width: "100%",
     margin: "0 auto"
   },
 
   card: {
-    background: "#101e31",
-    border: "1px solid #263951",
+    background: "var(--app-card, #101e31)",
+    border: "1px solid var(--app-border, #263951)",
     borderRadius: "14px",
     padding: "18px",
-    marginTop: "16px"
+    marginTop: "16px",
+    boxSizing: "border-box"
   },
 
   button: {
     width: "100%",
+    minHeight: "46px",
     padding: "13px",
     marginTop: "10px",
     background: "#16a34a",
@@ -55,17 +60,19 @@ const styles = {
 
   secondaryButton: {
     width: "100%",
+    minHeight: "46px",
     padding: "12px",
     marginTop: "10px",
-    background: "#263951",
-    color: "#ffffff",
-    border: "none",
+    background: "var(--app-secondary, #263951)",
+    color: "var(--app-text, #ffffff)",
+    border: "1px solid var(--app-border, #344861)",
     borderRadius: "9px",
     cursor: "pointer"
   },
 
   dangerButton: {
     width: "100%",
+    minHeight: "46px",
     padding: "12px",
     marginTop: "10px",
     background: "#b91c1c",
@@ -76,19 +83,22 @@ const styles = {
   },
 
   input: {
+    display: "block",
     width: "100%",
+    minHeight: "46px",
     boxSizing: "border-box",
     padding: "12px",
     marginTop: "8px",
     marginBottom: "12px",
-    background: "#07111f",
-    color: "#ffffff",
-    border: "1px solid #344861",
-    borderRadius: "8px"
+    background: "var(--app-input, #07111f)",
+    color: "var(--app-text, #ffffff)",
+    border: "1px solid var(--app-border, #344861)",
+    borderRadius: "8px",
+    fontSize: "16px"
   },
 
   muted: {
-    color: "#a6b7cc",
+    color: "var(--app-muted, #a6b7cc)",
     fontSize: "13px",
     lineHeight: 1.6
   },
@@ -102,12 +112,14 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    overflowY: "auto"
+    overflowY: "auto",
+    boxSizing: "border-box"
   },
 
   modalCard: {
-    background: "#101e31",
-    border: "1px solid #344861",
+    background: "var(--app-card, #101e31)",
+    color: "var(--app-text, #ffffff)",
+    border: "1px solid var(--app-border, #344861)",
     borderRadius: "14px",
     padding: "20px",
     width: "100%",
@@ -119,11 +131,11 @@ const styles = {
 };
 
 // =====================================
-// HELPER
+// HELPERS
 // =====================================
 
-function formatNaira(amount) {
-  return `₦${Number(amount || 0).toLocaleString("en-NG")}`;
+function formatCoins(value) {
+  return Number(value || 0).toLocaleString("en-NG");
 }
 
 // =====================================
@@ -134,83 +146,83 @@ export default function Wallet() {
   const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
-
   const [wallet, setWallet] = useState(null);
-
   const [loading, setLoading] = useState(true);
-
   const [promo, setPromo] = useState(null);
-
   const [zangiContact, setZangiContact] = useState("");
-
   const [message, setMessage] = useState("");
 
-  // Game-fund deposit modal
-  const [showDeposit, setShowDeposit] = useState(false);
-
-  const [depositAmount, setDepositAmount] = useState("");
-
-  const [depositName, setDepositName] = useState("");
-
-  const [depositLoading, setDepositLoading] = useState(false);
-
-  // Coin withdrawal modal
+  // Withdrawal form
   const [showWithdraw, setShowWithdraw] = useState(false);
-
   const [withdrawCoins, setWithdrawCoins] = useState("");
-
   const [bank, setBank] = useState("");
-
   const [accountNumber, setAccountNumber] = useState("");
-
   const [accountName, setAccountName] = useState("");
-
   const [withdrawLoading, setWithdrawLoading] = useState(false);
 
   // =====================================
-  // LOAD USER AND WALLET
+  // LOAD USER, WALLET AND PROMO
   // =====================================
 
   useEffect(() => {
-    loadWallet();
+    let active = true;
+
+    async function load() {
+      setLoading(true);
+      setMessage("");
+
+      try {
+        const currentUser = await account.get();
+        const currentWallet = await getWallet(currentUser.$id);
+
+        const promoResponse = await databases.listDocuments(
+          DATABASE_ID,
+          PROMO_COLLECTION,
+          [
+            Query.equal("ownerId", currentUser.$id),
+            Query.limit(1)
+          ]
+        );
+
+        if (!active) return;
+
+        setUser(currentUser);
+        setWallet(currentWallet);
+        setZangiContact(currentWallet.zangiContact || "");
+        setPromo(promoResponse.documents[0] || null);
+      } catch (error) {
+        console.error("Wallet loading failed:", error);
+
+        if (active) {
+          setMessage(
+            "Unable to load your wallet. Please sign in and try again."
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    load();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  async function loadWallet() {
-    setLoading(true);
-    setMessage("");
+  // =====================================
+  // RELOAD WALLET
+  // =====================================
+
+  async function refreshWallet() {
+    if (!user) return;
 
     try {
-      const currentUser = await account.get();
-
-      setUser(currentUser);
-
-      const currentWallet = await getWallet(currentUser.$id);
-
+      const currentWallet = await getWallet(user.$id);
       setWallet(currentWallet);
-
-      setZangiContact(currentWallet.zangiContact || "");
-
-      // Load the user's promo code.
-      const promoResponse = await databases.listDocuments(
-        DATABASE_ID,
-        PROMO_COLLECTION,
-        [
-          Query.equal("ownerId", currentUser.$id),
-          Query.limit(1)
-        ]
-      );
-
-      if (promoResponse.documents.length > 0) {
-        setPromo(promoResponse.documents[0]);
-      }
     } catch (error) {
-      console.error("Wallet loading failed:", error);
-
-      setMessage(
-        "Unable to load your wallet. Please sign in and try again."
-      );
-    } finally {
-      setLoading(false);
+      console.error("Wallet refresh failed:", error);
+      setMessage("Could not refresh your coin balance.");
     }
   }
 
@@ -258,7 +270,6 @@ export default function Wallet() {
       );
 
       setPromo(newPromo);
-
       alert("Promo code created successfully.");
     } catch (error) {
       console.error("Promo creation failed:", error);
@@ -278,7 +289,6 @@ export default function Wallet() {
   async function copyText(text, label) {
     try {
       await navigator.clipboard.writeText(text);
-
       alert(`${label} copied successfully.`);
     } catch {
       alert(
@@ -307,7 +317,7 @@ export default function Wallet() {
 
 Use Promo Code: ${promo.code}
 
-🪙 Play and earn rewards.
+🪙 Play games using Win9ja Coins.
 
 Visit:
 https://win9jalife.vercel.app
@@ -340,8 +350,7 @@ https://chat.whatsapp.com/XXXXXXXX
       );
 
       alert("Zangi contact saved successfully.");
-
-      await loadWallet();
+      await refreshWallet();
     } catch (error) {
       alert(
         `Could not save Zangi contact: ${error.message}`
@@ -350,77 +359,10 @@ https://chat.whatsapp.com/XXXXXXXX
   }
 
   // =====================================
-  // EXISTING GAME-FUND DEPOSIT
-  //
-  // This remains separate from coin purchases.
-  // =====================================
-
-  async function makeDeposit() {
-    if (depositLoading) return;
-
-    if (!depositAmount || Number(depositAmount) < 200) {
-      alert("Minimum game-fund deposit is ₦200.");
-      return;
-    }
-
-    if (!depositName.trim()) {
-      alert("Enter your full name.");
-      return;
-    }
-
-    setDepositLoading(true);
-
-    try {
-      const currentUser = await account.get();
-
-      const reference = `DEP-${Date.now()}`;
-
-      await databases.createDocument(
-        DATABASE_ID,
-        DEPOSIT_COLLECTION,
-        ID.unique(),
-        {
-          userId: currentUser.$id,
-          amount: Number(depositAmount),
-          name: depositName.trim(),
-          status: "pending",
-          reference,
-          createdAt: new Date().toISOString()
-        }
-      );
-
-      window.open(
-        "https://flutterwave.com/pay/qiattof2hy2w",
-        "_blank",
-        "noopener,noreferrer"
-      );
-
-      alert(
-        "Deposit request created. The payment must be verified before funds are credited."
-      );
-
-      setShowDeposit(false);
-      setDepositAmount("");
-      setDepositName("");
-    } catch (error) {
-      console.error("Game deposit failed:", error);
-
-      alert(
-        `Deposit failed: ${error.message}`
-      );
-    } finally {
-      setDepositLoading(false);
-    }
-  }
-
-  // =====================================
   // REQUEST COIN WITHDRAWAL
   //
-  // Nigeria: local bank details.
-  // Ghana and international TRX withdrawals
-  // need additional configuration before use.
-  //
-  // Coins are NOT deducted at request time.
+  // Coins are not deducted here.
+  // Admin must verify and process payment.
   // =====================================
 
   async function requestWithdraw() {
@@ -428,7 +370,7 @@ https://chat.whatsapp.com/XXXXXXXX
 
     const coins = Number(withdrawCoins);
 
-    if (!Number.isInteger(coins) || coins <= 0) {
+    if (!Number.isSafeInteger(coins) || coins <= 0) {
       alert("Enter a valid whole number of coins.");
       return;
     }
@@ -437,15 +379,13 @@ https://chat.whatsapp.com/XXXXXXXX
       wallet?.country ||
       wallet?.countryCode ||
       "NG"
-    ).toUpperCase();
+    ).trim().toUpperCase();
 
     const isNigeria =
-      country === "NG" ||
-      country === "NIGERIA";
+      country === "NG" || country === "NIGERIA";
 
     const isGhana =
-      country === "GH" ||
-      country === "GHANA";
+      country === "GH" || country === "GHANA";
 
     const minimum = isNigeria || isGhana ? 2000 : 5000;
 
@@ -461,13 +401,11 @@ https://chat.whatsapp.com/XXXXXXXX
       return;
     }
 
-    // International withdrawals require a configured TRX form
-    // and corresponding Appwrite attributes.
+    // International TRX processing must be configured first.
     if (!isNigeria) {
       alert(
-        "International TRX withdrawals will be enabled after the TRX address and withdrawal collection are configured."
+        "International TRX withdrawals are not enabled yet. Please contact support."
       );
-
       return;
     }
 
@@ -497,29 +435,24 @@ https://chat.whatsapp.com/XXXXXXXX
         ID.unique(),
         {
           userId: currentUser.$id,
-
-          // This field stores the requested coin count
-          // for compatibility with the existing schema.
           amount: coins,
-
+          coins,
+          country: "NG",
+          currency: "NGN",
+          paymentMethod: "bank",
           bank: bank.trim(),
-
           accountNumber: accountNumber.trim(),
-
           accountName: accountName.trim(),
-
-          status: "pending",
-
-          createdAt: new Date().toISOString()
+          trxAddress: "",
+          status: "pending"
         }
       );
 
       alert(
-        "Your withdrawal request has been submitted. Your coins remain in your wallet until the request is paid."
+        "Your withdrawal request has been submitted. Your coins remain in your wallet until the request is processed."
       );
 
       setShowWithdraw(false);
-
       setWithdrawCoins("");
       setBank("");
       setAccountNumber("");
@@ -536,14 +469,14 @@ https://chat.whatsapp.com/XXXXXXXX
   }
 
   // =====================================
-  // LOADING SCREEN
+  // LOADING
   // =====================================
 
   if (loading) {
     return (
       <main style={styles.page}>
         <div style={styles.container}>
-          <h2>💳 Win9ja Wallet</h2>
+          <h2>🪙 Win9ja Wallet</h2>
           <p>Loading your wallet...</p>
         </div>
       </main>
@@ -551,29 +484,29 @@ https://chat.whatsapp.com/XXXXXXXX
   }
 
   // =====================================
-  // LOGIN ERROR
+  // LOGIN OR WALLET ERROR
   // =====================================
 
   if (!user || !wallet) {
     return (
       <main style={styles.page}>
         <div style={styles.container}>
-          <h2>💳 Win9ja Wallet</h2>
+          <h2>🪙 Win9ja Wallet</h2>
 
           <p>{message || "Please sign in to view your wallet."}</p>
 
           <button
             style={styles.button}
-            onClick={() => navigate("/login")}
+            onClick={() => navigate("/auth")}
           >
             Sign in
           </button>
 
           <button
             style={styles.secondaryButton}
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/dashboard")}
           >
-            Home
+            Back to Dashboard
           </button>
         </div>
       </main>
@@ -587,9 +520,8 @@ https://chat.whatsapp.com/XXXXXXXX
   return (
     <main style={styles.page}>
       <div style={styles.container}>
-
         <header>
-          <h1>💳 My Wallet</h1>
+          <h1>🪙 My Win9ja Wallet</h1>
 
           <p style={styles.muted}>
             Welcome, {wallet.name || user.name || "Player"}
@@ -597,36 +529,10 @@ https://chat.whatsapp.com/XXXXXXXX
         </header>
 
         {message && (
-          <div style={styles.card}>
+          <div style={styles.card} role="status">
             {message}
           </div>
         )}
-
-        {/* GAME BALANCE */}
-
-        <section style={styles.card}>
-          <h2>💰 Game Funds</h2>
-
-          <p style={{ fontSize: 27, fontWeight: "bold" }}>
-            {formatNaira(wallet.balance)}
-          </p>
-
-          <p style={styles.muted}>
-            Funds used for your existing games.
-          </p>
-
-          <p>
-            🔒 Locked game funds:{" "}
-            {formatNaira(wallet.locked ?? wallet.lockedCoins ?? 0)}
-          </p>
-
-          <button
-            style={styles.button}
-            onClick={() => setShowDeposit(true)}
-          >
-            ➕ Deposit Game Funds
-          </button>
-        </section>
 
         {/* COIN BALANCE */}
 
@@ -636,20 +542,21 @@ https://chat.whatsapp.com/XXXXXXXX
             border: "1px solid #16a34a"
           }}
         >
-          <h2>🪙 Win9ja Coins</h2>
+          <p style={styles.muted}>YOUR AVAILABLE COINS</p>
 
-          <p
+          <h2
             style={{
-              fontSize: 32,
-              fontWeight: "bold",
-              color: "#4ade80"
+              fontSize: "clamp(30px, 7vw, 42px)",
+              color: "#22c55e",
+              margin: "8px 0"
             }}
           >
-            {Number(wallet.coins || 0).toLocaleString()}
-          </p>
+            🪙 {formatCoins(wallet.coins)}
+          </h2>
 
           <p style={styles.muted}>
-            Your coin balance is separate from your game funds.
+            Use your coins to enter games. Your coin balance is
+            separate from your old game-fund balance during migration.
           </p>
 
           <button
@@ -661,9 +568,39 @@ https://chat.whatsapp.com/XXXXXXXX
 
           <button
             style={styles.secondaryButton}
+            onClick={refreshWallet}
+          >
+            ↻ Refresh Coin Balance
+          </button>
+
+          <button
+            style={styles.secondaryButton}
             onClick={() => setShowWithdraw(true)}
           >
-            💸 Withdraw Coins
+            💸 Request Coin Withdrawal
+          </button>
+        </section>
+
+        {/* PURCHASE INFORMATION */}
+
+        <section style={styles.card}>
+          <h2>🛒 Purchase Coins</h2>
+
+          <p style={styles.muted}>
+            Select a coin package on the Buy Coins page. Follow the
+            payment instructions and keep your payment reference.
+          </p>
+
+          <p style={styles.muted}>
+            Coin purchases remain pending until the payment is verified
+            and approved by the Win9ja Life administrator.
+          </p>
+
+          <button
+            style={styles.button}
+            onClick={() => navigate("/coins")}
+          >
+            View Coin Packages
           </button>
         </section>
 
@@ -674,7 +611,14 @@ https://chat.whatsapp.com/XXXXXXXX
 
           {promo?.code ? (
             <>
-              <p style={{ fontSize: 23, color: "#4ade80" }}>
+              <p
+                style={{
+                  fontSize: "24px",
+                  fontWeight: "bold",
+                  color: "#22c55e",
+                  overflowWrap: "anywhere"
+                }}
+              >
                 {promo.code}
               </p>
 
@@ -712,15 +656,20 @@ https://chat.whatsapp.com/XXXXXXXX
           )}
         </section>
 
-        {/* ZANGI */}
+        {/* ZANGI CONTACT */}
 
         <section style={styles.card}>
           <h2>💬 Zangi Contact</h2>
 
+          <label htmlFor="zangiContact">
+            Your Zangi contact
+          </label>
+
           <input
+            id="zangiContact"
             style={styles.input}
             value={zangiContact}
-            onChange={event =>
+            onChange={(event) =>
               setZangiContact(event.target.value)
             }
             placeholder="Enter your Zangi contact"
@@ -739,79 +688,41 @@ https://chat.whatsapp.com/XXXXXXXX
         <section style={styles.card}>
           <button
             style={styles.secondaryButton}
+            onClick={() => navigate("/transactions")}
+          >
+            📜 View Transactions
+          </button>
+
+          <button
+            style={styles.secondaryButton}
             onClick={() => navigate("/dashboard")}
           >
             ← Back to Dashboard
           </button>
         </section>
 
-        {/* GAME-FUND DEPOSIT MODAL */}
-
-        {showDeposit && (
-          <div style={styles.modal}>
-            <div style={styles.modalCard}>
-              <h2>➕ Deposit Game Funds</h2>
-
-              <p style={styles.muted}>
-                This form is for game funds, not coin purchases.
-              </p>
-
-              <label>Full name</label>
-
-              <input
-                style={styles.input}
-                value={depositName}
-                onChange={event =>
-                  setDepositName(event.target.value)
-                }
-                placeholder="Enter full name"
-              />
-
-              <label>Amount in naira</label>
-
-              <input
-                style={styles.input}
-                type="number"
-                min="200"
-                value={depositAmount}
-                onChange={event =>
-                  setDepositAmount(event.target.value)
-                }
-                placeholder="Minimum ₦200"
-              />
-
-              <button
-                style={styles.button}
-                disabled={depositLoading}
-                onClick={makeDeposit}
-              >
-                {depositLoading
-                  ? "Processing..."
-                  : "Proceed to Payment"}
-              </button>
-
-              <button
-                style={styles.dangerButton}
-                onClick={() => setShowDeposit(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* COIN WITHDRAWAL MODAL */}
+        {/* WITHDRAWAL MODAL */}
 
         {showWithdraw && (
-          <div style={styles.modal}>
-            <div style={styles.modalCard}>
-              <h2>💸 Withdraw Coins</h2>
+          <div
+            style={styles.modal}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setShowWithdraw(false);
+              }
+            }}
+          >
+            <div
+              style={styles.modalCard}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="withdrawTitle"
+            >
+              <h2 id="withdrawTitle">💸 Withdraw Coins</h2>
 
               <p>
                 Available coins:{" "}
-                <strong>
-                  {Number(wallet.coins || 0).toLocaleString()}
-                </strong>
+                <strong>{formatCoins(wallet.coins)}</strong>
               </p>
 
               <p style={styles.muted}>
@@ -819,15 +730,18 @@ https://chat.whatsapp.com/XXXXXXXX
                 Other countries: minimum 5,000 coins.
               </p>
 
-              <label>Number of coins</label>
+              <label htmlFor="withdrawCoins">
+                Number of coins
+              </label>
 
               <input
+                id="withdrawCoins"
                 style={styles.input}
                 type="number"
                 min="2000"
                 step="1"
                 value={withdrawCoins}
-                onChange={event =>
+                onChange={(event) =>
                   setWithdrawCoins(event.target.value)
                 }
                 placeholder="Enter coins to withdraw"
@@ -835,25 +749,27 @@ https://chat.whatsapp.com/XXXXXXXX
 
               <h3>🇳🇬 Nigerian Bank Details</h3>
 
-              <label>Bank name</label>
+              <label htmlFor="bank">Bank name</label>
 
               <input
+                id="bank"
                 style={styles.input}
                 value={bank}
-                onChange={event =>
-                  setBank(event.target.value)
-                }
+                onChange={(event) => setBank(event.target.value)}
                 placeholder="Enter bank name"
               />
 
-              <label>Account number</label>
+              <label htmlFor="accountNumber">
+                Account number
+              </label>
 
               <input
+                id="accountNumber"
                 style={styles.input}
                 inputMode="numeric"
                 maxLength={10}
                 value={accountNumber}
-                onChange={event =>
+                onChange={(event) =>
                   setAccountNumber(
                     event.target.value.replace(/\D/g, "")
                   )
@@ -861,19 +777,25 @@ https://chat.whatsapp.com/XXXXXXXX
                 placeholder="10-digit account number"
               />
 
-              <label>Account holder name</label>
+              <label htmlFor="accountName">
+                Account holder name
+              </label>
 
               <input
+                id="accountName"
                 style={styles.input}
                 value={accountName}
-                onChange={event =>
+                onChange={(event) =>
                   setAccountName(event.target.value)
                 }
                 placeholder="Enter account holder name"
               />
 
               <button
-                style={styles.button}
+                style={{
+                  ...styles.button,
+                  opacity: withdrawLoading ? 0.7 : 1
+                }}
                 disabled={withdrawLoading}
                 onClick={requestWithdraw}
               >
@@ -890,14 +812,13 @@ https://chat.whatsapp.com/XXXXXXXX
               </button>
 
               <p style={styles.muted}>
-                Submitting a request does not automatically
-                deduct your coins. The admin must review and
-                process the payout.
+                This submits a request only. It does not automatically
+                deduct coins or guarantee approval. The administrator
+                must review the request and process any payout.
               </p>
             </div>
           </div>
         )}
-
       </div>
     </main>
   );
