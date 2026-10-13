@@ -7,7 +7,7 @@ import { ID, Query } from "appwrite";
 // APPWRITE COLLECTIONS
 // ========================================
 const WALLET_COLLECTION = "wallets";
-const PURCHASE_COLLECTION = "coinpurchases";
+const PURCHASE_COLLECTION = "deposit_requests";
 
 // ========================================
 // COUNTRY PAYMENT CONFIGURATION
