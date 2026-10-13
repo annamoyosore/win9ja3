@@ -1,6 +1,3 @@
-// =========================
-// IMPORTS
-// =========================
 import {
   databases,
   DATABASE_ID,
@@ -8,33 +5,45 @@ import {
   Query
 } from "./appwrite";
 
-// =========================
-// GET WALLET
-// =========================
+/**
+ * Get a user's wallet.
+ */
 export async function getWallet(userId) {
-  const res = await databases.listDocuments(
+  const response = await databases.listDocuments(
     DATABASE_ID,
     WALLET_COLLECTION,
-    [Query.equal("userId", userId)]
+    [
+      Query.equal("userId", userId),
+      Query.limit(1)
+    ]
   );
 
-  if (!res.documents.length) {
-    throw new Error("Wallet not found");
+  if (response.documents.length === 0) {
+    throw new Error("Wallet not found.");
   }
 
-  return res.documents[0];
+  return response.documents[0];
 }
 
-// =========================
-// LOCK FUNDS
-// =========================
+/**
+ * Lock game funds when a user enters a game.
+ * This function changes balance and locked only.
+ * It does not change the user's coin balance.
+ */
 export async function lockFunds(userId, amount) {
-  const wallet = await getWallet(userId);
-
   amount = Number(amount);
 
-  if (wallet.balance < amount) {
-    throw new Error("Insufficient balance");
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Enter a valid amount.");
+  }
+
+  const wallet = await getWallet(userId);
+
+  const balance = Number(wallet.balance || 0);
+  const locked = Number(wallet.locked || 0);
+
+  if (balance < amount) {
+    throw new Error("Insufficient game balance.");
   }
 
   return databases.updateDocument(
@@ -42,49 +51,61 @@ export async function lockFunds(userId, amount) {
     WALLET_COLLECTION,
     wallet.$id,
     {
-      balance: wallet.balance - amount,
-      locked: (wallet.locked || 0) + amount
+      balance: balance - amount,
+      locked: locked + amount
     }
   );
 }
 
-// =========================
-// UNLOCK FUNDS (REFUND)
-// =========================
+/**
+ * Return locked game funds to the user's game balance.
+ */
 export async function unlockFunds(userId, amount) {
+  amount = Number(amount);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Enter a valid amount.");
+  }
+
   const wallet = await getWallet(userId);
 
-  amount = Number(amount);
+  const balance = Number(wallet.balance || 0);
+  const locked = Number(wallet.locked || 0);
 
   return databases.updateDocument(
     DATABASE_ID,
     WALLET_COLLECTION,
     wallet.$id,
     {
-      balance: wallet.balance + amount,
-      locked: Math.max(0, (wallet.locked || 0) - amount)
+      balance: balance + amount,
+      locked: Math.max(0, locked - amount)
     }
   );
 }
 
-// =========================
-// PAY WINNER (FIXED)
-// =========================
+/**
+ * Credit game winnings.
+ * This preserves your existing wallet logic.
+ */
 export async function payWinner(userId, amount) {
+  amount = Number(amount);
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error("Enter a valid winning amount.");
+  }
+
   const wallet = await getWallet(userId);
 
-  amount = Number(amount);
+  const balance = Number(wallet.balance || 0);
+  const locked = Number(wallet.locked || 0);
 
   return databases.updateDocument(
     DATABASE_ID,
     WALLET_COLLECTION,
     wallet.$id,
     {
-      // winner receives full pot
-      balance: wallet.balance + amount,
-
-      // only remove THEIR OWN stake from locked
-      locked: Math.max(0, (wallet.locked || 0) - (amount / 2))
+      balance: balance + amount,
+      locked: Math.max(0, locked - amount / 2)
     }
   );
 }
