@@ -69,7 +69,6 @@ const PAYMENT_CONFIG = {
 
 // =====================================
 // COIN PACKAGES
-// Existing prices are preserved.
 // =====================================
 
 const COIN_PACKAGES = [
@@ -131,95 +130,142 @@ const COIN_PACKAGES = [
 ];
 
 // =====================================
-// STYLES
+// THEME-AWARE STYLES
+// Theme variables are controlled globally
+// by App.jsx.
 // =====================================
 
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "#07111f",
-    color: "#ffffff",
+    boxSizing: "border-box",
     padding: "20px",
-    fontFamily: "Arial, sans-serif"
+    background: "var(--app-bg, #07111f)",
+    color: "var(--app-text, #ffffff)",
+    fontFamily: "Arial, sans-serif",
+    transition: "background 0.2s, color 0.2s"
   },
 
   container: {
+    width: "100%",
     maxWidth: "850px",
     margin: "0 auto"
   },
 
   card: {
-    background: "#101e31",
-    border: "1px solid #263951",
-    borderRadius: "15px",
-    padding: "18px",
-    marginTop: "16px"
+    background: "var(--app-card, #101e31)",
+    border: "1px solid var(--app-border, #263951)",
+    borderRadius: "16px",
+    padding: "20px",
+    marginTop: "18px",
+    boxSizing: "border-box"
   },
 
   grid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
     gap: "12px",
     marginTop: "16px"
   },
 
   package: {
-    background: "#12243a",
-    color: "#ffffff",
-    border: "2px solid #263951",
+    width: "100%",
+    minHeight: "150px",
+    background: "var(--app-secondary, #12243a)",
+    color: "var(--app-text, #ffffff)",
+    border: "2px solid var(--app-border, #263951)",
     borderRadius: "12px",
-    padding: "16px",
+    padding: "15px",
     cursor: "pointer",
-    textAlign: "left"
+    textAlign: "left",
+    transition: "border-color 0.2s, transform 0.2s"
   },
 
   input: {
+    display: "block",
     width: "100%",
     boxSizing: "border-box",
-    padding: "12px",
+    padding: "13px",
     marginTop: "8px",
     marginBottom: "12px",
-    background: "#07111f",
-    color: "#ffffff",
-    border: "1px solid #344861",
-    borderRadius: "8px"
+    background: "var(--app-input, #07111f)",
+    color: "var(--app-text, #ffffff)",
+    border: "1px solid var(--app-border, #344861)",
+    borderRadius: "9px",
+    fontSize: "16px"
   },
 
   button: {
+    display: "block",
     width: "100%",
+    minHeight: "48px",
     padding: "13px",
-    marginTop: "10px",
+    marginTop: "12px",
     background: "#16a34a",
     color: "#ffffff",
     border: "none",
+    borderRadius: "10px",
+    fontWeight: "bold",
+    fontSize: "15px",
+    cursor: "pointer"
+  },
+
+  secondaryButton: {
+    display: "block",
+    width: "100%",
+    minHeight: "46px",
+    padding: "12px",
+    marginTop: "12px",
+    background: "var(--app-secondary, #263951)",
+    color: "var(--app-text, #ffffff)",
+    border: "1px solid var(--app-border, #344861)",
     borderRadius: "9px",
     fontWeight: "bold",
     cursor: "pointer"
   },
 
-  secondaryButton: {
-    width: "100%",
-    padding: "12px",
-    marginTop: "10px",
-    background: "#263951",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "9px",
-    cursor: "pointer"
-  },
-
   muted: {
-    color: "#a6b7cc",
+    color: "var(--app-muted, #a6b7cc)",
     fontSize: "13px",
-    lineHeight: 1.6
+    lineHeight: 1.7
   },
 
   message: {
-    padding: "12px",
-    borderRadius: "8px",
-    background: "#142b40",
+    padding: "13px",
+    borderRadius: "9px",
+    marginTop: "14px",
+    overflowWrap: "anywhere",
+    lineHeight: 1.6
+  },
+
+  progressRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "7px",
+    marginTop: "22px"
+  },
+
+  stepNumber: {
+    width: "30px",
+    height: "30px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "50%",
+    fontWeight: "bold",
+    marginBottom: "7px"
+  },
+
+  paymentOption: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "10px",
+    padding: "15px",
+    background: "var(--app-secondary, #07111f)",
+    border: "1px solid var(--app-border, #263951)",
+    borderRadius: "10px",
     marginTop: "12px",
-    overflowWrap: "anywhere"
+    cursor: "pointer"
   }
 };
 
@@ -247,7 +293,6 @@ export default function CoinsStore() {
   const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
-
   const [country, setCountry] = useState("NG");
 
   const [selectedPackage, setSelectedPackage] = useState(
@@ -255,28 +300,35 @@ export default function CoinsStore() {
   );
 
   const [paymentMethod, setPaymentMethod] = useState("card");
-
   const [paymentReference, setPaymentReference] = useState("");
-
   const [paymentNote, setPaymentNote] = useState("");
-
   const [userPhone, setUserPhone] = useState("");
-
   const [trxAddress, setTrxAddress] = useState("");
 
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(true);
-
   const [submitting, setSubmitting] = useState(false);
 
   const [message, setMessage] = useState("");
-
   const [messageType, setMessageType] = useState("info");
 
   const currentCountry = PAYMENT_CONFIG[country];
-
   const amount = selectedPackage?.prices?.[currentCountry.currency];
-
   const isNigeria = country === "NG";
+
+  // =====================================
+  // HELPERS
+  // =====================================
+
+  function showMessage(text, type = "info") {
+    setMessage(text);
+    setMessageType(type);
+  }
+
+  function clearMessage() {
+    setMessage("");
+    setMessageType("info");
+  }
 
   // =====================================
   // LOAD LOGGED-IN USER
@@ -314,18 +366,28 @@ export default function CoinsStore() {
             wallet.telephone ||
             ""
           );
+
+          // Use a stored country only when it matches
+          // one of the supported country codes.
+          const savedCountry = String(
+            wallet.countryCode || wallet.country || ""
+          ).toUpperCase();
+
+          if (PAYMENT_CONFIG[savedCountry]) {
+            setCountry(savedCountry);
+          }
         }
       } catch (error) {
         console.error("Unable to load user:", error);
 
         if (active) {
-          setMessage("Please sign in to purchase coins.");
-          setMessageType("error");
+          showMessage(
+            "Please sign in before purchasing coins.",
+            "error"
+          );
         }
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
@@ -337,16 +399,17 @@ export default function CoinsStore() {
   }, []);
 
   // =====================================
-  // LOAD PUBLIC TRX RECEIVING ADDRESS
+  // LOAD TRX ADDRESS
   // =====================================
 
   useEffect(() => {
     let active = true;
 
     async function loadTrxAddress() {
-      if (paymentMethod !== "trx") return;
-
-      setTrxAddress("");
+      if (paymentMethod !== "trx") {
+        setTrxAddress("");
+        return;
+      }
 
       try {
         const response = await databases.listDocuments(
@@ -360,15 +423,13 @@ export default function CoinsStore() {
 
         if (!active) return;
 
-        const setting = response.documents[0];
-
-        setTrxAddress(setting?.settingValue || "");
+        setTrxAddress(
+          response.documents[0]?.settingValue || ""
+        );
       } catch (error) {
         console.error("Could not load TRX settings:", error);
 
-        if (active) {
-          setTrxAddress("");
-        }
+        if (active) setTrxAddress("");
       }
     }
 
@@ -380,58 +441,108 @@ export default function CoinsStore() {
   }, [paymentMethod]);
 
   // =====================================
-  // SELECT PACKAGE
+  // STEP 1: SELECT COUNTRY
   // =====================================
 
-  function selectPackage(coinPackage) {
-    setSelectedPackage(coinPackage);
-    setMessage("");
-    setPaymentReference("");
-    setPaymentNote("");
+  function continueFromCountry() {
+    clearMessage();
+
+    if (!user) {
+      showMessage("Please sign in before purchasing coins.", "error");
+      return;
+    }
+
+    setStep(2);
   }
 
   // =====================================
-  // OPEN CARD PAYMENT
+  // STEP 2: SELECT COIN PACKAGE
+  // =====================================
+
+  function continueFromPackage() {
+    clearMessage();
+
+    if (!selectedPackage) {
+      showMessage("Please select a coin package.", "error");
+      return;
+    }
+
+    if (!isNigeria && selectedPackage.coins < 1000) {
+      showMessage(
+        "International purchases must be at least 1,000 coins.",
+        "error"
+      );
+      return;
+    }
+
+    setStep(3);
+  }
+
+  function selectPackage(coinPackage) {
+    setSelectedPackage(coinPackage);
+    setPaymentReference("");
+    setPaymentNote("");
+    clearMessage();
+  }
+
+  // =====================================
+  // STEP 3: SELECT PAYMENT METHOD
+  // =====================================
+
+  function continueFromPaymentMethod() {
+    clearMessage();
+
+    if (paymentMethod === "card" && !currentCountry.url) {
+      showMessage(
+        `Card payments for ${currentCountry.label} have not been configured yet.`,
+        "error"
+      );
+      return;
+    }
+
+    if (paymentMethod === "trx" && !trxAddress) {
+      showMessage(
+        "The TRX receiving address is not configured yet. Please contact support or select another payment method.",
+        "error"
+      );
+      return;
+    }
+
+    setStep(4);
+  }
+
+  // =====================================
+  // OPEN CARD PAYMENT PAGE
   // =====================================
 
   function openPaymentPage() {
-    setMessage("");
+    clearMessage();
 
     if (!user) {
-      setMessage("Please sign in before purchasing coins.");
-      setMessageType("error");
+      showMessage("Please sign in first.", "error");
       return;
     }
 
     if (!currentCountry.url) {
-      setMessage(
-        `Card payments for ${currentCountry.label} have not been configured yet.`
+      showMessage(
+        `Card payments for ${currentCountry.label} are not configured.`,
+        "error"
       );
-
-      setMessageType("error");
       return;
     }
 
-    if (selectedPackage.coins < 1000 && !isNigeria) {
-      setMessage(
-        "International purchases must be at least 1,000 coins."
-      );
-
-      setMessageType("error");
-      return;
-    }
-
+    // Open the payment provider in a new tab.
+    // The user must return to this page afterward.
     window.open(
       currentCountry.url,
       "_blank",
       "noopener,noreferrer"
     );
 
-    setMessage(
-      "Complete payment in the payment window. Return here afterward and enter your payment reference."
+    showMessage(
+      "Complete your payment in the new tab. Return here afterward and enter your payment reference.",
+      "success"
     );
-
-    setMessageType("info");
   }
 
   // =====================================
@@ -440,81 +551,78 @@ export default function CoinsStore() {
 
   async function copyTrxAddress() {
     if (!trxAddress) {
-      setMessage("The TRX receiving address is not configured yet.");
-      setMessageType("error");
+      showMessage(
+        "The TRX receiving address is not configured yet.",
+        "error"
+      );
       return;
     }
 
     try {
       await navigator.clipboard.writeText(trxAddress);
 
-      setMessage("TRX address copied.");
-      setMessageType("success");
+      showMessage("TRX address copied successfully.", "success");
     } catch {
-      setMessage(
-        "Copy was unsuccessful. Please select and copy the address manually."
+      showMessage(
+        "Copy failed. Select the address and copy it manually.",
+        "error"
       );
-
-      setMessageType("error");
     }
   }
 
   // =====================================
-  // SUBMIT PURCHASE REQUEST
+  // STEP 4: SUBMIT PURCHASE REQUEST
   //
-  // This does NOT credit coins.
-  // Admin must verify the payment.
+  // Does not credit coins automatically.
+  // Payment must be verified by an administrator.
   // =====================================
 
   async function submitPurchase() {
     if (submitting) return;
 
-    setMessage("");
+    clearMessage();
 
     if (!user) {
-      setMessage("Please sign in first.");
-      setMessageType("error");
+      showMessage("Please sign in first.", "error");
       return;
     }
 
     if (!selectedPackage) {
-      setMessage("Please select a coin package.");
-      setMessageType("error");
+      showMessage("Please select a coin package.", "error");
       return;
     }
 
     if (!paymentReference.trim()) {
-      setMessage(
+      showMessage(
         paymentMethod === "trx"
           ? "Enter your TRON transaction ID."
-          : "Enter your payment reference."
+          : "Enter your payment reference.",
+        "error"
       );
-
-      setMessageType("error");
       return;
     }
 
     if (paymentMethod === "trx" && !trxAddress) {
-      setMessage(
-        "The TRX receiving address is not configured yet. Please contact support."
+      showMessage(
+        "The TRX receiving address is not configured.",
+        "error"
       );
-
-      setMessageType("error");
       return;
     }
 
     if (paymentMethod === "card" && !currentCountry.url) {
-      setMessage("Card payment is unavailable for this country.");
-      setMessageType("error");
+      showMessage(
+        "Card payment is not available for this country.",
+        "error"
+      );
       return;
     }
 
     if (!isNigeria && selectedPackage.coins < 1000) {
-      setMessage(
-        "The minimum international purchase is 1,000 coins."
+      showMessage(
+        "The minimum international purchase is 1,000 coins.",
+        "error"
       );
-
-      setMessageType("error");
       return;
     }
 
@@ -527,56 +635,105 @@ export default function CoinsStore() {
         ID.unique(),
         {
           userId: user.$id,
-
           userEmail: user.email || "",
-
           userPhone: userPhone || "",
-
           packageId: selectedPackage.id,
-
           coins: selectedPackage.coins,
-
           amount: Number(amount),
-
           currency: currentCountry.currency,
-
           country,
-
           paymentProvider:
             paymentMethod === "trx"
               ? "trx"
               : "flutterwave",
-
           paymentReference: paymentReference.trim(),
-
           paymentNote: paymentNote.trim(),
-
           status: "pending"
         }
       );
 
-      setMessage(
-        "Your purchase request has been submitted. Your coins will be credited after the admin verifies your payment."
+      showMessage(
+        "Your purchase request has been submitted successfully. Your coins will be credited after an administrator verifies your payment.",
+        "success"
       );
-
-      setMessageType("success");
 
       setPaymentReference("");
       setPaymentNote("");
     } catch (error) {
       console.error("Purchase request failed:", error);
 
-      setMessage(
+      showMessage(
         `Could not submit your request: ${
           error.message ||
-          "Please check the deposit_requests collection attributes in Appwrite."
-        }`
+          "Check the deposit_requests collection attributes and permissions in Appwrite."
+        }`,
+        "error"
       );
-
-      setMessageType("error");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // =====================================
+  // GO BACK ONE STEP
+  // =====================================
+
+  function previousStep() {
+    clearMessage();
+    setStep(current => Math.max(1, current - 1));
+  }
+
+  // =====================================
+  // PROGRESS INDICATOR
+  // =====================================
+
+  const stepLabels = [
+    "Country",
+    "Amount",
+    "Payment",
+    "Complete"
+  ];
+
+  function renderProgress() {
+    return (
+      <div style={styles.progressRow}>
+        {stepLabels.map((label, index) => {
+          const stepNumber = index + 1;
+          const active = step === stepNumber;
+          const completed = step > stepNumber;
+
+          return (
+            <div
+              key={label}
+              style={{
+                textAlign: "center",
+                minWidth: 0,
+                fontSize: "12px",
+                color:
+                  active || completed
+                    ? "#22c55e"
+                    : "var(--app-muted, #a6b7cc)"
+              }}
+            >
+              <div
+                style={{
+                  ...styles.stepNumber,
+                  background:
+                    active || completed
+                      ? "#16a34a"
+                      : "var(--app-secondary, #263951)",
+                  color: "#ffffff"
+                }}
+              >
+                {completed ? "✓" : stepNumber}
+              </div>
+
+              <div>{label}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   // =====================================
@@ -601,13 +758,17 @@ export default function CoinsStore() {
   return (
     <main style={styles.page}>
       <div style={styles.container}>
+        {/* TOP NAVIGATION */}
 
         <button
+          type="button"
           style={styles.secondaryButton}
           onClick={() => navigate("/wallet")}
         >
           ← Back to Wallet
         </button>
+
+        {/* HEADER */}
 
         <header style={{ textAlign: "center", marginTop: 25 }}>
           <div style={{ fontSize: 48 }}>🪙</div>
@@ -615,17 +776,24 @@ export default function CoinsStore() {
           <h1>Win9ja Life Coin Store</h1>
 
           <p style={styles.muted}>
-            Purchase coins for your Win9ja Life account.
+            Buy coins in a few simple steps and use them to
+            enter supported games.
           </p>
         </header>
+
+        {/* PROGRESS */}
+
+        {renderProgress()}
 
         {/* STATUS MESSAGE */}
 
         {message && (
           <div
             role="status"
+            aria-live="polite"
             style={{
               ...styles.message,
+              background: "var(--app-card, #101e31)",
               border:
                 messageType === "error"
                   ? "1px solid #ef4444"
@@ -638,338 +806,565 @@ export default function CoinsStore() {
           </div>
         )}
 
-        {/* COUNTRY SELECTION */}
+        {/* =================================
+            STEP 1: COUNTRY
+        ================================= */}
 
-        <section style={styles.card}>
-          <h2>🌍 Select your country</h2>
+        {step === 1 && (
+          <section style={styles.card}>
+            <h2>🌍 Step 1: Select your country</h2>
 
-          <select
-            style={styles.input}
-            value={country}
-            onChange={event => {
-              setCountry(event.target.value);
-              setMessage("");
-              setPaymentReference("");
-            }}
-          >
-            {Object.entries(PAYMENT_CONFIG).map(
-              ([code, config]) => (
-                <option key={code} value={code}>
-                  {config.label} ({config.currency})
-                </option>
-              )
-            )}
-          </select>
+            <p style={styles.muted}>
+              Select your country so we can display the
+              corresponding currency and available payment options.
+            </p>
 
-          <p style={styles.muted}>
-            Currency: {currentCountry.currency}
-          </p>
-        </section>
+            <label htmlFor="country">
+              Country of payment
+            </label>
 
-        {/* PACKAGE SELECTION */}
+            <select
+              id="country"
+              style={styles.input}
+              value={country}
+              onChange={event => {
+                const nextCountry = event.target.value;
 
-        <section style={styles.card}>
-          <h2>Choose your coin package</h2>
+                setCountry(nextCountry);
 
-          <div style={styles.grid}>
-            {COIN_PACKAGES
-              .filter(pkg => isNigeria || pkg.coins >= 1000)
-              .map(pkg => {
-                const selected =
-                  selectedPackage.id === pkg.id;
+                setSelectedPackage(current => {
+                  if (
+                    nextCountry !== "NG" &&
+                    current.coins < 1000
+                  ) {
+                    return COIN_PACKAGES[1];
+                  }
 
-                return (
-                  <button
-                    key={pkg.id}
-                    type="button"
-                    onClick={() => selectPackage(pkg)}
-                    style={{
-                      ...styles.package,
-                      border: selected
-                        ? "2px solid #22c55e"
-                        : "2px solid #263951"
-                    }}
-                  >
-                    <div style={{ fontSize: 27 }}>
-                      🪙
-                    </div>
+                  return current;
+                });
 
-                    <strong>
-                      {pkg.coins.toLocaleString()} coins
-                    </strong>
+                setPaymentReference("");
+                setPaymentNote("");
+                clearMessage();
+              }}
+            >
+              {Object.entries(PAYMENT_CONFIG).map(
+                ([code, config]) => (
+                  <option key={code} value={code}>
+                    {config.label} ({config.currency})
+                  </option>
+                )
+              )}
+            </select>
 
-                    <div
+            <div
+              style={{
+                ...styles.card,
+                marginTop: 8,
+                background: "var(--app-secondary, #12243a)"
+              }}
+            >
+              <p style={styles.muted}>Selected country</p>
+
+              <h3>{currentCountry.label}</h3>
+
+              <p>
+                Currency: <strong>{currentCountry.currency}</strong>
+              </p>
+            </div>
+
+            <button
+              type="button"
+              style={styles.button}
+              onClick={continueFromCountry}
+            >
+              Next: Choose Coin Amount →
+            </button>
+          </section>
+        )}
+
+        {/* =================================
+            STEP 2: COIN AMOUNT
+        ================================= */}
+
+        {step === 2 && (
+          <section style={styles.card}>
+            <h2>🪙 Step 2: Choose your coin amount</h2>
+
+            <p style={styles.muted}>
+              Country: {currentCountry.label} · Currency:{" "}
+              {currentCountry.currency}
+            </p>
+
+            <div style={styles.grid}>
+              {COIN_PACKAGES
+                .filter(pkg => isNigeria || pkg.coins >= 1000)
+                .map(pkg => {
+                  const selected =
+                    selectedPackage.id === pkg.id;
+
+                  return (
+                    <button
+                      key={pkg.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => selectPackage(pkg)}
                       style={{
-                        fontSize: 21,
-                        marginTop: 10,
-                        color: "#4ade80"
+                        ...styles.package,
+                        border: selected
+                          ? "2px solid #22c55e"
+                          : "2px solid var(--app-border, #263951)"
                       }}
                     >
-                      {formatPrice(
-                        pkg.prices[currentCountry.currency],
-                        currentCountry.currency
-                      )}
-                    </div>
+                      <div style={{ fontSize: 29 }}>
+                        🪙
+                      </div>
 
-                    <p style={styles.muted}>
-                      {selected ? "Selected" : "Choose package"}
-                    </p>
-                  </button>
-                );
-              })}
-          </div>
+                      <strong>
+                        {pkg.coins.toLocaleString()} coins
+                      </strong>
 
-          <div
-            style={{
-              marginTop: 20,
-              padding: 15,
-              borderRadius: 10,
-              background: "#07111f"
-            }}
-          >
-            <p>Selected package:</p>
+                      <div
+                        style={{
+                          fontSize: 21,
+                          fontWeight: "bold",
+                          marginTop: 10,
+                          color: "#22c55e"
+                        }}
+                      >
+                        {formatPrice(
+                          pkg.prices[currentCountry.currency],
+                          currentCountry.currency
+                        )}
+                      </div>
 
-            <h2 style={{ color: "#4ade80" }}>
-              {selectedPackage.coins.toLocaleString()} coins
-            </h2>
-
-            <h3>
-              {formatPrice(
-                amount,
-                currentCountry.currency
-              )}
-            </h3>
-          </div>
-        </section>
-
-        {/* PAYMENT METHOD */}
-
-        <section style={styles.card}>
-          <h2>💳 Choose payment method</h2>
-
-          <label
-            style={{
-              display: "block",
-              padding: 12,
-              background: "#07111f",
-              borderRadius: 8,
-              marginTop: 10
-            }}
-          >
-            <input
-              type="radio"
-              name="paymentMethod"
-              value="card"
-              checked={paymentMethod === "card"}
-              onChange={() => {
-                setPaymentMethod("card");
-                setMessage("");
-              }}
-            />
-
-            {" "}Card / Flutterwave
-          </label>
-
-          <label
-            style={{
-              display: "block",
-              padding: 12,
-              background: "#07111f",
-              borderRadius: 8,
-              marginTop: 10
-            }}
-          >
-            <input
-              type="radio"
-              name="paymentMethod"
-              value="trx"
-              checked={paymentMethod === "trx"}
-              onChange={() => {
-                setPaymentMethod("trx");
-                setMessage("");
-              }}
-            />
-
-            {" "}TRX / TRON network
-          </label>
-
-          {/* CARD PAYMENT */}
-
-          {paymentMethod === "card" && (
-            <div style={{ marginTop: 18 }}>
-              <h3>Pay with card</h3>
-
-              <p style={styles.muted}>
-                Open the payment page, complete payment,
-                and return here to submit your payment reference.
-              </p>
-
-              <button
-                style={styles.button}
-                onClick={openPaymentPage}
-                disabled={!currentCountry.url}
-              >
-                {currentCountry.url
-                  ? "Open payment page"
-                  : "Payment not configured"}
-              </button>
-
-              {!currentCountry.url && (
-                <p style={styles.muted}>
-                  A country-specific payment link must be
-                  configured before card payments can be used
-                  for this country.
-                </p>
-              )}
+                      <p style={styles.muted}>
+                        {selected ? "✓ Selected" : "Tap to select"}
+                      </p>
+                    </button>
+                  );
+                })}
             </div>
-          )}
 
-          {/* TRX PAYMENT */}
+            <div
+              style={{
+                ...styles.card,
+                background: "var(--app-secondary, #12243a)"
+              }}
+            >
+              <p style={styles.muted}>Your selection</p>
 
-          {paymentMethod === "trx" && (
-            <div style={{ marginTop: 18 }}>
-              <h3>₮ Pay using TRX</h3>
+              <h2 style={{ color: "#22c55e" }}>
+                🪙 {selectedPackage.coins.toLocaleString()} coins
+              </h2>
+
+              <h3>
+                {formatPrice(
+                  amount,
+                  currentCountry.currency
+                )}
+              </h3>
+            </div>
+
+            <button
+              type="button"
+              style={styles.button}
+              onClick={continueFromPackage}
+            >
+              Next: Payment Method →
+            </button>
+
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={previousStep}
+            >
+              ← Previous: Country
+            </button>
+          </section>
+        )}
+
+        {/* =================================
+            STEP 3: PAYMENT METHOD
+        ================================= */}
+
+        {step === 3 && (
+          <section style={styles.card}>
+            <h2>💳 Step 3: Select payment method</h2>
+
+            <div
+              style={{
+                ...styles.card,
+                marginTop: 8,
+                background: "var(--app-secondary, #12243a)"
+              }}
+            >
+              <p style={styles.muted}>Purchase summary</p>
+
+              <h3>
+                🪙 {selectedPackage.coins.toLocaleString()} coins
+              </h3>
+
+              <h2 style={{ color: "#22c55e" }}>
+                {formatPrice(
+                  amount,
+                  currentCountry.currency
+                )}
+              </h2>
 
               <p style={styles.muted}>
-                Only send TRX using the TRON network.
-                Sending another asset or using another network
-                may result in permanent loss of funds.
+                Country: {currentCountry.label}
               </p>
+            </div>
 
-              {trxAddress ? (
-                <>
-                  <label>
-                    Official TRX receiving address
-                  </label>
+            <label style={styles.paymentOption}>
+              <input
+                type="radio"
+                name="paymentMethod"
+                value="card"
+                checked={paymentMethod === "card"}
+                onChange={() => {
+                  setPaymentMethod("card");
+                  clearMessage();
+                }}
+              />
 
-                  <input
-                    style={styles.input}
-                    value={trxAddress}
-                    readOnly
-                  />
+              <span>
+                <strong>💳 Card / Flutterwave</strong>
 
-                  <button
-                    type="button"
-                    style={styles.button}
-                    onClick={copyTrxAddress}
-                  >
-                    📋 Copy TRX address
-                  </button>
-                </>
-              ) : (
-                <div
+                <span
                   style={{
-                    ...styles.message,
-                    border: "1px solid #f59e0b"
+                    display: "block",
+                    ...styles.muted
                   }}
                 >
-                  <strong>
-                    TRX receiving address not configured.
-                  </strong>
+                  Pay through the configured Flutterwave payment page.
+                </span>
+              </span>
+            </label>
 
+            <label style={styles.paymentOption}>
+              <input
+                type="radio"
+                name="paymentMethod"
+                value="trx"
+                checked={paymentMethod === "trx"}
+                onChange={() => {
+                  setPaymentMethod("trx");
+                  clearMessage();
+                }}
+              />
+
+              <span>
+                <strong>₮ TRX / TRON network</strong>
+
+                <span
+                  style={{
+                    display: "block",
+                    ...styles.muted
+                  }}
+                >
+                  Pay with TRX using the verified receiving address.
+                </span>
+              </span>
+            </label>
+
+            {paymentMethod === "card" && (
+              <div style={{ marginTop: 18 }}>
+                <h3>Card payment</h3>
+
+                {currentCountry.url ? (
                   <p style={styles.muted}>
-                    The administrator must create the
-                    app_settings collection and add the public
-                    receiving address before users can submit
-                    TRX purchase requests.
+                    The configured payment link will open when
+                    you reach the next step.
                   </p>
-                </div>
-              )}
+                ) : (
+                  <p
+                    style={{
+                      ...styles.muted,
+                      color: "#f59e0b"
+                    }}
+                  >
+                    Card payment has not been configured for{" "}
+                    {currentCountry.label}. You can choose TRX
+                    if the receiving address is configured.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {paymentMethod === "trx" && (
+              <div style={{ marginTop: 18 }}>
+                <h3>₮ TRX payment</h3>
+
+                <p style={styles.muted}>
+                  Only send TRX using the TRON network.
+                  Sending another asset or using another network
+                  can result in permanent loss of funds.
+                </p>
+
+                {trxAddress ? (
+                  <>
+                    <label htmlFor="trxAddress">
+                      Official receiving address
+                    </label>
+
+                    <input
+                      id="trxAddress"
+                      style={styles.input}
+                      value={trxAddress}
+                      readOnly
+                    />
+
+                    <button
+                      type="button"
+                      style={styles.secondaryButton}
+                      onClick={copyTrxAddress}
+                    >
+                      📋 Copy TRX Address
+                    </button>
+                  </>
+                ) : (
+                  <p
+                    style={{
+                      ...styles.muted,
+                      color: "#f59e0b"
+                    }}
+                  >
+                    The receiving address has not been configured.
+                    Add the public address to the app_settings
+                    collection before using TRX payments.
+                  </p>
+                )}
+
+                <p style={styles.muted}>
+                  Confirm the required TRX amount using a reliable
+                  current exchange rate before sending. This page
+                  does not calculate a live TRX conversion.
+                </p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              style={{
+                ...styles.button,
+                opacity:
+                  (paymentMethod === "card" && !currentCountry.url) ||
+                  (paymentMethod === "trx" && !trxAddress)
+                    ? 0.6
+                    : 1
+              }}
+              disabled={
+                (paymentMethod === "card" && !currentCountry.url) ||
+                (paymentMethod === "trx" && !trxAddress)
+              }
+              onClick={continueFromPaymentMethod}
+            >
+              Next: Complete Payment →
+            </button>
+
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={previousStep}
+            >
+              ← Previous: Coin Amount
+            </button>
+          </section>
+        )}
+
+        {/* =================================
+            STEP 4: COMPLETE PAYMENT
+        ================================= */}
+
+        {step === 4 && (
+          <section style={styles.card}>
+            <h2>✅ Step 4: Complete your purchase</h2>
+
+            <div
+              style={{
+                ...styles.card,
+                marginTop: 8,
+                background: "var(--app-secondary, #12243a)"
+              }}
+            >
+              <p style={styles.muted}>Order summary</p>
+
+              <h3>
+                🪙 {selectedPackage.coins.toLocaleString()} coins
+              </h3>
+
+              <h2 style={{ color: "#22c55e" }}>
+                {formatPrice(
+                  amount,
+                  currentCountry.currency
+                )}
+              </h2>
 
               <p style={styles.muted}>
-                Confirm the required TRX amount using the
-                current exchange rate before sending. This page
-                does not have a live TRX price feed, so it does
-                not calculate a guaranteed TRX payment amount.
+                Country: {currentCountry.label}
+              </p>
+
+              <p style={styles.muted}>
+                Payment method:{" "}
+                {paymentMethod === "trx"
+                  ? "TRX / TRON"
+                  : "Card / Flutterwave"}
               </p>
             </div>
-          )}
 
-          {/* PAYMENT REFERENCE */}
+            {paymentMethod === "card" && (
+              <div style={{ marginTop: 18 }}>
+                <h3>1. Make your payment</h3>
 
-          <label
-            style={{
-              display: "block",
-              marginTop: 20
-            }}
-          >
-            {paymentMethod === "trx"
-              ? "TRON transaction ID"
-              : "Payment reference"}
-          </label>
+                <p style={styles.muted}>
+                  Open the payment page, complete your payment,
+                  and return to this page to enter the reference.
+                </p>
 
-          <input
-            style={styles.input}
-            value={paymentReference}
-            onChange={event =>
-              setPaymentReference(event.target.value)
-            }
-            placeholder={
-              paymentMethod === "trx"
-                ? "Paste your TRON transaction ID"
-                : "Enter your payment reference"
-            }
-          />
+                <button
+                  type="button"
+                  style={styles.button}
+                  onClick={openPaymentPage}
+                >
+                  Open Flutterwave Payment ↗
+                </button>
+              </div>
+            )}
 
-          <label>Additional note (optional)</label>
+            {paymentMethod === "trx" && (
+              <div style={{ marginTop: 18 }}>
+                <h3>1. Send your TRX payment</h3>
 
-          <textarea
-            style={{
-              ...styles.input,
-              resize: "vertical"
-            }}
-            rows={3}
-            value={paymentNote}
-            onChange={event =>
-              setPaymentNote(event.target.value)
-            }
-            placeholder="Add optional payment information"
-          />
+                <p style={styles.muted}>
+                  Send only the verified amount to the receiving
+                  address displayed below. Verify the address and
+                  network before confirming your transaction.
+                </p>
 
-          <button
-            style={{
-              ...styles.button,
-              opacity: submitting ? 0.6 : 1
-            }}
-            onClick={submitPurchase}
-            disabled={submitting}
-          >
-            {submitting
-              ? "Submitting request..."
-              : "Submit payment for verification"}
-          </button>
+                <label htmlFor="finalTrxAddress">
+                  Receiving address
+                </label>
 
-          <p style={styles.muted}>
-            Submitting a reference does not automatically
-            credit coins. The administrator must verify that
-            the payment was actually received.
-          </p>
-        </section>
+                <input
+                  id="finalTrxAddress"
+                  style={styles.input}
+                  value={trxAddress}
+                  readOnly
+                />
 
-        {/* IMPORTANT NOTICE */}
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={copyTrxAddress}
+                >
+                  📋 Copy TRX Address
+                </button>
+              </div>
+            )}
+
+            <div style={{ marginTop: 22 }}>
+              <h3>2. Submit your payment details</h3>
+
+              <label htmlFor="paymentReference">
+                {paymentMethod === "trx"
+                  ? "TRON transaction ID"
+                  : "Payment reference"}
+              </label>
+
+              <input
+                id="paymentReference"
+                style={styles.input}
+                value={paymentReference}
+                onChange={event =>
+                  setPaymentReference(event.target.value)
+                }
+                placeholder={
+                  paymentMethod === "trx"
+                    ? "Paste your TRON transaction ID"
+                    : "Enter your payment reference"
+                }
+                autoComplete="off"
+              />
+
+              <label htmlFor="paymentNote">
+                Additional note (optional)
+              </label>
+
+              <textarea
+                id="paymentNote"
+                style={{
+                  ...styles.input,
+                  resize: "vertical"
+                }}
+                rows={3}
+                value={paymentNote}
+                onChange={event =>
+                  setPaymentNote(event.target.value)
+                }
+                placeholder="Add optional payment information"
+              />
+
+              <button
+                type="button"
+                style={{
+                  ...styles.button,
+                  opacity: submitting ? 0.6 : 1
+                }}
+                disabled={submitting}
+                onClick={submitPurchase}
+              >
+                {submitting
+                  ? "Submitting Request..."
+                  : "Submit Payment for Verification"}
+              </button>
+
+              <p style={styles.muted}>
+                Your request will remain pending until an
+                administrator verifies the payment. Entering a
+                reference does not itself prove payment or credit
+                coins automatically.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={previousStep}
+              disabled={submitting}
+            >
+              ← Previous: Payment Method
+            </button>
+
+            <button
+              type="button"
+              style={styles.secondaryButton}
+              onClick={() => navigate("/wallet")}
+            >
+              Return to Wallet
+            </button>
+          </section>
+        )}
+
+        {/* =================================
+            PAYMENT SAFETY
+        ================================= */}
 
         <section style={styles.card}>
           <h3>🔐 Payment safety</h3>
 
           <p style={styles.muted}>
-            Win9ja Life will never ask for your wallet seed
-            phrase or private key. Never share them with anyone.
+            Win9ja Life will never ask for your wallet seed phrase
+            or private key. Never share them with anyone.
           </p>
 
           <p style={styles.muted}>
-            Your game balance and coin balance are separate.
-            Buying coins does not directly change your game
-            funds.
+            Coin purchases are separate from your legacy game-fund
+            balance. Your coins should only be credited after the
+            payment has been independently verified.
           </p>
         </section>
-
-        <button
-          style={styles.secondaryButton}
-          onClick={() => navigate("/wallet")}
-        >
-          Return to Wallet
-        </button>
-
       </div>
     </main>
   );
