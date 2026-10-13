@@ -1,743 +1,904 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { account, databases, DATABASE_ID } from "../lib/appwrite";
-import { getWallet } from "../lib/wallet";
-import { ID, Query } from "appwrite";
 
-const PROMO_COLLECTION = "promocodes";
-const WALLET_COLLECTION = "wallets";
+import {
+  account,
+  databases,
+  DATABASE_ID,
+  WALLET_COLLECTION,
+  PROMO_COLLECTION,
+  DEPOSIT_COLLECTION,
+  WITHDRAW_COLLECTION,
+  ID,
+  Query
+} from "../lib/appwrite";
+
+import { getWallet } from "../lib/wallet";
+
+// =====================================
+// STYLES
+// =====================================
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#07111f",
+    color: "#ffffff",
+    padding: "20px",
+    fontFamily: "Arial, sans-serif"
+  },
+
+  container: {
+    maxWidth: "760px",
+    margin: "0 auto"
+  },
+
+  card: {
+    background: "#101e31",
+    border: "1px solid #263951",
+    borderRadius: "14px",
+    padding: "18px",
+    marginTop: "16px"
+  },
+
+  button: {
+    width: "100%",
+    padding: "13px",
+    marginTop: "10px",
+    background: "#16a34a",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "9px",
+    fontWeight: "bold",
+    cursor: "pointer"
+  },
+
+  secondaryButton: {
+    width: "100%",
+    padding: "12px",
+    marginTop: "10px",
+    background: "#263951",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "9px",
+    cursor: "pointer"
+  },
+
+  dangerButton: {
+    width: "100%",
+    padding: "12px",
+    marginTop: "10px",
+    background: "#b91c1c",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "9px",
+    cursor: "pointer"
+  },
+
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "12px",
+    marginTop: "8px",
+    marginBottom: "12px",
+    background: "#07111f",
+    color: "#ffffff",
+    border: "1px solid #344861",
+    borderRadius: "8px"
+  },
+
+  muted: {
+    color: "#a6b7cc",
+    fontSize: "13px",
+    lineHeight: 1.6
+  },
+
+  modal: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 1000,
+    padding: "16px",
+    background: "rgba(0,0,0,0.8)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflowY: "auto"
+  },
+
+  modalCard: {
+    background: "#101e31",
+    border: "1px solid #344861",
+    borderRadius: "14px",
+    padding: "20px",
+    width: "100%",
+    maxWidth: "460px",
+    maxHeight: "90vh",
+    overflowY: "auto",
+    boxSizing: "border-box"
+  }
+};
+
+// =====================================
+// HELPER
+// =====================================
+
+function formatNaira(amount) {
+  return `₦${Number(amount || 0).toLocaleString("en-NG")}`;
+}
+
+// =====================================
+// WALLET COMPONENT
+// =====================================
 
 export default function Wallet() {
   const navigate = useNavigate();
 
   const [user, setUser] = useState(null);
+
   const [wallet, setWallet] = useState(null);
-  const [promoCode, setPromoCode] = useState("");
+
   const [loading, setLoading] = useState(true);
-  const [redeeming, setRedeeming] = useState(false);
+
+  const [promo, setPromo] = useState(null);
+
+  const [zangiContact, setZangiContact] = useState("");
+
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("success");
 
-  // ========================================
+  // Game-fund deposit modal
+  const [showDeposit, setShowDeposit] = useState(false);
+
+  const [depositAmount, setDepositAmount] = useState("");
+
+  const [depositName, setDepositName] = useState("");
+
+  const [depositLoading, setDepositLoading] = useState(false);
+
+  // Coin withdrawal modal
+  const [showWithdraw, setShowWithdraw] = useState(false);
+
+  const [withdrawCoins, setWithdrawCoins] = useState("");
+
+  const [bank, setBank] = useState("");
+
+  const [accountNumber, setAccountNumber] = useState("");
+
+  const [accountName, setAccountName] = useState("");
+
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+
+  // =====================================
   // LOAD USER AND WALLET
-  // ========================================
-  async function loadWallet() {
-    setLoading(true);
-
-    try {
-      const currentUser = await account.get();
-      setUser(currentUser);
-
-      const walletData = await getWallet(currentUser.$id);
-      setWallet(walletData);
-    } catch (error) {
-      console.error("Failed to load wallet:", error);
-      setMessage("Unable to load your wallet. Please sign in again.");
-      setMessageType("error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  // =====================================
 
   useEffect(() => {
     loadWallet();
   }, []);
 
-  // ========================================
-  // FORMAT COINS
-  // ========================================
-  function formatCoins(value) {
-    const amount = Number(value ?? 0);
-
-    return Number.isFinite(amount)
-      ? amount.toLocaleString()
-      : "0";
-  }
-
-  // ========================================
-  // REDEEM PROMO CODE
-  // ========================================
-  async function redeemPromoCode(event) {
-    event.preventDefault();
-
+  async function loadWallet() {
+    setLoading(true);
     setMessage("");
 
-    const code = promoCode.trim().toUpperCase();
-
-    if (!code) {
-      setMessage("Please enter a promo code.");
-      setMessageType("error");
-      return;
-    }
-
-    if (!user || !wallet) {
-      setMessage("Your wallet is not ready. Please refresh and try again.");
-      setMessageType("error");
-      return;
-    }
-
-    setRedeeming(true);
-
     try {
-      const response = await databases.listDocuments(
+      const currentUser = await account.get();
+
+      setUser(currentUser);
+
+      const currentWallet = await getWallet(currentUser.$id);
+
+      setWallet(currentWallet);
+
+      setZangiContact(currentWallet.zangiContact || "");
+
+      // Load the user's promo code.
+      const promoResponse = await databases.listDocuments(
         DATABASE_ID,
         PROMO_COLLECTION,
         [
-          Query.equal("code", code),
-          Query.limit(1),
+          Query.equal("ownerId", currentUser.$id),
+          Query.limit(1)
         ]
       );
 
-      if (response.documents.length === 0) {
-        setMessage("Invalid promo code.");
-        setMessageType("error");
+      if (promoResponse.documents.length > 0) {
+        setPromo(promoResponse.documents[0]);
+      }
+    } catch (error) {
+      console.error("Wallet loading failed:", error);
+
+      setMessage(
+        "Unable to load your wallet. Please sign in and try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // =====================================
+  // CREATE PROMO CODE
+  // =====================================
+
+  function generateCode(displayName) {
+    const base = (
+      displayName ||
+      wallet?.name ||
+      "USER"
+    )
+      .replace(/\s+/g, "")
+      .toUpperCase()
+      .slice(0, 5);
+
+    return base + Math.floor(1000 + Math.random() * 9000);
+  }
+
+  async function createPromo() {
+    try {
+      if (!user) {
+        alert("Please sign in first.");
         return;
       }
 
-      const promo = response.documents[0];
-
-      if (promo.active === false) {
-        setMessage("This promo code is no longer active.");
-        setMessageType("error");
+      if (promo?.code) {
+        alert("You already have a promo code.");
         return;
       }
 
-      if (promo.expiresAt) {
-        const expiryDate = new Date(promo.expiresAt);
+      const code = generateCode(wallet?.name);
 
-        if (
-          !Number.isNaN(expiryDate.getTime()) &&
-          expiryDate.getTime() < Date.now()
-        ) {
-          setMessage("This promo code has expired.");
-          setMessageType("error");
-          return;
+      const newPromo = await databases.createDocument(
+        DATABASE_ID,
+        PROMO_COLLECTION,
+        ID.unique(),
+        {
+          code,
+          ownerId: user.$id,
+          usedCount: 0,
+          isActive: true
         }
-      }
-
-      const rewardCoins = Number(
-        promo.coins ?? promo.rewardCoins ?? promo.amount ?? 0
       );
 
-      if (!Number.isFinite(rewardCoins) || rewardCoins <= 0) {
-        setMessage("This promo code has no valid coin reward.");
-        setMessageType("error");
+      setPromo(newPromo);
+
+      alert("Promo code created successfully.");
+    } catch (error) {
+      console.error("Promo creation failed:", error);
+
+      alert(
+        `Could not create promo code: ${
+          error.message || "Please try again."
+        }`
+      );
+    }
+  }
+
+  // =====================================
+  // COPY TEXT
+  // =====================================
+
+  async function copyText(text, label) {
+    try {
+      await navigator.clipboard.writeText(text);
+
+      alert(`${label} copied successfully.`);
+    } catch {
+      alert(
+        "Copy failed. Please select and copy the text manually."
+      );
+    }
+  }
+
+  function copyPromoCode() {
+    if (!promo?.code) {
+      alert("Create a promo code first.");
+      return;
+    }
+
+    copyText(promo.code, "Promo code");
+  }
+
+  function copyInvite() {
+    if (!promo?.code) {
+      alert("Create a promo code first.");
+      return;
+    }
+
+    const inviteText = `
+🎮 Join Win9ja Life!
+
+Use Promo Code: ${promo.code}
+
+🪙 Play and earn rewards.
+
+Visit:
+https://win9jalife.vercel.app
+
+📲 Community Group:
+https://chat.whatsapp.com/XXXXXXXX
+    `.trim();
+
+    copyText(inviteText, "Invitation");
+  }
+
+  // =====================================
+  // SAVE ZANGI CONTACT
+  // =====================================
+
+  async function saveZangi() {
+    try {
+      if (!wallet?.$id) {
+        alert("Wallet not found.");
         return;
       }
-
-      if (!wallet.$id) {
-        setMessage(
-          "Your wallet document ID could not be found. Please contact support."
-        );
-        setMessageType("error");
-        return;
-      }
-
-      const currentCoins = Number(wallet.coins ?? 0);
 
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
         wallet.$id,
         {
-          coins: currentCoins + rewardCoins,
+          zangiContact: zangiContact.trim()
         }
       );
 
-      setPromoCode("");
-      setMessage(
-        `Success! ${formatCoins(rewardCoins)} coins have been added to your wallet.`
-      );
-      setMessageType("success");
+      alert("Zangi contact saved successfully.");
 
       await loadWallet();
     } catch (error) {
-      console.error("Promo redemption failed:", error);
-
-      setMessage(
-        error?.message ||
-          "Unable to redeem this promo code. Please try again."
+      alert(
+        `Could not save Zangi contact: ${error.message}`
       );
-      setMessageType("error");
-    } finally {
-      setRedeeming(false);
     }
   }
 
-  // ========================================
+  // =====================================
+  // EXISTING GAME-FUND DEPOSIT
+  //
+  // This remains separate from coin purchases.
+  // =====================================
+
+  async function makeDeposit() {
+    if (depositLoading) return;
+
+    if (!depositAmount || Number(depositAmount) < 200) {
+      alert("Minimum game-fund deposit is ₦200.");
+      return;
+    }
+
+    if (!depositName.trim()) {
+      alert("Enter your full name.");
+      return;
+    }
+
+    setDepositLoading(true);
+
+    try {
+      const currentUser = await account.get();
+
+      const reference = `DEP-${Date.now()}`;
+
+      await databases.createDocument(
+        DATABASE_ID,
+        DEPOSIT_COLLECTION,
+        ID.unique(),
+        {
+          userId: currentUser.$id,
+          amount: Number(depositAmount),
+          name: depositName.trim(),
+          status: "pending",
+          reference,
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      window.open(
+        "https://flutterwave.com/pay/qiattof2hy2w",
+        "_blank",
+        "noopener,noreferrer"
+      );
+
+      alert(
+        "Deposit request created. The payment must be verified before funds are credited."
+      );
+
+      setShowDeposit(false);
+      setDepositAmount("");
+      setDepositName("");
+    } catch (error) {
+      console.error("Game deposit failed:", error);
+
+      alert(
+        `Deposit failed: ${error.message}`
+      );
+    } finally {
+      setDepositLoading(false);
+    }
+  }
+
+  // =====================================
+  // REQUEST COIN WITHDRAWAL
+  //
+  // Nigeria: local bank details.
+  // Ghana and international TRX withdrawals
+  // need additional configuration before use.
+  //
+  // Coins are NOT deducted at request time.
+  // =====================================
+
+  async function requestWithdraw() {
+    if (withdrawLoading) return;
+
+    const coins = Number(withdrawCoins);
+
+    if (!Number.isInteger(coins) || coins <= 0) {
+      alert("Enter a valid whole number of coins.");
+      return;
+    }
+
+    const country = String(
+      wallet?.country ||
+      wallet?.countryCode ||
+      "NG"
+    ).toUpperCase();
+
+    const isNigeria =
+      country === "NG" ||
+      country === "NIGERIA";
+
+    const isGhana =
+      country === "GH" ||
+      country === "GHANA";
+
+    const minimum = isNigeria || isGhana ? 2000 : 5000;
+
+    if (coins < minimum) {
+      alert(
+        `Minimum withdrawal is ${minimum.toLocaleString()} coins.`
+      );
+      return;
+    }
+
+    if (coins > Number(wallet?.coins || 0)) {
+      alert("Insufficient coin balance.");
+      return;
+    }
+
+    // International withdrawals require a configured TRX form
+    // and corresponding Appwrite attributes.
+    if (!isNigeria) {
+      alert(
+        "International TRX withdrawals will be enabled after the TRX address and withdrawal collection are configured."
+      );
+
+      return;
+    }
+
+    if (!bank.trim()) {
+      alert("Enter your bank name.");
+      return;
+    }
+
+    if (!/^\d{10}$/.test(accountNumber.trim())) {
+      alert("Enter a valid 10-digit Nigerian bank account number.");
+      return;
+    }
+
+    if (!accountName.trim()) {
+      alert("Enter the account holder's name.");
+      return;
+    }
+
+    setWithdrawLoading(true);
+
+    try {
+      const currentUser = await account.get();
+
+      await databases.createDocument(
+        DATABASE_ID,
+        WITHDRAW_COLLECTION,
+        ID.unique(),
+        {
+          userId: currentUser.$id,
+
+          // This field stores the requested coin count
+          // for compatibility with the existing schema.
+          amount: coins,
+
+          bank: bank.trim(),
+
+          accountNumber: accountNumber.trim(),
+
+          accountName: accountName.trim(),
+
+          status: "pending",
+
+          createdAt: new Date().toISOString()
+        }
+      );
+
+      alert(
+        "Your withdrawal request has been submitted. Your coins remain in your wallet until the request is paid."
+      );
+
+      setShowWithdraw(false);
+
+      setWithdrawCoins("");
+      setBank("");
+      setAccountNumber("");
+      setAccountName("");
+    } catch (error) {
+      console.error("Withdrawal request failed:", error);
+
+      alert(
+        `Withdrawal request failed: ${error.message}. Please check the withdrawal_requests collection attributes in Appwrite.`
+      );
+    } finally {
+      setWithdrawLoading(false);
+    }
+  }
+
+  // =====================================
   // LOADING SCREEN
-  // ========================================
+  // =====================================
+
   if (loading) {
     return (
-      <div style={styles.page}>
-        <div style={styles.loadingCard}>
-          <div style={styles.loadingIcon}>🪙</div>
-          <h2>Loading Wallet</h2>
-          <p>Please wait while we retrieve your coin balance.</p>
+      <main style={styles.page}>
+        <div style={styles.container}>
+          <h2>💳 Win9ja Wallet</h2>
+          <p>Loading your wallet...</p>
         </div>
-      </div>
+      </main>
     );
   }
 
-  // ========================================
-  // WALLET PAGE
-  // ========================================
-  return (
-    <div style={styles.page}>
-      <main style={styles.container}>
-        {/* HEADER */}
-        <header style={styles.header}>
+  // =====================================
+  // LOGIN ERROR
+  // =====================================
+
+  if (!user || !wallet) {
+    return (
+      <main style={styles.page}>
+        <div style={styles.container}>
+          <h2>💳 Win9ja Wallet</h2>
+
+          <p>{message || "Please sign in to view your wallet."}</p>
+
           <button
-            type="button"
-            style={styles.backButton}
-            onClick={() => navigate("/dashboard")}
+            style={styles.button}
+            onClick={() => navigate("/login")}
           >
-            ← Dashboard
+            Sign in
           </button>
 
-          <h1 style={styles.title}>My Wallet</h1>
+          <button
+            style={styles.secondaryButton}
+            onClick={() => navigate("/")}
+          >
+            Home
+          </button>
+        </div>
+      </main>
+    );
+  }
 
-          <p style={styles.subtitle}>
-            Manage your Win9ja Life coins.
+  // =====================================
+  // MAIN WALLET UI
+  // =====================================
+
+  return (
+    <main style={styles.page}>
+      <div style={styles.container}>
+
+        <header>
+          <h1>💳 My Wallet</h1>
+
+          <p style={styles.muted}>
+            Welcome, {wallet.name || user.name || "Player"}
           </p>
         </header>
 
-        {/* USER INFORMATION */}
-        <section style={styles.userCard}>
-          <div style={styles.avatar}>👤</div>
-
-          <div style={styles.userInfo}>
-            <h2 style={styles.userName}>
-              {user?.name || "Win9ja User"}
-            </h2>
-
-            <p style={styles.userEmail}>
-              {user?.email || "Email unavailable"}
-            </p>
-          </div>
-        </section>
-
-        {/* ALERT MESSAGE */}
         {message && (
-          <div
-            role={messageType === "error" ? "alert" : "status"}
-            style={
-              messageType === "error"
-                ? styles.errorMessage
-                : styles.successMessage
-            }
-          >
+          <div style={styles.card}>
             {message}
           </div>
         )}
 
-        {/* COIN BALANCE */}
-        <section style={styles.balanceCard}>
-          <div style={styles.balanceHeader}>
-            <span style={styles.balanceLabel}>
-              AVAILABLE COINS
-            </span>
+        {/* GAME BALANCE */}
 
-            <span style={styles.balanceIcon}>🪙</span>
-          </div>
+        <section style={styles.card}>
+          <h2>💰 Game Funds</h2>
 
-          <h2 style={styles.balance}>
-            {formatCoins(wallet?.coins)}
-          </h2>
-
-          <p style={styles.balanceDescription}>
-            Your Win9ja Life coin balance
+          <p style={{ fontSize: 27, fontWeight: "bold" }}>
+            {formatNaira(wallet.balance)}
           </p>
 
-          <div style={styles.divider} />
+          <p style={styles.muted}>
+            Funds used for your existing games.
+          </p>
 
-          <div style={styles.lockedRow}>
-            <span>🔒 Locked coins</span>
+          <p>
+            🔒 Locked game funds:{" "}
+            {formatNaira(wallet.locked ?? wallet.lockedCoins ?? 0)}
+          </p>
 
-            <strong>
-              {formatCoins(wallet?.lockedCoins)}
-            </strong>
-          </div>
-
-          {/* BUY COINS */}
           <button
-            type="button"
-            style={styles.buyButton}
+            style={styles.button}
+            onClick={() => setShowDeposit(true)}
+          >
+            ➕ Deposit Game Funds
+          </button>
+        </section>
+
+        {/* COIN BALANCE */}
+
+        <section
+          style={{
+            ...styles.card,
+            border: "1px solid #16a34a"
+          }}
+        >
+          <h2>🪙 Win9ja Coins</h2>
+
+          <p
+            style={{
+              fontSize: 32,
+              fontWeight: "bold",
+              color: "#4ade80"
+            }}
+          >
+            {Number(wallet.coins || 0).toLocaleString()}
+          </p>
+
+          <p style={styles.muted}>
+            Your coin balance is separate from your game funds.
+          </p>
+
+          <button
+            style={styles.button}
             onClick={() => navigate("/coins")}
           >
-            🪙 Buy Win9ja Coins
+            🪙 Buy Coins
           </button>
 
-          {/* WITHDRAW COINS */}
           <button
-            type="button"
-            style={styles.withdrawButton}
-            onClick={() => {
-              window.location.href = "/withdraw.html";
-            }}
+            style={styles.secondaryButton}
+            onClick={() => setShowWithdraw(true)}
           >
             💸 Withdraw Coins
           </button>
         </section>
 
-        {/* WALLET ACTIONS */}
-        <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>Wallet Actions</h2>
+        {/* PROMO CODES */}
 
-          <div style={styles.actionGrid}>
-            <button
-              type="button"
-              style={styles.actionCard}
-              onClick={() => navigate("/coins")}
-            >
-              <span style={styles.actionIcon}>🪙</span>
-              <span style={styles.actionTitle}>Coin Store</span>
-              <span style={styles.actionDescription}>
-                Purchase more coins
-              </span>
-            </button>
+        <section style={styles.card}>
+          <h2>🎁 Promo Code</h2>
 
-            <button
-              type="button"
-              style={styles.actionCard}
-              onClick={() => {
-                window.location.href = "/withdraw.html";
-              }}
-            >
-              <span style={styles.actionIcon}>💸</span>
-              <span style={styles.actionTitle}>Withdraw Coins</span>
-              <span style={styles.actionDescription}>
-                View withdrawal information
-              </span>
-            </button>
+          {promo?.code ? (
+            <>
+              <p style={{ fontSize: 23, color: "#4ade80" }}>
+                {promo.code}
+              </p>
 
-            <button
-              type="button"
-              style={styles.actionCard}
-              onClick={() => navigate("/dashboard")}
-            >
-              <span style={styles.actionIcon}>🏠</span>
-              <span style={styles.actionTitle}>Dashboard</span>
-              <span style={styles.actionDescription}>
-                Return to Win9ja Life
-              </span>
-            </button>
-          </div>
+              <p style={styles.muted}>
+                Users joined: {promo.usedCount || 0}
+              </p>
+
+              <button
+                style={styles.button}
+                onClick={copyPromoCode}
+              >
+                📋 Copy Promo Code
+              </button>
+
+              <button
+                style={styles.secondaryButton}
+                onClick={copyInvite}
+              >
+                📤 Copy Invitation
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={styles.muted}>
+                Create a promo code to share your Win9ja Life invitation.
+              </p>
+
+              <button
+                style={styles.button}
+                onClick={createPromo}
+              >
+                + Create Promo Code
+              </button>
+            </>
+          )}
         </section>
 
-        {/* PROMO CODE */}
-        <section style={styles.promoCard}>
-          <div style={styles.promoHeading}>
-            <span style={styles.promoIcon}>🎁</span>
+        {/* ZANGI */}
 
-            <div>
-              <h2 style={styles.sectionTitle}>
-                Redeem a Promo Code
-              </h2>
+        <section style={styles.card}>
+          <h2>💬 Zangi Contact</h2>
 
-              <p style={styles.promoDescription}>
-                Enter an eligible code to receive bonus coins.
+          <input
+            style={styles.input}
+            value={zangiContact}
+            onChange={event =>
+              setZangiContact(event.target.value)
+            }
+            placeholder="Enter your Zangi contact"
+          />
+
+          <button
+            style={styles.button}
+            onClick={saveZangi}
+          >
+            Save Zangi Contact
+          </button>
+        </section>
+
+        {/* NAVIGATION */}
+
+        <section style={styles.card}>
+          <button
+            style={styles.secondaryButton}
+            onClick={() => navigate("/dashboard")}
+          >
+            ← Back to Dashboard
+          </button>
+        </section>
+
+        {/* GAME-FUND DEPOSIT MODAL */}
+
+        {showDeposit && (
+          <div style={styles.modal}>
+            <div style={styles.modalCard}>
+              <h2>➕ Deposit Game Funds</h2>
+
+              <p style={styles.muted}>
+                This form is for game funds, not coin purchases.
               </p>
-            </div>
-          </div>
 
-          <form onSubmit={redeemPromoCode}>
-            <label htmlFor="promo-code" style={styles.label}>
-              Promo code
-            </label>
+              <label>Full name</label>
 
-            <div style={styles.promoForm}>
               <input
-                id="promo-code"
-                type="text"
-                value={promoCode}
-                onChange={(event) =>
-                  setPromoCode(event.target.value.toUpperCase())
-                }
-                placeholder="ENTER CODE"
-                maxLength={100}
-                autoComplete="off"
                 style={styles.input}
+                value={depositName}
+                onChange={event =>
+                  setDepositName(event.target.value)
+                }
+                placeholder="Enter full name"
+              />
+
+              <label>Amount in naira</label>
+
+              <input
+                style={styles.input}
+                type="number"
+                min="200"
+                value={depositAmount}
+                onChange={event =>
+                  setDepositAmount(event.target.value)
+                }
+                placeholder="Minimum ₦200"
               />
 
               <button
-                type="submit"
-                disabled={redeeming}
-                style={{
-                  ...styles.redeemButton,
-                  ...(redeeming ? styles.disabledButton : {}),
-                }}
+                style={styles.button}
+                disabled={depositLoading}
+                onClick={makeDeposit}
               >
-                {redeeming ? "Checking..." : "Redeem"}
+                {depositLoading
+                  ? "Processing..."
+                  : "Proceed to Payment"}
+              </button>
+
+              <button
+                style={styles.dangerButton}
+                onClick={() => setShowDeposit(false)}
+              >
+                Cancel
               </button>
             </div>
-          </form>
-        </section>
-
-        {/* ACCOUNT INFORMATION */}
-        <section style={styles.accountCard}>
-          <h2 style={styles.sectionTitle}>Account Information</h2>
-
-          <div style={styles.accountRow}>
-            <span>Account ID</span>
-            <strong>{user?.$id || "Unavailable"}</strong>
           </div>
+        )}
 
-          <div style={styles.accountRow}>
-            <span>Wallet status</span>
-            <strong>{wallet ? "Connected" : "Not found"}</strong>
+        {/* COIN WITHDRAWAL MODAL */}
+
+        {showWithdraw && (
+          <div style={styles.modal}>
+            <div style={styles.modalCard}>
+              <h2>💸 Withdraw Coins</h2>
+
+              <p>
+                Available coins:{" "}
+                <strong>
+                  {Number(wallet.coins || 0).toLocaleString()}
+                </strong>
+              </p>
+
+              <p style={styles.muted}>
+                Nigeria and Ghana: minimum 2,000 coins.
+                Other countries: minimum 5,000 coins.
+              </p>
+
+              <label>Number of coins</label>
+
+              <input
+                style={styles.input}
+                type="number"
+                min="2000"
+                step="1"
+                value={withdrawCoins}
+                onChange={event =>
+                  setWithdrawCoins(event.target.value)
+                }
+                placeholder="Enter coins to withdraw"
+              />
+
+              <h3>🇳🇬 Nigerian Bank Details</h3>
+
+              <label>Bank name</label>
+
+              <input
+                style={styles.input}
+                value={bank}
+                onChange={event =>
+                  setBank(event.target.value)
+                }
+                placeholder="Enter bank name"
+              />
+
+              <label>Account number</label>
+
+              <input
+                style={styles.input}
+                inputMode="numeric"
+                maxLength={10}
+                value={accountNumber}
+                onChange={event =>
+                  setAccountNumber(
+                    event.target.value.replace(/\D/g, "")
+                  )
+                }
+                placeholder="10-digit account number"
+              />
+
+              <label>Account holder name</label>
+
+              <input
+                style={styles.input}
+                value={accountName}
+                onChange={event =>
+                  setAccountName(event.target.value)
+                }
+                placeholder="Enter account holder name"
+              />
+
+              <button
+                style={styles.button}
+                disabled={withdrawLoading}
+                onClick={requestWithdraw}
+              >
+                {withdrawLoading
+                  ? "Submitting..."
+                  : "Submit Withdrawal Request"}
+              </button>
+
+              <button
+                style={styles.dangerButton}
+                onClick={() => setShowWithdraw(false)}
+              >
+                Cancel
+              </button>
+
+              <p style={styles.muted}>
+                Submitting a request does not automatically
+                deduct your coins. The admin must review and
+                process the payout.
+              </p>
+            </div>
           </div>
-        </section>
+        )}
 
-        <footer style={styles.footer}>
-          © {new Date().getFullYear()} Win9ja Life
-        </footer>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
-
-// ========================================
-// INLINE STYLES
-// ========================================
-const styles = {
-  page: {
-    minHeight: "100vh",
-    padding: "24px 14px",
-    boxSizing: "border-box",
-    background:
-      "radial-gradient(circle at top right, #dcfce7 0, #f8fafc 42%, #f1f5f9 100%)",
-    color: "#172033",
-    fontFamily:
-      "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-  },
-
-  container: {
-    maxWidth: "760px",
-    margin: "0 auto",
-  },
-
-  loadingCard: {
-    maxWidth: "420px",
-    margin: "100px auto",
-    padding: "35px 20px",
-    background: "#ffffff",
-    borderRadius: "20px",
-    textAlign: "center",
-    boxShadow: "0 15px 40px rgba(15, 23, 42, 0.08)",
-  },
-
-  loadingIcon: {
-    fontSize: "45px",
-    marginBottom: "10px",
-  },
-
-  header: {
-    marginBottom: "25px",
-  },
-
-  backButton: {
-    padding: "10px 15px",
-    marginBottom: "18px",
-    background: "#ffffff",
-    color: "#166534",
-    border: "1px solid #bbf7d0",
-    borderRadius: "10px",
-    fontWeight: 750,
-    cursor: "pointer",
-  },
-
-  title: {
-    margin: 0,
-    fontSize: "clamp(27px, 5vw, 35px)",
-    fontWeight: 850,
-    letterSpacing: "-1px",
-  },
-
-  subtitle: {
-    color: "#64748b",
-    margin: "7px 0 0",
-    fontSize: "14px",
-  },
-
-  userCard: {
-    display: "flex",
-    alignItems: "center",
-    gap: "14px",
-    padding: "18px",
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "17px",
-    marginBottom: "18px",
-  },
-
-  avatar: {
-    width: "48px",
-    height: "48px",
-    display: "grid",
-    placeItems: "center",
-    background: "#dcfce7",
-    borderRadius: "15px",
-    fontSize: "25px",
-    flexShrink: 0,
-  },
-
-  userInfo: {
-    minWidth: 0,
-  },
-
-  userName: {
-    margin: 0,
-    fontSize: "17px",
-    fontWeight: 800,
-    overflowWrap: "anywhere",
-  },
-
-  userEmail: {
-    margin: "5px 0 0",
-    color: "#64748b",
-    fontSize: "13px",
-    overflowWrap: "anywhere",
-  },
-
-  errorMessage: {
-    marginBottom: "18px",
-    padding: "14px",
-    background: "#fef2f2",
-    border: "1px solid #fecaca",
-    color: "#991b1b",
-    borderRadius: "12px",
-    fontSize: "14px",
-    lineHeight: 1.6,
-  },
-
-  successMessage: {
-    marginBottom: "18px",
-    padding: "14px",
-    background: "#f0fdf4",
-    border: "1px solid #bbf7d0",
-    color: "#166534",
-    borderRadius: "12px",
-    fontSize: "14px",
-    lineHeight: 1.6,
-  },
-
-  balanceCard: {
-    padding: "clamp(22px, 5vw, 32px)",
-    borderRadius: "23px",
-    color: "#ffffff",
-    background:
-      "linear-gradient(130deg, #14532d 0%, #15803d 60%, #22c55e 100%)",
-    boxShadow: "0 18px 40px rgba(22, 101, 52, 0.18)",
-  },
-
-  balanceHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  balanceLabel: {
-    fontSize: "11px",
-    letterSpacing: "1.8px",
-    fontWeight: 850,
-    color: "#bbf7d0",
-  },
-
-  balanceIcon: {
-    fontSize: "30px",
-  },
-
-  balance: {
-    fontSize: "clamp(38px, 9vw, 56px)",
-    letterSpacing: "-1.5px",
-    lineHeight: 1.1,
-    margin: "17px 0 7px",
-    fontWeight: 900,
-    overflowWrap: "anywhere",
-  },
-
-  balanceDescription: {
-    color: "#dcfce7",
-    margin: 0,
-    fontSize: "13px",
-  },
-
-  divider: {
-    height: "1px",
-    background: "rgba(255,255,255,0.22)",
-    margin: "23px 0 17px",
-  },
-
-  lockedRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "12px",
-    marginBottom: "22px",
-    color: "#dcfce7",
-    fontSize: "14px",
-  },
-
-  buyButton: {
-    width: "100%",
-    padding: "15px",
-    border: "none",
-    borderRadius: "12px",
-    background: "#ffffff",
-    color: "#166534",
-    fontSize: "15px",
-    fontWeight: 850,
-    cursor: "pointer",
-  },
-
-  withdrawButton: {
-    width: "100%",
-    padding: "15px",
-    marginTop: "12px",
-    border: "1px solid #bbf7d0",
-    borderRadius: "12px",
-    background: "rgba(255,255,255,0.12)",
-    color: "#ffffff",
-    fontSize: "15px",
-    fontWeight: 850,
-    cursor: "pointer",
-  },
-
-  section: {
-    marginTop: "30px",
-  },
-
-  sectionTitle: {
-    margin: 0,
-    fontSize: "19px",
-    fontWeight: 850,
-  },
-
-  actionGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))",
-    gap: "14px",
-    marginTop: "15px",
-  },
-
-  actionCard: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: "7px",
-    padding: "20px",
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "16px",
-    textAlign: "left",
-    cursor: "pointer",
-  },
-
-  actionIcon: {
-    fontSize: "27px",
-    marginBottom: "5px",
-  },
-
-  actionTitle: {
-    color: "#172033",
-    fontWeight: 850,
-    fontSize: "15px",
-  },
-
-  actionDescription: {
-    color: "#64748b",
-    fontSize: "12px",
-  },
-
-  promoCard: {
-    marginTop: "30px",
-    padding: "22px",
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "18px",
-  },
-
-  promoHeading: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "13px",
-    marginBottom: "20px",
-  },
-
-  promoIcon: {
-    fontSize: "28px",
-  },
-
-  promoDescription: {
-    color: "#64748b",
-    fontSize: "13px",
-    lineHeight: 1.6,
-    margin: "7px 0 0",
-  },
-
-  label: {
-    display: "block",
-    marginBottom: "8px",
-    fontSize: "13px",
-    fontWeight: 750,
-  },
-
-  promoForm: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "10px",
-  },
-
-  input: {
-    flex: "1 1 180px",
-    minWidth: 0,
-    boxSizing: "border-box",
-    padding: "14px",
-    background: "#ffffff",
-    border: "1px solid #cbd5e1",
-    borderRadius: "10px",
-    fontSize: "14px",
-  },
-
-  redeemButton: {
-    flex: "0 0 auto",
-    padding: "14px 22px",
-    background: "#15803d",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "10px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  disabledButton: {
-    opacity: 0.6,
-    cursor: "not-allowed",
-  },
-
-  accountCard: {
-    marginTop: "25px",
-    padding: "20px",
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "16px",
-  },
-
-  accountRow: {
-    display: "flex",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    gap: "8px",
-    padding: "13px 0",
-    borderBottom: "1px solid #f1f5f9",
-    fontSize: "12px",
-  },
-
-  footer: {
-    padding: "28px 0 8px",
-    color: "#94a3b8",
-    textAlign: "center",
-    fontSize: "12px",
-  },
-};
