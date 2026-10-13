@@ -10,53 +10,94 @@ import { getWallet } from "../lib/wallet";
 
 const WITHDRAW_COLLECTION = "withdrawal_requests";
 
-const MIN_WITHDRAWAL = {
-  NG: 2000,
-  GH: 2000,
-  OTHER: 5000,
-};
-
-const countries = [
-  { code: "NG", name: "Nigeria", currency: "NGN", symbol: "₦" },
-  { code: "GH", name: "Ghana", currency: "GHS", symbol: "GH₵" },
-  { code: "GB", name: "United Kingdom", currency: "GBP", symbol: "£" },
-  { code: "US", name: "United States", currency: "USD", symbol: "$" },
-  { code: "CA", name: "Canada", currency: "CAD", symbol: "C$" },
-  { code: "KE", name: "Kenya", currency: "KES", symbol: "KSh" },
-  { code: "ZA", name: "South Africa", currency: "ZAR", symbol: "R" },
-  { code: "OTHER", name: "Other country", currency: "USD", symbol: "$" },
+const CURRENCIES = [
+  {
+    code: "NGN",
+    label: "₦ Nigerian Naira (NGN)",
+    country: "NG",
+    countryName: "Nigeria",
+    symbol: "₦",
+    minimum: 2000,
+  },
+  {
+    code: "GHS",
+    label: "GH₵ Ghanaian Cedi (GHS)",
+    country: "GH",
+    countryName: "Ghana",
+    symbol: "GH₵",
+    minimum: 2000,
+  },
+  {
+    code: "GBP",
+    label: "£ British Pound (GBP)",
+    country: "GB",
+    countryName: "United Kingdom",
+    symbol: "£",
+    minimum: 5000,
+  },
+  {
+    code: "USD",
+    label: "$ US Dollar (USD)",
+    country: "US",
+    countryName: "United States",
+    symbol: "$",
+    minimum: 5000,
+  },
+  {
+    code: "CAD",
+    label: "C$ Canadian Dollar (CAD)",
+    country: "CA",
+    countryName: "Canada",
+    symbol: "C$",
+    minimum: 5000,
+  },
+  {
+    code: "KES",
+    label: "KSh Kenyan Shilling (KES)",
+    country: "KE",
+    countryName: "Kenya",
+    symbol: "KSh",
+    minimum: 5000,
+  },
+  {
+    code: "ZAR",
+    label: "R South African Rand (ZAR)",
+    country: "ZA",
+    countryName: "South Africa",
+    symbol: "R",
+    minimum: 5000,
+  },
 ];
 
 export default function Withdraw() {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
+  const [requests, setRequests] = useState([]);
 
-  const [country, setCountry] = useState("");
+  // Page 1: currency selection
   const [currency, setCurrency] = useState("");
   const [confirmed, setConfirmed] = useState(false);
 
+  // Withdrawal form
   const [bank, setBank] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
   const [trxAddress, setTrxAddress] = useState("");
   const [amount, setAmount] = useState("");
 
-  const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  const selectedCountry = countries.find(
-    (item) => item.code === country
+  const selectedCurrency = CURRENCIES.find(
+    (item) => item.code === currency
   );
 
-  const minimum =
-    MIN_WITHDRAWAL[country] ?? MIN_WITHDRAWAL.OTHER;
-
+  const isNigeria = currency === "NGN";
+  const minimum = selectedCurrency?.minimum ?? 5000;
   const availableCoins = Number(wallet?.coins ?? 0);
   const requestedCoins = Number(amount);
-  const isNigeria = country === "NG";
 
   useEffect(() => {
     initialize();
@@ -75,9 +116,9 @@ export default function Withdraw() {
 
       await loadRequests(currentUser.$id);
     } catch (err) {
-      console.error("Failed to initialize withdrawal page:", err);
+      console.error("Failed to load withdrawal page:", err);
       setError(
-        "Unable to load your withdrawal information. Please log in and try again."
+        "Unable to load your wallet. Please log in and try again."
       );
     } finally {
       setLoading(false);
@@ -98,46 +139,46 @@ export default function Withdraw() {
 
       setRequests(result.documents || []);
     } catch (err) {
-      console.error("Failed to load withdrawal history:", err);
+      console.error("Unable to load withdrawal history:", err);
     }
   }
 
-  function handleCountryChange(event) {
-    const selectedCode = event.target.value;
-    const selected = countries.find(
-      (item) => item.code === selectedCode
-    );
-
-    setCountry(selectedCode);
-    setCurrency(selected?.currency || "");
+  function handleCurrencyChange(event) {
+    setCurrency(event.target.value);
     setConfirmed(false);
 
-    setAmount("");
     setBank("");
     setAccountNumber("");
     setAccountName("");
     setTrxAddress("");
+    setAmount("");
 
-    setMessage("");
     setError("");
+    setMessage("");
   }
 
-  function confirmSelection() {
+  function handleNext() {
     setError("");
     setMessage("");
 
-    if (!selectedCountry || !currency) {
-      setError("Please select your country first.");
+    if (!selectedCurrency) {
+      setError("Please select your currency before continuing.");
       return;
     }
 
     setConfirmed(true);
   }
 
-  function useAllAvailableCoins() {
+  function handleBack() {
+    setConfirmed(false);
+    setError("");
+    setMessage("");
+  }
+
+  function useAllCoins() {
     if (availableCoins < minimum) {
       setError(
-        `Your balance must be at least ${minimum.toLocaleString()} coins before you can withdraw.`
+        `You need at least ${minimum.toLocaleString()} coins to withdraw.`
       );
       return;
     }
@@ -154,32 +195,36 @@ export default function Withdraw() {
     setMessage("");
 
     if (!user || !wallet) {
-      setError("Your account or wallet could not be loaded. Please try again.");
+      setError("Your account or wallet could not be loaded.");
       return;
     }
 
-    if (!confirmed || !selectedCountry || !currency) {
-      setError("Please select your country before continuing.");
+    if (!confirmed || !selectedCurrency) {
+      setError("Please select your currency and tap Next.");
       return;
     }
 
     const coins = Number(amount);
 
-    if (!Number.isFinite(coins) || !Number.isInteger(coins) || coins <= 0) {
+    if (
+      !Number.isFinite(coins) ||
+      !Number.isInteger(coins) ||
+      coins <= 0
+    ) {
       setError("Enter a valid whole-number coin amount.");
       return;
     }
 
     if (coins < minimum) {
       setError(
-        `The minimum withdrawal for your selected country is ${minimum.toLocaleString()} coins.`
+        `The minimum withdrawal is ${minimum.toLocaleString()} coins.`
       );
       return;
     }
 
     if (coins > availableCoins) {
       setError(
-        `Insufficient balance. You currently have ${Math.floor(
+        `Insufficient balance. You have ${Math.floor(
           availableCoins
         ).toLocaleString()} coins available.`
       );
@@ -202,9 +247,9 @@ export default function Withdraw() {
         return;
       }
     } else {
-      const cleanedAddress = trxAddress.trim();
+      const address = trxAddress.trim();
 
-      if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(cleanedAddress)) {
+      if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address)) {
         setError(
           "Enter a valid TRON/TRC20 receiving address beginning with T."
         );
@@ -223,8 +268,8 @@ export default function Withdraw() {
           userId: user.$id,
           amount: coins,
           coins,
-          country,
-          currency,
+          country: selectedCurrency.country,
+          currency: selectedCurrency.code,
           paymentMethod: isNigeria ? "BANK_TRANSFER" : "TRX",
           bank: isNigeria ? bank.trim() : "",
           accountNumber: isNigeria ? accountNumber.trim() : "",
@@ -235,7 +280,7 @@ export default function Withdraw() {
       );
 
       setMessage(
-        "Your withdrawal request has been submitted successfully and is awaiting review."
+        "Your withdrawal request has been submitted and is awaiting review."
       );
 
       setAmount("");
@@ -246,27 +291,24 @@ export default function Withdraw() {
 
       await loadRequests(user.$id);
     } catch (err) {
-      console.error("Withdrawal request failed:", err);
-
+      console.error("Withdrawal submission failed:", err);
       setError(
         err?.message ||
-          "Unable to submit your withdrawal request. Please try again."
+          "Unable to submit your request. Please try again."
       );
     } finally {
       setSubmitting(false);
     }
   }
 
-  function formatDate(dateString) {
-    if (!dateString) return "Date unavailable";
+  function formatDate(value) {
+    if (!value) return "Date unavailable";
 
-    const date = new Date(dateString);
+    const date = new Date(value);
 
-    if (Number.isNaN(date.getTime())) {
-      return "Date unavailable";
-    }
-
-    return date.toLocaleString();
+    return Number.isNaN(date.getTime())
+      ? "Date unavailable"
+      : date.toLocaleString();
   }
 
   function formatStatus(status) {
@@ -278,12 +320,12 @@ export default function Withdraw() {
   if (loading) {
     return (
       <div className="withdraw-page">
+        <style>{styles}</style>
+
         <div className="withdraw-loading">
           <div className="withdraw-spinner" />
           <p>Loading your wallet...</p>
         </div>
-
-        <style>{styles}</style>
       </div>
     );
   }
@@ -292,202 +334,222 @@ export default function Withdraw() {
     <div className="withdraw-page">
       <style>{styles}</style>
 
-      <div className="withdraw-container">
+      <main className="withdraw-container">
         <header className="withdraw-header">
           <div>
-            <span className="withdraw-eyebrow">WIN9JA LIFE WALLET</span>
+            <span className="withdraw-eyebrow">
+              WIN9JA LIFE WALLET
+            </span>
+
             <h1>Withdraw Coins</h1>
+
             <p className="withdraw-subtitle">
-              Choose your country, review the requirements, and submit
-              your withdrawal request.
+              Select your currency to view the withdrawal options
+              available to you.
             </p>
           </div>
 
           <div className="wallet-balance-card">
             <span>Available balance</span>
             <strong>
-              {Math.floor(availableCoins).toLocaleString()}{" "}
-              <small>coins</small>
+              {Math.floor(availableCoins).toLocaleString()}
+              <small> coins</small>
             </strong>
           </div>
         </header>
 
         {error && (
-          <div className="withdraw-alert withdraw-alert-error" role="alert">
-            <span className="alert-icon">!</span>
+          <div className="withdraw-alert alert-error" role="alert">
+            <strong>!</strong>
             <span>{error}</span>
           </div>
         )}
 
         {message && (
-          <div
-            className="withdraw-alert withdraw-alert-success"
-            role="status"
-          >
-            <span className="alert-icon">✓</span>
+          <div className="withdraw-alert alert-success" role="status">
+            <strong>✓</strong>
             <span>{message}</span>
           </div>
         )}
 
-        {/* STEP 1: COUNTRY AND CURRENCY */}
-        <section className="withdraw-card">
-          <div className="section-heading">
-            <div className="step-number">1</div>
-            <div>
-              <h2>Select your country</h2>
-              <p>Your selection determines the withdrawal requirements.</p>
-            </div>
-          </div>
+        {/* PAGE 1: CURRENCY SELECTION ONLY */}
+        {!confirmed && (
+          <section className="withdraw-card currency-card">
+            <div className="section-heading">
+              <div className="step-number">1</div>
 
-          <div className="form-grid">
+              <div>
+                <h2>Select Your Currency</h2>
+                <p>
+                  Choose your preferred currency and tap Next to
+                  reveal the appropriate withdrawal page.
+                </p>
+              </div>
+            </div>
+
+            <div className="currency-illustration">
+              <div className="currency-symbol">¤</div>
+              <div>
+                <strong>Choose your currency</strong>
+                <p>
+                  Nigerian users will see bank transfer options.
+                  International users will see TRX wallet options.
+                </p>
+              </div>
+            </div>
+
             <div className="form-group">
-              <label htmlFor="withdraw-country">Country or region</label>
+              <label htmlFor="withdraw-currency">
+                Your currency
+              </label>
 
               <select
-                id="withdraw-country"
-                value={country}
-                onChange={handleCountryChange}
-                className="withdraw-input"
+                id="withdraw-currency"
+                className="withdraw-input currency-select"
+                value={currency}
+                onChange={handleCurrencyChange}
               >
-                <option value="">Choose your country</option>
+                <option value="">-- Select your currency --</option>
 
-                {countries.map((item) => (
+                {CURRENCIES.map((item) => (
                   <option key={item.code} value={item.code}>
-                    {item.name}
+                    {item.label}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="withdraw-currency">Currency</label>
+            {selectedCurrency && (
+              <div className="selected-currency-preview">
+                <span>Selected currency</span>
+                <strong>
+                  {selectedCurrency.symbol} {selectedCurrency.code}
+                </strong>
+                <small>{selectedCurrency.countryName}</small>
+              </div>
+            )}
 
-              <input
-                id="withdraw-currency"
-                className="withdraw-input"
-                value={
-                  selectedCountry
-                    ? `${selectedCountry.symbol} ${selectedCountry.currency}`
-                    : ""
-                }
-                placeholder="Select a country first"
-                readOnly
-              />
+            <button
+              type="button"
+              className="withdraw-button button-primary"
+              onClick={handleNext}
+              disabled={!currency}
+            >
+              Next
+              <span aria-hidden="true"> →</span>
+            </button>
 
-              <small className="field-help">
-                Currency is assigned according to your selected country.
-              </small>
-            </div>
-          </div>
+            <p className="step-note">
+              Your withdrawal details will appear on the next page.
+            </p>
+          </section>
+        )}
 
-          <button
-            type="button"
-            className="withdraw-button withdraw-button-primary"
-            onClick={confirmSelection}
-            disabled={!country}
-          >
-            Next — View Withdrawal Requirements
-            <span aria-hidden="true"> →</span>
-          </button>
-        </section>
-
-        {/* STEP 2: COUNTRY REQUIREMENTS */}
-        {confirmed && selectedCountry && (
+        {/* PAGE 2: APPROPRIATE WITHDRAWAL PAGE */}
+        {confirmed && selectedCurrency && (
           <>
-            <section className="withdraw-card requirements-card">
+            <section className="withdraw-card">
               <div className="section-heading">
                 <div className="step-number">2</div>
+
                 <div>
-                  <h2>Withdrawal requirements</h2>
+                  <h2>
+                    {isNigeria
+                      ? "Nigerian Withdrawal"
+                      : "International Withdrawal"}
+                  </h2>
+
                   <p>
-                    Requirements for {selectedCountry.name}.
+                    {isNigeria
+                      ? "Enter the Nigerian bank account where you want to receive payment."
+                      : "Enter your TRON/TRC20 wallet address to request an international withdrawal."}
                   </p>
                 </div>
               </div>
 
-              <div className="requirements-summary">
-                <div className="requirement-item">
-                  <span>Selected country</span>
-                  <strong>{selectedCountry.name}</strong>
-                </div>
-
-                <div className="requirement-item">
+              <div className="selected-details">
+                <div className="detail-box">
                   <span>Currency</span>
-                  <strong>{selectedCountry.currency}</strong>
+                  <strong>
+                    {selectedCurrency.symbol} {selectedCurrency.code}
+                  </strong>
                 </div>
 
-                <div className="requirement-item">
+                <div className="detail-box">
+                  <span>Country</span>
+                  <strong>{selectedCurrency.countryName}</strong>
+                </div>
+
+                <div className="detail-box">
                   <span>Minimum withdrawal</span>
                   <strong>{minimum.toLocaleString()} coins</strong>
                 </div>
 
-                <div className="requirement-item">
+                <div className="detail-box">
                   <span>Available balance</span>
                   <strong>
                     {Math.floor(availableCoins).toLocaleString()} coins
                   </strong>
                 </div>
-
-                <div className="requirement-item">
-                  <span>Withdrawal method</span>
-                  <strong>
-                    {isNigeria
-                      ? "Nigerian bank transfer"
-                      : "TRON (TRC20) wallet"}
-                  </strong>
-                </div>
               </div>
 
+              <button
+                type="button"
+                className="back-button"
+                onClick={handleBack}
+              >
+                ← Change currency
+              </button>
+
               {isNigeria ? (
-                <div className="method-information">
+                <div className="method-panel">
                   <div className="method-icon">🏦</div>
                   <div>
-                    <h3>Nigerian bank transfer</h3>
+                    <h3>Nigerian Bank Transfer</h3>
                     <p>
-                      Enter your bank name, account holder's name, and
-                      10-digit account number. Make sure the details are
-                      correct before submitting your request.
+                      Provide your Nigerian bank details. Ensure that
+                      the account belongs to the intended recipient.
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="method-information">
+                <div className="method-panel">
                   <div className="method-icon">🔗</div>
                   <div>
-                    <h3>TRON (TRC20) wallet</h3>
+                    <h3>TRON (TRC20) Wallet</h3>
                     <p>
-                      Provide your own TRON/TRC20 receiving address.
-                      Confirm that your receiving wallet supports TRON
-                      (TRX/TRC20) before submitting.
+                      Provide your own TRON-compatible receiving address.
+                      The currency selection does not convert your coins
+                      or guarantee a payout in the selected currency.
                     </p>
                   </div>
                 </div>
               )}
 
               {availableCoins < minimum && (
-                <div className="withdraw-alert withdraw-alert-warning">
-                  Your current balance is below the minimum withdrawal
-                  requirement. You need at least{" "}
-                  {minimum.toLocaleString()} coins to submit a request.
+                <div className="withdraw-alert alert-warning">
+                  Your balance is below the minimum of{" "}
+                  {minimum.toLocaleString()} coins. You need more coins
+                  before you can submit a withdrawal request.
                 </div>
               )}
             </section>
 
-            {/* STEP 3: WITHDRAWAL FORM */}
             <section className="withdraw-card">
               <div className="section-heading">
                 <div className="step-number">3</div>
+
                 <div>
-                  <h2>Enter withdrawal details</h2>
+                  <h2>Withdrawal Details</h2>
                   <p>
-                    Complete the form carefully before submitting.
+                    Enter the amount and your payment details below.
                   </p>
                 </div>
               </div>
 
               <form onSubmit={submitWithdrawal}>
                 <div className="amount-panel">
-                  <div className="amount-panel-top">
+                  <div className="amount-heading">
                     <label htmlFor="withdraw-amount">
                       Amount to withdraw (coins)
                     </label>
@@ -495,7 +557,7 @@ export default function Withdraw() {
                     <button
                       type="button"
                       className="use-all-button"
-                      onClick={useAllAvailableCoins}
+                      onClick={useAllCoins}
                       disabled={availableCoins < minimum}
                     >
                       Use all available
@@ -506,6 +568,7 @@ export default function Withdraw() {
                     id="withdraw-amount"
                     type="number"
                     inputMode="numeric"
+                    className="withdraw-input amount-input"
                     min={minimum}
                     max={Math.floor(availableCoins)}
                     step="1"
@@ -516,36 +579,37 @@ export default function Withdraw() {
                       setMessage("");
                     }}
                     placeholder={`Minimum ${minimum.toLocaleString()} coins`}
-                    className="withdraw-input amount-input"
                     required
                   />
 
-                  <div className="amount-details">
+                  <div className="amount-footer">
                     <span>
                       Minimum: {minimum.toLocaleString()} coins
                     </span>
+
                     <span>
-                      Available:{" "}
+                      Balance:{" "}
                       {Math.floor(availableCoins).toLocaleString()} coins
                     </span>
                   </div>
                 </div>
 
                 {isNigeria ? (
-                  <div className="payment-details">
-                    <h3 className="form-section-title">
-                      Bank account details
-                    </h3>
+                  <div className="payment-form">
+                    <h3>Bank Account Details</h3>
 
                     <div className="form-group">
-                      <label htmlFor="withdraw-bank">Bank name</label>
+                      <label htmlFor="withdraw-bank">
+                        Bank name
+                      </label>
+
                       <input
                         id="withdraw-bank"
+                        className="withdraw-input"
                         type="text"
                         value={bank}
                         onChange={(event) => setBank(event.target.value)}
-                        placeholder="e.g. Access Bank"
-                        className="withdraw-input"
+                        placeholder="Enter your bank name"
                         autoComplete="off"
                         required
                       />
@@ -555,15 +619,16 @@ export default function Withdraw() {
                       <label htmlFor="withdraw-account-name">
                         Account holder's name
                       </label>
+
                       <input
                         id="withdraw-account-name"
+                        className="withdraw-input"
                         type="text"
                         value={accountName}
                         onChange={(event) =>
                           setAccountName(event.target.value)
                         }
-                        placeholder="Enter the account name"
-                        className="withdraw-input"
+                        placeholder="Enter account holder's name"
                         autoComplete="name"
                         required
                       />
@@ -573,64 +638,64 @@ export default function Withdraw() {
                       <label htmlFor="withdraw-account-number">
                         Account number
                       </label>
+
                       <input
                         id="withdraw-account-number"
+                        className="withdraw-input"
                         type="text"
                         inputMode="numeric"
                         value={accountNumber}
                         onChange={(event) =>
                           setAccountNumber(
-                            event.target.value.replace(/\D/g, "").slice(0, 10)
+                            event.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, 10)
                           )
                         }
-                        placeholder="Enter your 10-digit account number"
-                        className="withdraw-input"
+                        placeholder="10-digit account number"
                         autoComplete="off"
                         maxLength={10}
-                        minLength={10}
                         pattern="[0-9]{10}"
                         required
                       />
                     </div>
                   </div>
                 ) : (
-                  <div className="payment-details">
-                    <h3 className="form-section-title">
-                      TRON/TRC20 receiving address
-                    </h3>
+                  <div className="payment-form">
+                    <h3>International TRX Receiving Address</h3>
 
                     <div className="form-group">
                       <label htmlFor="withdraw-trx-address">
-                        Your TRX wallet address
+                        Your TRON/TRC20 wallet address
                       </label>
+
                       <input
                         id="withdraw-trx-address"
+                        className="withdraw-input trx-input"
                         type="text"
                         value={trxAddress}
                         onChange={(event) =>
                           setTrxAddress(event.target.value.trim())
                         }
                         placeholder="Enter your TRON address starting with T"
-                        className="withdraw-input trx-input"
                         autoComplete="off"
-                        spellCheck="false"
                         autoCapitalize="none"
+                        spellCheck="false"
                         required
                       />
 
                       <small className="field-help">
-                        Use a receiving address from a wallet or exchange
-                        that supports TRON/TRC20. Double-check the address
-                        before submitting.
+                        Use an address compatible with the TRON network.
+                        Check the address carefully before submitting.
                       </small>
                     </div>
 
                     <div className="network-warning">
-                      <strong>Network warning</strong>
+                      <strong>Important network notice</strong>
                       <p>
-                        Only enter a TRON/TRC20 address. Addresses for
-                        other networks may not be compatible. A withdrawal
-                        request is not a completed or guaranteed payment.
+                        Only use a compatible TRON/TRC20 address. Other
+                        networks may not be supported. Never enter your
+                        wallet recovery phrase or private key.
                       </p>
                     </div>
                   </div>
@@ -638,23 +703,25 @@ export default function Withdraw() {
 
                 <button
                   type="submit"
-                  className="withdraw-button withdraw-button-primary submit-button"
+                  className="withdraw-button button-primary submit-button"
                   disabled={
                     submitting ||
                     availableCoins < minimum ||
                     !amount ||
+                    !Number.isInteger(requestedCoins) ||
                     requestedCoins < minimum ||
                     requestedCoins > availableCoins
                   }
                 >
                   {submitting
-                    ? "Submitting request..."
+                    ? "Submitting..."
                     : "Submit Withdrawal Request"}
                 </button>
 
-                <p className="submit-disclaimer">
-                  Requests are submitted for review. Submitting a request
-                  does not mean payment has been sent.
+                <p className="submit-note">
+                  Your request will be recorded as pending until it is
+                  reviewed. Submitting a request does not mean payment
+                  has been made.
                 </p>
               </form>
             </section>
@@ -664,24 +731,25 @@ export default function Withdraw() {
         {/* WITHDRAWAL HISTORY */}
         <section className="withdraw-card history-card">
           <div className="section-heading">
-            <div className="history-heading-icon">↻</div>
+            <div className="history-icon">↻</div>
+
             <div>
-              <h2>Withdrawal history</h2>
-              <p>Track your recent withdrawal requests.</p>
+              <h2>Withdrawal History</h2>
+              <p>Review your recent withdrawal requests.</p>
             </div>
           </div>
 
           {requests.length === 0 ? (
             <div className="empty-history">
-              <div className="empty-history-icon">📋</div>
+              <div className="empty-icon">📋</div>
               <h3>No withdrawal requests yet</h3>
               <p>Your submitted requests will appear here.</p>
             </div>
           ) : (
-            <div className="withdrawal-list">
+            <div className="history-list">
               {requests.map((request) => {
-                const requestCountry = countries.find(
-                  (item) => item.code === request.country
+                const requestCurrency = CURRENCIES.find(
+                  (item) => item.code === request.currency
                 );
 
                 const isTrx =
@@ -690,10 +758,10 @@ export default function Withdraw() {
 
                 return (
                   <article
-                    className="withdrawal-history-item"
+                    className="history-item"
                     key={request.$id}
                   >
-                    <div className="history-item-top">
+                    <div className="history-top">
                       <div>
                         <strong className="history-amount">
                           {Number(
@@ -720,14 +788,15 @@ export default function Withdraw() {
 
                     <div className="history-meta">
                       <span>
-                        Country:{" "}
-                        {requestCountry?.name ||
-                          request.country ||
-                          "Not specified"}
+                        Currency:{" "}
+                        {request.currency || "Not specified"}
                       </span>
 
                       <span>
-                        Currency: {request.currency || "Not specified"}
+                        Country:{" "}
+                        {requestCurrency?.countryName ||
+                          request.country ||
+                          "Not specified"}
                       </span>
 
                       <span>
@@ -749,8 +818,8 @@ export default function Withdraw() {
 
                     {!isTrx &&
                       (request.bank ||
-                        request.accountNumber ||
-                        request.accountName) && (
+                        request.accountName ||
+                        request.accountNumber) && (
                         <div className="history-destination">
                           {request.bank && (
                             <span>Bank: {request.bank}</span>
@@ -775,7 +844,7 @@ export default function Withdraw() {
             </div>
           )}
         </section>
-      </div>
+      </main>
     </div>
   );
 }
@@ -838,7 +907,7 @@ const styles = `
   padding: 16px;
   border: 1px solid var(--app-border, #e4e8ef);
   border-radius: 16px;
-  background: var(--app-card, #ffffff);
+  background: var(--app-card, #fff);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.035);
 }
 
@@ -865,7 +934,7 @@ const styles = `
   padding: 24px;
   border: 1px solid var(--app-border, #e4e8ef);
   border-radius: 18px;
-  background: var(--app-card, #ffffff);
+  background: var(--app-card, #fff);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.035);
 }
 
@@ -886,11 +955,11 @@ const styles = `
   margin: 6px 0 0;
   color: var(--app-muted, #687386);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .step-number,
-.history-heading-icon {
+.history-icon {
   display: flex;
   flex: 0 0 38px;
   width: 38px;
@@ -904,15 +973,46 @@ const styles = `
   font-weight: 800;
 }
 
-.history-heading-icon {
+.history-icon {
   font-size: 21px;
 }
 
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-  margin-bottom: 20px;
+.currency-illustration {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+  padding: 17px;
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  border-radius: 14px;
+  background: rgba(22, 163, 74, 0.055);
+}
+
+.currency-symbol {
+  display: flex;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(22, 163, 74, 0.13);
+  color: #16a34a;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.currency-illustration strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.currency-illustration p {
+  margin: 0;
+  color: var(--app-muted, #687386);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .form-group {
@@ -923,7 +1023,7 @@ const styles = `
 }
 
 .form-group label,
-.amount-panel label {
+.amount-heading label {
   color: var(--app-text, #172033);
   font-size: 13px;
   font-weight: 700;
@@ -937,7 +1037,7 @@ const styles = `
   border: 1px solid var(--app-border, #dce2eb);
   border-radius: 11px;
   outline: none;
-  background: var(--app-input, #ffffff);
+  background: var(--app-input, #fff);
   color: var(--app-text, #172033);
   font: inherit;
   font-size: 14px;
@@ -951,20 +1051,33 @@ const styles = `
 
 .withdraw-input::placeholder {
   color: var(--app-muted, #8992a2);
-  opacity: 0.85;
 }
 
-.withdraw-input:read-only {
-  opacity: 0.85;
-  cursor: default;
+.currency-select {
+  min-height: 54px;
+  font-weight: 600;
 }
 
-.field-help {
-  display: block;
-  margin-top: 2px;
+.selected-currency-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 20px;
+  padding: 14px;
+  border: 1px solid var(--app-border, #e4e8ef);
+  border-radius: 11px;
+  background: var(--app-bg, #f8fafc);
+}
+
+.selected-currency-preview span,
+.selected-currency-preview small {
   color: var(--app-muted, #687386);
   font-size: 12px;
-  line-height: 1.55;
+}
+
+.selected-currency-preview strong {
+  color: #16a34a;
+  font-size: 18px;
 }
 
 .withdraw-button {
@@ -981,7 +1094,7 @@ const styles = `
   font-weight: 800;
   text-align: center;
   cursor: pointer;
-  transition: transform 0.15s, opacity 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, opacity 0.15s;
 }
 
 .withdraw-button:hover:not(:disabled) {
@@ -993,24 +1106,37 @@ const styles = `
   cursor: not-allowed;
 }
 
-.withdraw-button-primary {
+.button-primary {
   background: #16a34a;
-  color: #ffffff;
+  color: #fff;
   box-shadow: 0 5px 14px rgba(22, 163, 74, 0.17);
 }
 
-.withdraw-button-primary:hover:not(:disabled) {
+.button-primary:hover:not(:disabled) {
   background: #15803d;
 }
 
-.requirements-summary {
+.currency-card > .withdraw-button {
+  width: 100%;
+}
+
+.step-note,
+.submit-note {
+  margin: 12px 0 0;
+  color: var(--app-muted, #687386);
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.selected-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
-.requirement-item {
+.detail-box {
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -1020,17 +1146,29 @@ const styles = `
   background: var(--app-bg, #f8fafc);
 }
 
-.requirement-item span {
+.detail-box span {
   color: var(--app-muted, #687386);
   font-size: 12px;
 }
 
-.requirement-item strong {
+.detail-box strong {
   font-size: 14px;
   overflow-wrap: anywhere;
 }
 
-.method-information {
+.back-button {
+  margin-bottom: 18px;
+  padding: 9px 12px;
+  border: 1px solid var(--app-border, #e4e8ef);
+  border-radius: 9px;
+  background: var(--app-card, #fff);
+  color: var(--app-text, #172033);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.method-panel {
   display: flex;
   align-items: flex-start;
   gap: 14px;
@@ -1052,12 +1190,12 @@ const styles = `
   font-size: 21px;
 }
 
-.method-information h3 {
+.method-panel h3 {
   margin: 0 0 6px;
   font-size: 14px;
 }
 
-.method-information p {
+.method-panel p {
   margin: 0;
   color: var(--app-muted, #687386);
   font-size: 13px;
@@ -1077,35 +1215,23 @@ const styles = `
   overflow-wrap: anywhere;
 }
 
-.withdraw-alert-error {
+.alert-error {
   border-color: #fecaca;
   background: #fef2f2;
   color: #b91c1c;
 }
 
-.withdraw-alert-success {
+.alert-success {
   border-color: #bbf7d0;
   background: #f0fdf4;
   color: #166534;
 }
 
-.withdraw-alert-warning {
+.alert-warning {
   margin: 18px 0 0;
   border-color: #fde68a;
   background: #fffbeb;
   color: #92400e;
-}
-
-.alert-icon {
-  display: inline-flex;
-  flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.06);
-  font-weight: 900;
 }
 
 .amount-panel {
@@ -1116,7 +1242,7 @@ const styles = `
   background: var(--app-bg, #f8fafc);
 }
 
-.amount-panel-top {
+.amount-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1146,7 +1272,7 @@ const styles = `
   font-weight: 800;
 }
 
-.amount-details {
+.amount-footer {
   display: flex;
   justify-content: space-between;
   flex-wrap: wrap;
@@ -1156,18 +1282,21 @@ const styles = `
   font-size: 11px;
 }
 
-.payment-details {
+.payment-form {
   margin-bottom: 24px;
 }
 
-.form-section-title {
+.payment-form > h3 {
   margin: 0 0 18px;
   font-size: 15px;
-  font-weight: 800;
 }
 
-.trx-input {
-  overflow-wrap: anywhere;
+.field-help {
+  display: block;
+  margin-top: 2px;
+  color: var(--app-muted, #687386);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .network-warning {
@@ -1194,49 +1323,20 @@ const styles = `
   width: 100%;
 }
 
-.submit-disclaimer {
-  margin: 12px 0 0;
-  color: var(--app-muted, #687386);
-  font-size: 11px;
-  line-height: 1.6;
-  text-align: center;
-}
-
-.empty-history {
-  padding: 32px 12px;
-  text-align: center;
-}
-
-.empty-history-icon {
-  margin-bottom: 10px;
-  font-size: 30px;
-}
-
-.empty-history h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.empty-history p {
-  margin: 8px 0 0;
-  color: var(--app-muted, #687386);
-  font-size: 13px;
-}
-
-.withdrawal-list {
+.history-list {
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 
-.withdrawal-history-item {
+.history-item {
   min-width: 0;
   padding: 16px;
   border: 1px solid var(--app-border, #e4e8ef);
   border-radius: 13px;
 }
 
-.history-item-top {
+.history-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1322,6 +1422,27 @@ const styles = `
   word-break: break-word;
 }
 
+.empty-history {
+  padding: 32px 12px;
+  text-align: center;
+}
+
+.empty-icon {
+  margin-bottom: 10px;
+  font-size: 30px;
+}
+
+.empty-history h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.empty-history p {
+  margin: 8px 0 0;
+  color: var(--app-muted, #687386);
+  font-size: 13px;
+}
+
 .withdraw-loading {
   display: flex;
   min-height: 50vh;
@@ -1365,10 +1486,9 @@ const styles = `
     border-radius: 15px;
   }
 
-  .form-grid,
-  .requirements-summary {
+  .selected-details {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: 10px;
   }
 
   .section-heading h2 {
@@ -1379,11 +1499,11 @@ const styles = `
     padding: 14px;
   }
 
-  .amount-panel-top {
+  .amount-heading {
     align-items: flex-start;
   }
 
-  .history-item-top {
+  .history-top {
     align-items: flex-start;
   }
 
@@ -1394,6 +1514,12 @@ const styles = `
 
   .withdraw-button {
     width: 100%;
+  }
+}
+
+@keyframes withdraw-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
