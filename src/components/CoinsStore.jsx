@@ -24,7 +24,7 @@ const PAYMENT_CONFIG = {
     name: "United States",
     currency: "USD",
     symbol: "$",
-    url: "",
+    url: "https://flutterwave.com/pay/qiattof2hy2w",
   },
   GB: {
     name: "United Kingdom",
