@@ -1,0 +1,667 @@
+import { useEffect, useState } from "react";
+import { account, databases, DATABASE_ID, ID, Query } from "../lib/appwrite";
+import { getWallet } from "../lib/wallet";
+
+const WITHDRAW_COLLECTION = "withdrawal_requests";
+
+const MIN_WITHDRAWAL = {
+  NG: 2000,
+  GH: 2000,
+  OTHER: 5000,
+};
+
+const countries = [
+  { code: "NG", name: "Nigeria", currency: "NGN" },
+  { code: "GH", name: "Ghana", currency: "GHS" },
+  { code: "GB", name: "United Kingdom", currency: "GBP" },
+  { code: "US", name: "United States", currency: "USD" },
+  { code: "CA", name: "Canada", currency: "CAD" },
+  { code: "KE", name: "Kenya", currency: "KES" },
+  { code: "ZA", name: "South Africa", currency: "ZAR" },
+  { code: "OTHER", name: "Other country", currency: "USD" },
+];
+
+export default function Withdraw() {
+  const [user, setUser] = useState(null);
+  const [wallet, setWallet] = useState(null);
+  const [country, setCountry] = useState("NG");
+
+  const [bank, setBank] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountName, setAccountName] = useState("");
+  const [trxAddress, setTrxAddress] = useState("");
+
+  const [amount, setAmount] = useState("");
+  const [requests, setRequests] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const selectedCountry =
+    countries.find((item) => item.code === country) || countries[0];
+
+  const minimum =
+    MIN_WITHDRAWAL[country] ?? MIN_WITHDRAWAL.OTHER;
+
+  const isNigeria = country === "NG";
+
+  useEffect(() => {
+    initialize();
+  }, []);
+
+  async function initialize() {
+    try {
+      setLoading(true);
+
+      const currentUser = await account.get();
+      setUser(currentUser);
+
+      const currentWallet = await getWallet(currentUser.$id);
+      setWallet(currentWallet);
+
+      await loadRequests(currentUser.$id);
+    } catch (err) {
+      console.error("Withdrawal initialization error:", err);
+      setError(
+        "Unable to load your wallet. Please sign in and try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadRequests(userId) {
+    try {
+      const result = await databases.listDocuments(
+        DATABASE_ID,
+        WITHDRAW_COLLECTION,
+        [
+          Query.equal("userId", userId),
+          Query.orderDesc("$createdAt"),
+          Query.limit(50),
+        ]
+      );
+
+      setRequests(result.documents);
+    } catch (err) {
+      console.error("Unable to load withdrawal requests:", err);
+    }
+  }
+
+  async function submitWithdrawal(event) {
+    event.preventDefault();
+
+    setMessage("");
+    setError("");
+
+    if (!user || !wallet) {
+      setError("Please sign in before requesting a withdrawal.");
+      return;
+    }
+
+    const coins = Number(amount);
+    const availableCoins = Number(wallet.coins || 0);
+
+    if (!Number.isSafeInteger(coins) || coins <= 0) {
+      setError("Enter a valid whole number of coins.");
+      return;
+    }
+
+    if (coins < minimum) {
+      setError(
+        `The minimum withdrawal for your selected country is ${minimum.toLocaleString()} coins.`
+      );
+      return;
+    }
+
+    if (coins > availableCoins) {
+      setError("You do not have enough available coins.");
+      return;
+    }
+
+    if (isNigeria) {
+      if (!bank.trim() || !accountName.trim()) {
+        setError("Enter your bank name and account name.");
+        return;
+      }
+
+      if (!/^\d{10}$/.test(accountNumber.trim())) {
+        setError("Enter a valid 10-digit Nigerian bank account number.");
+        return;
+      }
+    } else {
+      if (!trxAddress.trim()) {
+        setError("Enter your TRX receiving wallet address.");
+        return;
+      }
+
+      if (!trxAddress.trim().startsWith("T") ||
+          trxAddress.trim().length < 25 ||
+          trxAddress.trim().length > 50) {
+        setError(
+          "The TRX address does not look valid. Check it before submitting."
+        );
+        return;
+      }
+    }
+
+    try {
+      setSubmitting(true);
+
+      /*
+       * This creates a request only.
+       * Coins are NOT deducted here.
+       * The admin must verify and complete payment.
+       */
+
+      await databases.createDocument(
+        DATABASE_ID,
+        WITHDRAW_COLLECTION,
+        ID.unique(),
+        {
+          userId: user.$id,
+          amount: coins,
+          coins,
+          country,
+          currency: selectedCountry.currency,
+          paymentMethod: isNigeria ? "BANK_TRANSFER" : "TRX",
+          bank: isNigeria ? bank.trim() : "",
+          accountNumber: isNigeria ? accountNumber.trim() : "",
+          accountName: isNigeria ? accountName.trim() : "",
+          trxAddress: isNigeria ? "" : trxAddress.trim(),
+          status: "pending",
+        }
+      );
+
+      setAmount("");
+      setBank("");
+      setAccountNumber("");
+      setAccountName("");
+      setTrxAddress("");
+
+      setMessage(
+        "Withdrawal request submitted. Your coins have not been deducted. Please wait for admin review and payment."
+      );
+
+      await loadRequests(user.$id);
+    } catch (err) {
+      console.error("Withdrawal submission error:", err);
+
+      setError(
+        "Unable to submit your request. Check the Appwrite collection attributes and permissions, then try again."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.card}>Loading your wallet...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.card}>
+          <h2>Sign in required</h2>
+          <p>Please sign in to request a withdrawal.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.container}>
+        <header style={styles.header}>
+          <div>
+            <div style={styles.logo}>WIN9JA LIFE</div>
+            <h1 style={styles.heading}>Withdraw Coins</h1>
+            <p style={styles.subtitle}>
+              Request payment for your available coins.
+            </p>
+          </div>
+
+          <div style={styles.coinCard}>
+            <span style={styles.smallLabel}>Available coins</span>
+            <strong style={styles.coinAmount}>
+              {Number(wallet?.coins || 0).toLocaleString()}
+            </strong>
+            <span style={styles.coinLabel}>WIN9JA COINS</span>
+          </div>
+        </header>
+
+        {message && (
+          <div style={styles.success}>
+            {message}
+          </div>
+        )}
+
+        {error && (
+          <div style={styles.error}>
+            {error}
+          </div>
+        )}
+
+        <section style={styles.card}>
+          <h2 style={styles.sectionTitle}>Withdrawal details</h2>
+
+          <form onSubmit={submitWithdrawal}>
+            <label style={styles.label}>
+              Select your country
+            </label>
+
+            <select
+              value={country}
+              onChange={(event) => setCountry(event.target.value)}
+              style={styles.input}
+            >
+              {countries.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+
+            <div style={styles.notice}>
+              <strong>Minimum withdrawal: </strong>
+              {minimum.toLocaleString()} coins
+            </div>
+
+            <label style={styles.label}>
+              Number of coins to withdraw
+            </label>
+
+            <input
+              type="number"
+              min={minimum}
+              step="1"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              placeholder={`Minimum ${minimum} coins`}
+              style={styles.input}
+              required
+            />
+
+            <button
+              type="button"
+              style={styles.maxButton}
+              onClick={() =>
+                setAmount(String(Number(wallet?.coins || 0)))
+              }
+            >
+              Use all available coins
+            </button>
+
+            {isNigeria ? (
+              <>
+                <h3 style={styles.subheading}>
+                  Nigerian bank account
+                </h3>
+
+                <label style={styles.label}>Bank name</label>
+
+                <input
+                  type="text"
+                  value={bank}
+                  onChange={(event) => setBank(event.target.value)}
+                  placeholder="Enter your bank name"
+                  style={styles.input}
+                  required
+                />
+
+                <label style={styles.label}>Account number</label>
+
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={accountNumber}
+                  onChange={(event) =>
+                    setAccountNumber(
+                      event.target.value.replace(/\D/g, "").slice(0, 10)
+                    )
+                  }
+                  placeholder="10-digit account number"
+                  style={styles.input}
+                  required
+                />
+
+                <label style={styles.label}>Account name</label>
+
+                <input
+                  type="text"
+                  value={accountName}
+                  onChange={(event) => setAccountName(event.target.value)}
+                  placeholder="Name on your bank account"
+                  style={styles.input}
+                  required
+                />
+              </>
+            ) : (
+              <>
+                <h3 style={styles.subheading}>
+                  TRON (TRX) receiving address
+                </h3>
+
+                <div style={styles.notice}>
+                  Enter a TRON network address that you control.
+                  Confirm that your wallet supports TRX on the TRON
+                  network before submitting.
+                </div>
+
+                <label style={styles.label}>
+                  Your TRX wallet address
+                </label>
+
+                <input
+                  type="text"
+                  value={trxAddress}
+                  onChange={(event) => setTrxAddress(event.target.value)}
+                  placeholder="Enter your TRON address beginning with T"
+                  style={styles.input}
+                  required
+                />
+              </>
+            )}
+
+            <div style={styles.warning}>
+              <strong>Important:</strong> Submitting this form does not
+              guarantee payment. Your request will be reviewed by the
+              Win9ja Life administrator. Do not submit a request unless
+              you understand the withdrawal terms.
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              style={{
+                ...styles.submitButton,
+                opacity: submitting ? 0.65 : 1,
+              }}
+            >
+              {submitting
+                ? "Submitting request..."
+                : "Submit withdrawal request"}
+            </button>
+          </form>
+        </section>
+
+        <section style={styles.card}>
+          <h2 style={styles.sectionTitle}>Your withdrawal history</h2>
+
+          {requests.length === 0 ? (
+            <p style={styles.muted}>
+              You have not made any withdrawal requests yet.
+            </p>
+          ) : (
+            <div style={styles.historyList}>
+              {requests.map((request) => (
+                <div key={request.$id} style={styles.historyItem}>
+                  <div>
+                    <strong>
+                      {Number(request.coins ?? request.amount ?? 0)
+                        .toLocaleString()}{" "}
+                      coins
+                    </strong>
+
+                    <div style={styles.historyDetails}>
+                      {request.paymentMethod === "TRX"
+                        ? "TRX withdrawal"
+                        : request.bank || "Bank transfer"}
+                    </div>
+
+                    <div style={styles.historyDate}>
+                      {request.$createdAt
+                        ? new Date(request.$createdAt).toLocaleString()
+                        : ""}
+                    </div>
+                  </div>
+
+                  <span
+                    style={{
+                      ...styles.status,
+                      ...(request.status === "paid"
+                        ? styles.statusPaid
+                        : request.status === "rejected"
+                        ? styles.statusRejected
+                        : request.status === "approved"
+                        ? styles.statusApproved
+                        : styles.statusPending),
+                    }}
+                  >
+                    {request.status || "pending"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <p style={styles.footer}>
+          Win9ja Life · Secure withdrawal requests
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#07111f",
+    color: "#f8fafc",
+    padding: "24px 14px",
+    boxSizing: "border-box",
+    fontFamily: "Arial, sans-serif",
+  },
+  container: {
+    maxWidth: "760px",
+    margin: "0 auto",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "18px",
+    flexWrap: "wrap",
+    marginBottom: "24px",
+  },
+  logo: {
+    color: "#4ade80",
+    fontWeight: "bold",
+    letterSpacing: "2px",
+    fontSize: "13px",
+    marginBottom: "10px",
+  },
+  heading: {
+    fontSize: "30px",
+    margin: "0 0 8px",
+  },
+  subtitle: {
+    color: "#aab8ca",
+    margin: 0,
+    lineHeight: 1.5,
+  },
+  coinCard: {
+    minWidth: "145px",
+    background: "#102b25",
+    border: "1px solid #226b4c",
+    borderRadius: "16px",
+    padding: "18px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "7px",
+  },
+  smallLabel: {
+    color: "#b9d9c8",
+    fontSize: "12px",
+  },
+  coinAmount: {
+    fontSize: "28px",
+    color: "#4ade80",
+  },
+  coinLabel: {
+    fontSize: "10px",
+    color: "#b9d9c8",
+    letterSpacing: "1px",
+  },
+  card: {
+    background: "#101d30",
+    border: "1px solid #263850",
+    borderRadius: "18px",
+    padding: "22px",
+    marginBottom: "20px",
+    boxSizing: "border-box",
+  },
+  sectionTitle: {
+    fontSize: "20px",
+    margin: "0 0 20px",
+  },
+  subheading: {
+    fontSize: "16px",
+    margin: "24px 0 12px",
+    color: "#4ade80",
+  },
+  label: {
+    display: "block",
+    fontSize: "13px",
+    fontWeight: "bold",
+    margin: "15px 0 8px",
+    color: "#dce5f0",
+  },
+  input: {
+    width: "100%",
+    padding: "13px",
+    background: "#081525",
+    color: "#f8fafc",
+    border: "1px solid #34465e",
+    borderRadius: "10px",
+    outline: "none",
+    boxSizing: "border-box",
+    fontSize: "14px",
+  },
+  notice: {
+    background: "#142a40",
+    border: "1px solid #284966",
+    borderRadius: "10px",
+    padding: "12px",
+    color: "#c7ddf3",
+    fontSize: "13px",
+    lineHeight: 1.6,
+    marginTop: "14px",
+  },
+  warning: {
+    background: "#302515",
+    border: "1px solid #785521",
+    borderRadius: "10px",
+    padding: "13px",
+    color: "#f5d8a3",
+    fontSize: "12px",
+    lineHeight: 1.7,
+    marginTop: "20px",
+  },
+  maxButton: {
+    marginTop: "9px",
+    background: "transparent",
+    color: "#4ade80",
+    border: "1px solid #26784d",
+    borderRadius: "8px",
+    padding: "8px 12px",
+    cursor: "pointer",
+  },
+  submitButton: {
+    width: "100%",
+    background: "#16a34a",
+    color: "#fff",
+    fontSize: "15px",
+    fontWeight: "bold",
+    border: "none",
+    borderRadius: "10px",
+    padding: "15px",
+    marginTop: "20px",
+    cursor: "pointer",
+  },
+  success: {
+    padding: "13px",
+    marginBottom: "16px",
+    borderRadius: "10px",
+    background: "#123a29",
+    border: "1px solid #258653",
+    color: "#bbf7d0",
+    lineHeight: 1.6,
+  },
+  error: {
+    padding: "13px",
+    marginBottom: "16px",
+    borderRadius: "10px",
+    background: "#3b171c",
+    border: "1px solid #8f303a",
+    color: "#fecaca",
+    lineHeight: 1.6,
+  },
+  muted: {
+    color: "#aab8ca",
+    lineHeight: 1.6,
+  },
+  historyList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  historyItem: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    padding: "14px",
+    borderRadius: "12px",
+    background: "#0a1728",
+    border: "1px solid #263850",
+  },
+  historyDetails: {
+    color: "#c0ccdc",
+    fontSize: "12px",
+    marginTop: "6px",
+  },
+  historyDate: {
+    color: "#8293a9",
+    fontSize: "11px",
+    marginTop: "5px",
+  },
+  status: {
+    padding: "6px 9px",
+    borderRadius: "20px",
+    fontSize: "11px",
+    textTransform: "capitalize",
+    whiteSpace: "nowrap",
+  },
+  statusPending: {
+    color: "#fde68a",
+    background: "#493817",
+  },
+  statusApproved: {
+    color: "#bfdbfe",
+    background: "#193b62",
+  },
+  statusPaid: {
+    color: "#bbf7d0",
+    background: "#16452e",
+  },
+  statusRejected: {
+    color: "#fecaca",
+    background: "#4b2027",
+  },
+  footer: {
+    textAlign: "center",
+    color: "#718198",
+    fontSize: "12px",
+    padding: "12px",
+  },
+};
