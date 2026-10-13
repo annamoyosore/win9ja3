@@ -18,7 +18,7 @@ const PAYMENT_CONFIG = {
     name: "Nigeria",
     currency: "NGN",
     symbol: "₦",
-    url: "",
+    url:         "https://flutterwave.com/pay/qiattof2hy2w",
   },
   US: {
     name: "United States",
