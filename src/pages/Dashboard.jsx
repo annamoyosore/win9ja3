@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
-import {
-  account,
-  databases,
-  DATABASE_ID,
-  WALLET_COLLECTION,
-  Query,
-} from "../lib/appwrite";
+import { account } from "../lib/appwrite";
+import { getWallet } from "../lib/wallet";
 
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 const THEME_KEY = "win9ja-theme";
+
+// Display conversion rate
+const COINS_PER_USD = 1000;
 
 const THEMES = {
   dark: {
@@ -54,7 +52,7 @@ export default function Dashboard({
     }
   });
 
-  // APPLY AND SAVE THEME
+  // Apply and save the selected theme.
   useEffect(() => {
     const themeName = isDark ? "dark" : "light";
     const theme = THEMES[themeName];
@@ -74,7 +72,7 @@ export default function Dashboard({
     document.body.style.color = theme["--app-text"];
   }, [isDark]);
 
-  // LOAD USER AND WALLET
+  // Load the signed-in user and their wallet.
   useEffect(() => {
     let active = true;
 
@@ -83,23 +81,20 @@ export default function Dashboard({
         const currentUser = await account.get();
 
         if (!active) return;
+
         setUser(currentUser);
 
-        const result = await databases.listDocuments(
-          DATABASE_ID,
-          WALLET_COLLECTION,
-          [Query.equal("userId", currentUser.$id)]
-        );
+        const currentWallet = await getWallet(currentUser.$id);
 
         if (!active) return;
 
-        if (result.documents.length > 0) {
-          setWallet(result.documents[0]);
-        }
+        setWallet(currentWallet || null);
       } catch (error) {
         console.error("Dashboard loading error:", error);
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
@@ -110,19 +105,25 @@ export default function Dashboard({
     };
   }, []);
 
-  // WHATSAPP SUPPORT
+  // Read the current coin balance safely.
+  const coinBalance = Number(wallet?.coins ?? 0) || 0;
+
+  // Calculate the displayed USD equivalent.
+  const usdBalance = coinBalance / COINS_PER_USD;
+
   function openWhatsApp() {
-    const message = "Hello Support, I need help with my account";
+    const message =
+      "Hello Support, I need help with my account";
 
     const url = `https://wa.me/18622726355?text=${encodeURIComponent(
       message
     )}`;
 
     window.open(url, "_blank", "noopener,noreferrer");
+
     setMenuOpen(false);
   }
 
-  // RUN MENU ACTION
   function runMenuAction(action) {
     setMenuOpen(false);
 
@@ -145,6 +146,7 @@ export default function Dashboard({
             font-family: Arial, sans-serif;
           }
         `}</style>
+
         Loading Win9ja Dashboard...
       </div>
     );
@@ -159,7 +161,6 @@ export default function Dashboard({
       <style>{`
         .dashboard-page {
           --dash-gold: #facc15;
-
           min-height: 100vh;
           padding: 16px;
           background: var(--app-bg, #0b1220);
@@ -249,11 +250,13 @@ export default function Dashboard({
           top: 51px;
           right: 0;
           width: min(270px, calc(100vw - 32px));
+          max-height: 75vh;
+          overflow-y: auto;
           padding: 8px;
           border: 1px solid var(--app-border);
           border-radius: 15px;
           background: var(--app-card);
-          box-shadow: 0 16px 40px rgba(0, 0, 0, .28);
+          box-shadow: 0 16px 40px rgba(0,0,0,.28);
         }
 
         .dashboard-dropdown button {
@@ -273,7 +276,7 @@ export default function Dashboard({
         }
 
         .dashboard-dropdown button:hover {
-          background: rgba(128, 128, 128, .14);
+          background: rgba(128,128,128,.14);
         }
 
         .dashboard-dropdown .dashboard-dropdown-admin {
@@ -291,15 +294,17 @@ export default function Dashboard({
         }
 
         .dashboard-balance-card {
+          position: relative;
           display: flex;
           align-items: center;
           justify-content: space-between;
           flex-wrap: wrap;
-          gap: 10px;
-          padding: 18px;
+          gap: 14px;
+          padding: 20px;
           margin-bottom: 26px;
+          overflow: hidden;
           border: 1px solid var(--app-border);
-          border-radius: 16px;
+          border-radius: 18px;
           background: var(--app-card);
         }
 
@@ -318,7 +323,37 @@ export default function Dashboard({
         }
 
         .dashboard-balance-icon {
-          font-size: 36px;
+          font-size: 44px;
+        }
+
+        .dashboard-usd-box {
+          display: inline-flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 7px;
+          margin-top: 13px;
+          padding: 10px 12px;
+          border: 1px solid var(--app-border);
+          border-radius: 10px;
+          background: var(--app-bg);
+        }
+
+        .dashboard-usd-label {
+          color: var(--app-secondary);
+          font-size: 13px;
+        }
+
+        .dashboard-usd-value {
+          color: #22c55e;
+          font-size: 20px;
+          font-weight: 800;
+        }
+
+        .dashboard-conversion-note {
+          margin: 9px 0 0;
+          color: var(--app-muted);
+          font-size: 11px;
+          line-height: 1.5;
         }
 
         .dashboard-section-title {
@@ -345,7 +380,7 @@ export default function Dashboard({
           border: 1px solid #ffffff24;
           border-radius: 16px;
           color: white;
-          box-shadow: 0 5px 14px rgba(0, 0, 0, .12);
+          box-shadow: 0 5px 14px rgba(0,0,0,.12);
           cursor: pointer;
           transition: transform .18s ease, filter .18s ease;
         }
@@ -394,7 +429,7 @@ export default function Dashboard({
 
         .dashboard-game-description {
           margin: 0;
-          color: rgba(255, 255, 255, .88);
+          color: rgba(255,255,255,.88);
           font-size: 12px;
           line-height: 1.5;
         }
@@ -474,7 +509,7 @@ export default function Dashboard({
       `}</style>
 
       <div className="dashboard-inner">
-        {/* HEADER */}
+        {/* Header */}
         <header className="dashboard-header">
           <div className="dashboard-brand">
             <h2 className="dashboard-title">
@@ -487,7 +522,6 @@ export default function Dashboard({
           </div>
 
           <div className="dashboard-header-actions">
-            {/* THEME SWITCH */}
             <button
               type="button"
               className="dashboard-theme-button"
@@ -501,14 +535,15 @@ export default function Dashboard({
               {isDark ? "☀️ Light" : "🌙 Dark"}
             </button>
 
-            {/* HAMBURGER MENU */}
             <div className="dashboard-menu-wrap">
               <button
                 type="button"
                 className="dashboard-icon-button"
                 aria-label={menuOpen ? "Close menu" : "Open menu"}
                 aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((previous) => !previous)}
+                onClick={() =>
+                  setMenuOpen((previous) => !previous)
+                }
               >
                 {menuOpen ? "✕" : "☰"}
               </button>
@@ -580,7 +615,9 @@ export default function Dashboard({
                     type="button"
                     onClick={() => {
                       setMenuOpen(false);
-                      window.alert("About Win9ja Life — Coming soon!");
+                      window.alert(
+                        "About Win9ja Life — Coming soon!"
+                      );
                     }}
                   >
                     ℹ️ About
@@ -623,41 +660,64 @@ export default function Dashboard({
           </div>
         </header>
 
-        {/* WALLET BALANCE */}
+        {/* Win9ja Coins and USD equivalent */}
         <section
           className="dashboard-balance-card"
-          aria-label="Wallet balance"
+          aria-label="Win9ja Coins balance"
         >
           <div>
             <p className="dashboard-balance-label">
-              💰 Wallet Balance
+              🪙 Win9ja Coins Balance
             </p>
 
             <h3 className="dashboard-balance-value">
-              ₦
-              {Number(wallet?.balance || 0).toLocaleString("en-NG")}
+              {coinBalance.toLocaleString("en-US")} Coins
             </h3>
+
+            <div className="dashboard-usd-box">
+              <span className="dashboard-usd-label">
+                USD Equivalent
+              </span>
+
+              <span className="dashboard-usd-value">
+                $
+                {usdBalance.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            </div>
+
+            <p className="dashboard-conversion-note">
+              Display rate: 1,000 Coins = $1 USD.
+              This is a display calculation only.
+            </p>
           </div>
 
-          <div className="dashboard-balance-icon" aria-hidden="true">
-            💳
+          <div
+            className="dashboard-balance-icon"
+            aria-hidden="true"
+          >
+            🪙
           </div>
         </section>
 
-        {/* GAMES */}
+        {/* Games */}
         <h3 className="dashboard-section-title">
           🎮 Games
         </h3>
 
         <div className="dashboard-game-grid">
-          {/* WHOT */}
           <div
             className="dashboard-game-card dashboard-game-whot"
             role="button"
             tabIndex={0}
             onClick={() => runMenuAction(goLobby)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+              if (
+                event.key === "Enter" ||
+                event.key === " "
+              ) {
                 event.preventDefault();
                 runMenuAction(goLobby);
               }
@@ -672,14 +732,16 @@ export default function Dashboard({
             </div>
           </div>
 
-          {/* SNAKE AND LADDER */}
           <div
             className="dashboard-game-card dashboard-game-snake"
             role="button"
             tabIndex={0}
             onClick={() => runMenuAction(goSnakeLobby)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+              if (
+                event.key === "Enter" ||
+                event.key === " "
+              ) {
                 event.preventDefault();
                 runMenuAction(goSnakeLobby);
               }
@@ -696,14 +758,16 @@ export default function Dashboard({
             </div>
           </div>
 
-          {/* JACKPOT */}
           <div
             className="dashboard-game-card dashboard-game-casino"
             role="button"
             tabIndex={0}
             onClick={() => runMenuAction(goCasino)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+              if (
+                event.key === "Enter" ||
+                event.key === " "
+              ) {
                 event.preventDefault();
                 runMenuAction(goCasino);
               }
@@ -711,21 +775,25 @@ export default function Dashboard({
           >
             <div>
               <div className="dashboard-game-icon">🎰</div>
-              <h4 className="dashboard-game-name">Jackpot</h4>
+              <h4 className="dashboard-game-name">
+                Jackpot
+              </h4>
               <p className="dashboard-game-description">
                 Spin & win rewards
               </p>
             </div>
           </div>
 
-          {/* MINES */}
           <div
             className="dashboard-game-card dashboard-game-mines"
             role="button"
             tabIndex={0}
             onClick={() => runMenuAction(goMineGame)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
+              if (
+                event.key === "Enter" ||
+                event.key === " "
+              ) {
                 event.preventDefault();
                 runMenuAction(goMineGame);
               }
@@ -733,7 +801,9 @@ export default function Dashboard({
           >
             <div>
               <div className="dashboard-game-icon">💣</div>
-              <h4 className="dashboard-game-name">Mines</h4>
+              <h4 className="dashboard-game-name">
+                Mines
+              </h4>
               <p className="dashboard-game-description">
                 Risk & reward mining game
               </p>
@@ -741,7 +811,7 @@ export default function Dashboard({
           </div>
         </div>
 
-        {/* LOGOUT */}
+        {/* Logout */}
         <button
           type="button"
           className="dashboard-logout"
