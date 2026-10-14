@@ -5,7 +5,7 @@ import { getWallet } from "../lib/wallet";
 const ADMIN_ID = "69ef9fe863a02a7490b4";
 const THEME_KEY = "win9ja-theme";
 
-// Display conversion rate
+// Display conversion rate: 1,000 coins = $1
 const COINS_PER_USD = 1000;
 
 const THEMES = {
@@ -52,7 +52,7 @@ export default function Dashboard({
     }
   });
 
-  // Apply and save the selected theme.
+  // Apply theme.
   useEffect(() => {
     const themeName = isDark ? "dark" : "light";
     const theme = THEMES[themeName];
@@ -64,7 +64,10 @@ export default function Dashboard({
     }
 
     Object.entries(theme).forEach(([property, value]) => {
-      document.documentElement.style.setProperty(property, value);
+      document.documentElement.style.setProperty(
+        property,
+        value
+      );
     });
 
     document.documentElement.style.colorScheme = themeName;
@@ -72,7 +75,7 @@ export default function Dashboard({
     document.body.style.color = theme["--app-text"];
   }, [isDark]);
 
-  // Load the signed-in user and their wallet.
+  // Load user and wallet.
   useEffect(() => {
     let active = true;
 
@@ -105,12 +108,13 @@ export default function Dashboard({
     };
   }, []);
 
-  // Read the current coin balance safely.
+  // Coins balance.
   const coinBalance = Number(wallet?.coins ?? 0) || 0;
 
-  // Calculate the displayed USD equivalent.
+  // USD equivalent.
   const usdBalance = coinBalance / COINS_PER_USD;
 
+  // Open support chat.
   function openWhatsApp() {
     const message =
       "Hello Support, I need help with my account";
@@ -124,6 +128,7 @@ export default function Dashboard({
     setMenuOpen(false);
   }
 
+  // Run navigation callbacks.
   function runMenuAction(action) {
     setMenuOpen(false);
 
@@ -293,6 +298,7 @@ export default function Dashboard({
           background: var(--app-border);
         }
 
+        /* Clickable coins balance card */
         .dashboard-balance-card {
           position: relative;
           display: flex;
@@ -300,12 +306,31 @@ export default function Dashboard({
           justify-content: space-between;
           flex-wrap: wrap;
           gap: 14px;
+          width: 100%;
           padding: 20px;
-          margin-bottom: 26px;
+          margin: 0 0 26px;
           overflow: hidden;
           border: 1px solid var(--app-border);
           border-radius: 18px;
           background: var(--app-card);
+          color: var(--app-text);
+          text-align: left;
+          font: inherit;
+          cursor: pointer;
+          transition:
+            background-color .2s ease,
+            border-color .2s ease,
+            transform .2s ease;
+        }
+
+        .dashboard-balance-card:hover {
+          border-color: #22c55e;
+          transform: translateY(-2px);
+        }
+
+        .dashboard-balance-card:focus-visible {
+          outline: 3px solid #22c55e;
+          outline-offset: 3px;
         }
 
         .dashboard-balance-label {
@@ -356,6 +381,13 @@ export default function Dashboard({
           line-height: 1.5;
         }
 
+        .dashboard-open-wallet {
+          margin: 12px 0 0;
+          color: #22c55e;
+          font-size: 13px;
+          font-weight: 800;
+        }
+
         .dashboard-section-title {
           margin: 26px 0 13px;
           color: var(--app-secondary);
@@ -390,11 +422,7 @@ export default function Dashboard({
           filter: brightness(1.08);
         }
 
-        .dashboard-game-card:focus-visible,
-        .dashboard-dropdown button:focus-visible,
-        .dashboard-icon-button:focus-visible,
-        .dashboard-theme-button:focus-visible,
-        .dashboard-logout:focus-visible {
+        .dashboard-game-card:focus-visible {
           outline: 3px solid #22c55e;
           outline-offset: 3px;
         }
@@ -517,7 +545,8 @@ export default function Dashboard({
             </h2>
 
             <p className="dashboard-subtitle">
-              Welcome back{user?.name ? `, ${user.name}` : ""}!
+              Welcome back
+              {user?.name ? `, ${user.name}` : ""}!
             </p>
           </div>
 
@@ -539,7 +568,9 @@ export default function Dashboard({
               <button
                 type="button"
                 className="dashboard-icon-button"
-                aria-label={menuOpen ? "Close menu" : "Open menu"}
+                aria-label={
+                  menuOpen ? "Close menu" : "Open menu"
+                }
                 aria-expanded={menuOpen}
                 onClick={() =>
                   setMenuOpen((previous) => !previous)
@@ -599,7 +630,9 @@ export default function Dashboard({
 
                   <button
                     type="button"
-                    onClick={() => runMenuAction(goTransactions)}
+                    onClick={() =>
+                      runMenuAction(goTransactions)
+                    }
                   >
                     📊 Transactions
                   </button>
@@ -660,10 +693,12 @@ export default function Dashboard({
           </div>
         </header>
 
-        {/* Win9ja Coins and USD equivalent */}
-        <section
+        {/* Clickable coins balance card */}
+        <button
+          type="button"
           className="dashboard-balance-card"
-          aria-label="Win9ja Coins balance"
+          aria-label="Open wallet and view your coins balance"
+          onClick={() => runMenuAction(goWallet)}
         >
           <div>
             <p className="dashboard-balance-label">
@@ -692,6 +727,10 @@ export default function Dashboard({
               Display rate: 1,000 Coins = $1 USD.
               This is a display calculation only.
             </p>
+
+            <p className="dashboard-open-wallet">
+              Tap to open wallet →
+            </p>
           </div>
 
           <div
@@ -700,7 +739,7 @@ export default function Dashboard({
           >
             🪙
           </div>
-        </section>
+        </button>
 
         {/* Games */}
         <h3 className="dashboard-section-title">
