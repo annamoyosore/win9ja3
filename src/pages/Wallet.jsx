@@ -15,7 +15,6 @@ import { getWallet } from "../lib/wallet";
 
 // =====================================
 // THEME-AWARE STYLES
-// App.jsx controls the global theme.
 // =====================================
 
 const styles = {
@@ -26,7 +25,6 @@ const styles = {
     padding: "20px",
     fontFamily: "Arial, sans-serif",
     boxSizing: "border-box",
-    transition: "background 0.2s, color 0.2s",
   },
 
   container: {
@@ -92,11 +90,65 @@ const styles = {
 };
 
 // =====================================
-// HELPERS
+// REUSABLE WIN9JA COIN ICON
 // =====================================
 
-function formatCoins(value) {
-  return Number(value || 0).toLocaleString("en-NG");
+function CoinLogo({ size = 28 }) {
+  return (
+    <span
+      role="img"
+      aria-label="Win9ja coin"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: size,
+        height: size,
+        minWidth: size,
+        borderRadius: "50%",
+        background:
+          "radial-gradient(circle at 30% 25%, #fff3a6 0%, #facc15 35%, #d97706 75%, #92400e 100%)",
+        border: "2px solid #fef08a",
+        color: "#78350f",
+        fontSize: size * 0.55,
+        fontWeight: 900,
+        lineHeight: 1,
+        boxShadow: "0 2px 5px rgba(0,0,0,0.25)",
+        verticalAlign: "middle",
+        flexShrink: 0,
+      }}
+    >
+      W
+    </span>
+  );
+}
+
+// =====================================
+// REUSABLE COIN AMOUNT
+// =====================================
+
+function CoinAmount({
+  amount,
+  iconSize = 25,
+  className = "",
+}) {
+  return (
+    <span
+      className={className}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "8px",
+        verticalAlign: "middle",
+      }}
+    >
+      <CoinLogo size={iconSize} />
+
+      <span>
+        {Number(amount || 0).toLocaleString("en-NG")}
+      </span>
+    </span>
+  );
 }
 
 // =====================================
@@ -153,9 +205,7 @@ export default function Wallet() {
           );
         }
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
@@ -227,7 +277,6 @@ export default function Wallet() {
       );
 
       setPromo(newPromo);
-
       alert("Promo code created successfully.");
     } catch (error) {
       console.error("Promo creation failed:", error);
@@ -308,7 +357,6 @@ https://chat.whatsapp.com/XXXXXXXX
       );
 
       alert("Zangi contact saved successfully.");
-
       await refreshWallet();
     } catch (error) {
       console.error("Saving Zangi contact failed:", error);
@@ -329,7 +377,7 @@ https://chat.whatsapp.com/XXXXXXXX
     return (
       <main style={styles.page}>
         <div style={styles.container}>
-          <h2>🪙 Win9ja Wallet</h2>
+          <h2>My Win9ja Wallet</h2>
           <p>Loading your wallet...</p>
         </div>
       </main>
@@ -344,7 +392,7 @@ https://chat.whatsapp.com/XXXXXXXX
     return (
       <main style={styles.page}>
         <div style={styles.container}>
-          <h2>🪙 Win9ja Wallet</h2>
+          <h2>My Win9ja Wallet</h2>
 
           <p>{message || "Please sign in to view your wallet."}</p>
 
@@ -376,7 +424,7 @@ https://chat.whatsapp.com/XXXXXXXX
     <main style={styles.page}>
       <div style={styles.container}>
         <header>
-          <h1>🪙 My Win9ja Wallet</h1>
+          <h1>My Win9ja Wallet</h1>
 
           <p style={styles.muted}>
             Welcome, {wallet.name || user.name || "Player"}
@@ -401,12 +449,17 @@ https://chat.whatsapp.com/XXXXXXXX
 
           <h2
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
               fontSize: "clamp(30px, 7vw, 42px)",
               color: "#22c55e",
               margin: "8px 0",
             }}
           >
-            🪙 {formatCoins(wallet.coins)}
+            <CoinLogo size={42} />
+            {formatCoins(wallet.coins)}
           </h2>
 
           <p style={styles.muted}>
@@ -419,7 +472,7 @@ https://chat.whatsapp.com/XXXXXXXX
             style={styles.button}
             onClick={() => navigate("/coins")}
           >
-            🪙 Buy Coins
+            <CoinLogo size={18} /> Buy Coins
           </button>
 
           <button
@@ -430,7 +483,7 @@ https://chat.whatsapp.com/XXXXXXXX
             ↻ Refresh Coin Balance
           </button>
 
-          {/* UPDATED: OPEN THE NEW WITHDRAW PAGE */}
+          {/* OPEN THE NEW WITHDRAWAL PAGE */}
 
           <button
             type="button"
@@ -461,7 +514,7 @@ https://chat.whatsapp.com/XXXXXXXX
             style={styles.button}
             onClick={() => navigate("/coins")}
           >
-            View Coin Packages
+            <CoinLogo size={18} /> View Coin Packages
           </button>
         </section>
 
@@ -474,6 +527,10 @@ https://chat.whatsapp.com/XXXXXXXX
             <>
               <p
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
                   fontSize: "24px",
                   fontWeight: "bold",
                   color: "#22c55e",
@@ -570,4 +627,12 @@ https://chat.whatsapp.com/XXXXXXXX
       </div>
     </main>
   );
+}
+
+// =====================================
+// FORMAT COINS
+// =====================================
+
+function formatCoins(value) {
+  return Number(value || 0).toLocaleString("en-NG");
 }
