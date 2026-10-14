@@ -13,7 +13,7 @@ const WITHDRAW_COLLECTION = "withdrawal_requests";
 const CURRENCIES = [
   {
     code: "NGN",
-    label: "₦ Nigerian Naira (NGN)",
+    label: "🇳🇬 Nigeria — Nigerian Naira (NGN)",
     country: "NG",
     countryName: "Nigeria",
     symbol: "₦",
@@ -21,7 +21,7 @@ const CURRENCIES = [
   },
   {
     code: "GHS",
-    label: "GH₵ Ghanaian Cedi (GHS)",
+    label: "🇬🇭 Ghana — Ghanaian Cedi (GHS)",
     country: "GH",
     countryName: "Ghana",
     symbol: "GH₵",
@@ -29,7 +29,7 @@ const CURRENCIES = [
   },
   {
     code: "GBP",
-    label: "£ British Pound (GBP)",
+    label: "🇬🇧 United Kingdom — British Pound (GBP)",
     country: "GB",
     countryName: "United Kingdom",
     symbol: "£",
@@ -37,7 +37,7 @@ const CURRENCIES = [
   },
   {
     code: "USD",
-    label: "$ US Dollar (USD)",
+    label: "🇺🇸 United States — US Dollar (USD)",
     country: "US",
     countryName: "United States",
     symbol: "$",
@@ -45,7 +45,7 @@ const CURRENCIES = [
   },
   {
     code: "CAD",
-    label: "C$ Canadian Dollar (CAD)",
+    label: "🇨🇦 Canada — Canadian Dollar (CAD)",
     country: "CA",
     countryName: "Canada",
     symbol: "C$",
@@ -53,7 +53,7 @@ const CURRENCIES = [
   },
   {
     code: "KES",
-    label: "KSh Kenyan Shilling (KES)",
+    label: "🇰🇪 Kenya — Kenyan Shilling (KES)",
     country: "KE",
     countryName: "Kenya",
     symbol: "KSh",
@@ -61,7 +61,7 @@ const CURRENCIES = [
   },
   {
     code: "ZAR",
-    label: "R South African Rand (ZAR)",
+    label: "🇿🇦 South Africa — South African Rand (ZAR)",
     country: "ZA",
     countryName: "South Africa",
     symbol: "R",
@@ -69,16 +69,50 @@ const CURRENCIES = [
   },
 ];
 
+function formatCoins(value) {
+  return Math.floor(Number(value) || 0).toLocaleString();
+}
+
+function CoinLogo({ size = 28 }) {
+  return (
+    <span
+      className="withdraw-coin-logo"
+      style={{
+        width: size,
+        height: size,
+        minWidth: size,
+        fontSize: Math.max(10, size * 0.42),
+      }}
+      aria-label="Win9ja coin"
+      role="img"
+    >
+      W
+    </span>
+  );
+}
+
+function CoinAmount({
+  amount,
+  size = 25,
+  className = "",
+}) {
+  return (
+    <span className={`withdraw-coin-amount ${className}`}>
+      <CoinLogo size={size} />
+      <strong>{formatCoins(amount)}</strong>
+      <span className="coin-unit">coins</span>
+    </span>
+  );
+}
+
 export default function Withdraw() {
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
   const [requests, setRequests] = useState([]);
 
-  // Page 1: currency selection
   const [currency, setCurrency] = useState("");
   const [confirmed, setConfirmed] = useState(false);
 
-  // Withdrawal form
   const [bank, setBank] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -96,7 +130,10 @@ export default function Withdraw() {
 
   const isNigeria = currency === "NGN";
   const minimum = selectedCurrency?.minimum ?? 5000;
-  const availableCoins = Number(wallet?.coins ?? 0);
+  const availableCoins = Math.max(
+    0,
+    Number(wallet?.coins ?? 0) || 0
+  );
   const requestedCoins = Number(amount);
 
   useEffect(() => {
@@ -117,6 +154,7 @@ export default function Withdraw() {
       await loadRequests(currentUser.$id);
     } catch (err) {
       console.error("Failed to load withdrawal page:", err);
+
       setError(
         "Unable to load your wallet. Please log in and try again."
       );
@@ -162,7 +200,7 @@ export default function Withdraw() {
     setMessage("");
 
     if (!selectedCurrency) {
-      setError("Please select your currency before continuing.");
+      setError("Please select your country and currency first.");
       return;
     }
 
@@ -178,7 +216,7 @@ export default function Withdraw() {
   function useAllCoins() {
     if (availableCoins < minimum) {
       setError(
-        `You need at least ${minimum.toLocaleString()} coins to withdraw.`
+        `You need at least ${formatCoins(minimum)} coins to withdraw.`
       );
       return;
     }
@@ -200,7 +238,7 @@ export default function Withdraw() {
     }
 
     if (!confirmed || !selectedCurrency) {
-      setError("Please select your currency and tap Next.");
+      setError("Select your currency and tap Next before continuing.");
       return;
     }
 
@@ -217,16 +255,16 @@ export default function Withdraw() {
 
     if (coins < minimum) {
       setError(
-        `The minimum withdrawal is ${minimum.toLocaleString()} coins.`
+        `The minimum withdrawal is ${formatCoins(minimum)} coins.`
       );
       return;
     }
 
     if (coins > availableCoins) {
       setError(
-        `Insufficient balance. You have ${Math.floor(
+        `Insufficient balance. You have ${formatCoins(
           availableCoins
-        ).toLocaleString()} coins available.`
+        )} coins available.`
       );
       return;
     }
@@ -243,7 +281,9 @@ export default function Withdraw() {
       }
 
       if (!/^\d{10}$/.test(accountNumber.trim())) {
-        setError("Enter a valid 10-digit Nigerian bank account number.");
+        setError(
+          "Enter a valid 10-digit Nigerian bank account number."
+        );
         return;
       }
     } else {
@@ -292,6 +332,7 @@ export default function Withdraw() {
       await loadRequests(user.$id);
     } catch (err) {
       console.error("Withdrawal submission failed:", err);
+
       setError(
         err?.message ||
           "Unable to submit your request. Please try again."
@@ -344,17 +385,19 @@ export default function Withdraw() {
             <h1>Withdraw Coins</h1>
 
             <p className="withdraw-subtitle">
-              Select your currency to view the withdrawal options
-              available to you.
+              Choose your country and currency to view the available
+              withdrawal options.
             </p>
           </div>
 
           <div className="wallet-balance-card">
-            <span>Available balance</span>
-            <strong>
-              {Math.floor(availableCoins).toLocaleString()}
-              <small> coins</small>
-            </strong>
+            <span>Available coin balance</span>
+
+            <CoinAmount
+              amount={availableCoins}
+              size={32}
+              className="balance-coin-amount"
+            />
           </div>
         </header>
 
@@ -372,35 +415,37 @@ export default function Withdraw() {
           </div>
         )}
 
-        {/* PAGE 1: CURRENCY SELECTION ONLY */}
         {!confirmed && (
           <section className="withdraw-card currency-card">
             <div className="section-heading">
               <div className="step-number">1</div>
 
               <div>
-                <h2>Select Your Currency</h2>
+                <h2>Select Your Country & Currency</h2>
                 <p>
-                  Choose your preferred currency and tap Next to
-                  reveal the appropriate withdrawal page.
+                  Choose your currency, then tap Next to continue to
+                  the withdrawal details.
                 </p>
               </div>
             </div>
 
             <div className="currency-illustration">
-              <div className="currency-symbol">¤</div>
+              <div className="currency-coin-art">
+                <CoinLogo size={48} />
+              </div>
+
               <div>
-                <strong>Choose your currency</strong>
+                <strong>Win9ja Life Coins</strong>
                 <p>
-                  Nigerian users will see bank transfer options.
-                  International users will see TRX wallet options.
+                  Select your country to see the relevant payment
+                  details. Your coin balance is shown above.
                 </p>
               </div>
             </div>
 
             <div className="form-group">
               <label htmlFor="withdraw-currency">
-                Your currency
+                Country and currency
               </label>
 
               <select
@@ -409,7 +454,7 @@ export default function Withdraw() {
                 value={currency}
                 onChange={handleCurrencyChange}
               >
-                <option value="">-- Select your currency --</option>
+                <option value="">-- Select your country --</option>
 
                 {CURRENCIES.map((item) => (
                   <option key={item.code} value={item.code}>
@@ -422,10 +467,20 @@ export default function Withdraw() {
             {selectedCurrency && (
               <div className="selected-currency-preview">
                 <span>Selected currency</span>
+
                 <strong>
                   {selectedCurrency.symbol} {selectedCurrency.code}
                 </strong>
+
                 <small>{selectedCurrency.countryName}</small>
+
+                <div className="preview-minimum">
+                  Minimum withdrawal:
+                  <CoinAmount
+                    amount={selectedCurrency.minimum}
+                    size={20}
+                  />
+                </div>
               </div>
             )}
 
@@ -435,17 +490,16 @@ export default function Withdraw() {
               onClick={handleNext}
               disabled={!currency}
             >
-              Next
-              <span aria-hidden="true"> →</span>
+              Next <span aria-hidden="true">→</span>
             </button>
 
             <p className="step-note">
-              Your withdrawal details will appear on the next page.
+              Your withdrawal form will appear after you select a
+              currency and tap Next.
             </p>
           </section>
         )}
 
-        {/* PAGE 2: APPROPRIATE WITHDRAWAL PAGE */}
         {confirmed && selectedCurrency && (
           <>
             <section className="withdraw-card">
@@ -455,14 +509,14 @@ export default function Withdraw() {
                 <div>
                   <h2>
                     {isNigeria
-                      ? "Nigerian Withdrawal"
+                      ? "Nigerian Bank Withdrawal"
                       : "International Withdrawal"}
                   </h2>
 
                   <p>
                     {isNigeria
-                      ? "Enter the Nigerian bank account where you want to receive payment."
-                      : "Enter your TRON/TRC20 wallet address to request an international withdrawal."}
+                      ? "Enter the Nigerian bank account details for your request."
+                      : "Enter a TRON/TRC20 receiving address for your request."}
                   </p>
                 </div>
               </div>
@@ -482,14 +536,15 @@ export default function Withdraw() {
 
                 <div className="detail-box">
                   <span>Minimum withdrawal</span>
-                  <strong>{minimum.toLocaleString()} coins</strong>
+                  <CoinAmount amount={minimum} size={23} />
                 </div>
 
                 <div className="detail-box">
                   <span>Available balance</span>
-                  <strong>
-                    {Math.floor(availableCoins).toLocaleString()} coins
-                  </strong>
+                  <CoinAmount
+                    amount={availableCoins}
+                    size={23}
+                  />
                 </div>
               </div>
 
@@ -498,29 +553,31 @@ export default function Withdraw() {
                 className="back-button"
                 onClick={handleBack}
               >
-                ← Change currency
+                ← Change country or currency
               </button>
 
               {isNigeria ? (
                 <div className="method-panel">
                   <div className="method-icon">🏦</div>
+
                   <div>
                     <h3>Nigerian Bank Transfer</h3>
                     <p>
-                      Provide your Nigerian bank details. Ensure that
-                      the account belongs to the intended recipient.
+                      Enter your bank details carefully. Confirm the
+                      account information before submitting.
                     </p>
                   </div>
                 </div>
               ) : (
                 <div className="method-panel">
                   <div className="method-icon">🔗</div>
+
                   <div>
                     <h3>TRON (TRC20) Wallet</h3>
                     <p>
-                      Provide your own TRON-compatible receiving address.
-                      The currency selection does not convert your coins
-                      or guarantee a payout in the selected currency.
+                      Enter a compatible TRON receiving address.
+                      Currency selection does not convert your coins
+                      or guarantee a payout in that currency.
                     </p>
                   </div>
                 </div>
@@ -528,9 +585,11 @@ export default function Withdraw() {
 
               {availableCoins < minimum && (
                 <div className="withdraw-alert alert-warning">
-                  Your balance is below the minimum of{" "}
-                  {minimum.toLocaleString()} coins. You need more coins
-                  before you can submit a withdrawal request.
+                  <span>
+                    Your balance is below the minimum withdrawal of{" "}
+                    <CoinAmount amount={minimum} size={20} />. You need
+                    more coins before you can submit a request.
+                  </span>
                 </div>
               )}
             </section>
@@ -542,7 +601,8 @@ export default function Withdraw() {
                 <div>
                   <h2>Withdrawal Details</h2>
                   <p>
-                    Enter the amount and your payment details below.
+                    Enter the number of coins and the payment details
+                    required for your selected method.
                   </p>
                 </div>
               </div>
@@ -551,7 +611,7 @@ export default function Withdraw() {
                 <div className="amount-panel">
                   <div className="amount-heading">
                     <label htmlFor="withdraw-amount">
-                      Amount to withdraw (coins)
+                      Amount to withdraw
                     </label>
 
                     <button
@@ -564,32 +624,39 @@ export default function Withdraw() {
                     </button>
                   </div>
 
-                  <input
-                    id="withdraw-amount"
-                    type="number"
-                    inputMode="numeric"
-                    className="withdraw-input amount-input"
-                    min={minimum}
-                    max={Math.floor(availableCoins)}
-                    step="1"
-                    value={amount}
-                    onChange={(event) => {
-                      setAmount(event.target.value);
-                      setError("");
-                      setMessage("");
-                    }}
-                    placeholder={`Minimum ${minimum.toLocaleString()} coins`}
-                    required
-                  />
+                  <div className="amount-input-wrap">
+                    <CoinLogo size={32} />
+
+                    <input
+                      id="withdraw-amount"
+                      type="number"
+                      inputMode="numeric"
+                      className="withdraw-input amount-input"
+                      min={minimum}
+                      max={Math.floor(availableCoins)}
+                      step="1"
+                      value={amount}
+                      onChange={(event) => {
+                        setAmount(event.target.value);
+                        setError("");
+                        setMessage("");
+                      }}
+                      placeholder={String(minimum)}
+                      required
+                    />
+                  </div>
 
                   <div className="amount-footer">
                     <span>
-                      Minimum: {minimum.toLocaleString()} coins
+                      Minimum: <CoinAmount amount={minimum} size={19} />
                     </span>
 
                     <span>
-                      Balance:{" "}
-                      {Math.floor(availableCoins).toLocaleString()} coins
+                      Available:{" "}
+                      <CoinAmount
+                        amount={availableCoins}
+                        size={19}
+                      />
                     </span>
                   </div>
                 </div>
@@ -685,17 +752,17 @@ export default function Withdraw() {
                       />
 
                       <small className="field-help">
-                        Use an address compatible with the TRON network.
-                        Check the address carefully before submitting.
+                        Use a TRON-compatible receiving address. Check
+                        it carefully before submitting.
                       </small>
                     </div>
 
                     <div className="network-warning">
                       <strong>Important network notice</strong>
                       <p>
-                        Only use a compatible TRON/TRC20 address. Other
-                        networks may not be supported. Never enter your
-                        wallet recovery phrase or private key.
+                        Only use an address compatible with the TRON
+                        network. Never enter your wallet recovery
+                        phrase or private key.
                       </p>
                     </div>
                   </div>
@@ -719,16 +786,15 @@ export default function Withdraw() {
                 </button>
 
                 <p className="submit-note">
-                  Your request will be recorded as pending until it is
-                  reviewed. Submitting a request does not mean payment
-                  has been made.
+                  Requests are recorded as pending for review. This
+                  form does not itself process payment or guarantee a
+                  payout.
                 </p>
               </form>
             </section>
           </>
         )}
 
-        {/* WITHDRAWAL HISTORY */}
         <section className="withdraw-card history-card">
           <div className="section-heading">
             <div className="history-icon">↻</div>
@@ -763,12 +829,13 @@ export default function Withdraw() {
                   >
                     <div className="history-top">
                       <div>
-                        <strong className="history-amount">
-                          {Number(
+                        <CoinAmount
+                          amount={
                             request.coins ?? request.amount ?? 0
-                          ).toLocaleString()}{" "}
-                          coins
-                        </strong>
+                          }
+                          size={29}
+                          className="history-coin-amount"
+                        />
 
                         <span className="history-date">
                           {formatDate(request.$createdAt)}
@@ -788,8 +855,7 @@ export default function Withdraw() {
 
                     <div className="history-meta">
                       <span>
-                        Currency:{" "}
-                        {request.currency || "Not specified"}
+                        Currency: {request.currency || "Not specified"}
                       </span>
 
                       <span>
@@ -811,7 +877,7 @@ export default function Withdraw() {
 
                     {isTrx && request.trxAddress && (
                       <div className="history-destination">
-                        <span>TRX address</span>
+                        <span>TRX receiving address</span>
                         <code>{request.trxAddress}</code>
                       </div>
                     )}
@@ -903,7 +969,7 @@ const styles = `
 }
 
 .wallet-balance-card {
-  min-width: 180px;
+  min-width: 210px;
   padding: 16px;
   border: 1px solid var(--app-border, #e4e8ef);
   border-radius: 16px;
@@ -913,20 +979,63 @@ const styles = `
 
 .wallet-balance-card > span {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   color: var(--app-muted, #687386);
   font-size: 12px;
 }
 
-.wallet-balance-card strong {
-  color: #16a34a;
-  font-size: 24px;
+.withdraw-coin-logo {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #d69b19;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, #fff3a6 0%, #f7ce45 38%, #d99612 100%);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.42),
+    0 2px 5px rgba(161, 112, 8, 0.2);
+  color: #754400;
+  font-weight: 1000;
+  line-height: 1;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.withdraw-coin-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--app-text, #172033);
+  vertical-align: middle;
+}
+
+.withdraw-coin-amount strong {
+  font-size: 16px;
+  font-weight: 850;
   overflow-wrap: anywhere;
 }
 
-.wallet-balance-card small {
-  font-size: 12px;
+.withdraw-coin-amount .coin-unit {
+  color: var(--app-muted, #687386);
+  font-size: 11px;
   font-weight: 600;
+}
+
+.balance-coin-amount {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.balance-coin-amount strong {
+  color: #15803d;
+  font-size: 25px;
+}
+
+.balance-coin-amount .coin-unit {
+  align-self: center;
+  font-size: 12px;
 }
 
 .withdraw-card {
@@ -988,18 +1097,13 @@ const styles = `
   background: rgba(22, 163, 74, 0.055);
 }
 
-.currency-symbol {
+.currency-coin-art {
   display: flex;
-  flex: 0 0 48px;
-  width: 48px;
-  height: 48px;
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
-  background: rgba(22, 163, 74, 0.13);
-  color: #16a34a;
-  font-size: 28px;
-  font-weight: 800;
 }
 
 .currency-illustration strong {
@@ -1061,7 +1165,7 @@ const styles = `
 .selected-currency-preview {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   margin-bottom: 20px;
   padding: 14px;
   border: 1px solid var(--app-border, #e4e8ef);
@@ -1069,15 +1173,24 @@ const styles = `
   background: var(--app-bg, #f8fafc);
 }
 
-.selected-currency-preview span,
-.selected-currency-preview small {
+.selected-currency-preview > span,
+.selected-currency-preview > small {
   color: var(--app-muted, #687386);
   font-size: 12px;
 }
 
-.selected-currency-preview strong {
+.selected-currency-preview > strong {
   color: #16a34a;
   font-size: 18px;
+}
+
+.preview-minimum {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 12px;
 }
 
 .withdraw-button {
@@ -1139,19 +1252,21 @@ const styles = `
 .detail-box {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
   padding: 15px;
   border: 1px solid var(--app-border, #e4e8ef);
   border-radius: 12px;
   background: var(--app-bg, #f8fafc);
 }
 
-.detail-box span {
+.detail-box > span {
   color: var(--app-muted, #687386);
   font-size: 12px;
 }
 
-.detail-box strong {
+.detail-box > strong {
   font-size: 14px;
   overflow-wrap: anywhere;
 }
@@ -1266,9 +1381,23 @@ const styles = `
   cursor: not-allowed;
 }
 
-.amount-input {
-  min-height: 58px;
-  font-size: 20px;
+.amount-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--app-border, #dce2eb);
+  border-radius: 12px;
+  background: var(--app-input, #fff);
+}
+
+.amount-input-wrap .withdraw-input {
+  min-width: 0;
+  padding-left: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 22px;
   font-weight: 800;
 }
 
@@ -1276,10 +1405,17 @@ const styles = `
   display: flex;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 12px;
+  margin-top: 12px;
   color: var(--app-muted, #687386);
   font-size: 11px;
+}
+
+.amount-footer > span {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
 .payment-form {
@@ -1344,15 +1480,17 @@ const styles = `
   margin-bottom: 14px;
 }
 
-.history-amount {
-  display: block;
-  font-size: 17px;
-  font-weight: 800;
+.history-coin-amount {
+  flex-wrap: wrap;
+}
+
+.history-coin-amount strong {
+  font-size: 19px;
 }
 
 .history-date {
   display: block;
-  margin-top: 5px;
+  margin-top: 7px;
   color: var(--app-muted, #687386);
   font-size: 11px;
 }
@@ -1515,11 +1653,9 @@ const styles = `
   .withdraw-button {
     width: 100%;
   }
-}
 
-@keyframes withdraw-spin {
-  to {
-    transform: rotate(360deg);
+  .balance-coin-amount strong {
+    font-size: 23px;
   }
 }
 
