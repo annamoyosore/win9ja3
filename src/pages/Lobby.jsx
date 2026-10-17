@@ -53,17 +53,31 @@ function formatCoins(value) {
 function getRoomForStake(stake) {
   const amount = Number(stake);
 
-  if (amount >= 100 && amount <= 350) return "beginners";
-  if (amount >= 400 && amount <= 1000) return "standard";
-  if (amount >= 1100) return "premium";
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    return null;
+  }
+
+  if (amount >= 100 && amount <= 350) {
+    return "beginners";
+  }
+
+  if (amount >= 400 && amount <= 1000) {
+    return "standard";
+  }
+
+  if (amount >= 1100) {
+    return "premium";
+  }
 
   return null;
 }
 
 function getAvailableBalance(wallet) {
-  const coins = Number(wallet?.coins || 0);
+  const coins = Number(wallet?.coins ?? 0);
 
-  if (!Number.isFinite(coins) || coins < 0) return 0;
+  if (!Number.isFinite(coins) || coins < 0) {
+    return 0;
+  }
 
   return Math.floor(coins);
 }
@@ -570,10 +584,7 @@ export default function Lobby({ goGame, back }) {
 
   const notify = useCallback(
     (message, type = "info", options = {}) => {
-      const {
-        speak = true,
-        sound = true,
-      } = options;
+      const { speak = true, sound = true } = options;
 
       if (!mountedRef.current) return;
 
@@ -626,8 +637,6 @@ export default function Lobby({ goGame, back }) {
 
   // ----------------------------------------------------
   // ENABLE SOUND AND VOICE
-  // Call this from a button click because browsers often
-  // block audio until the user interacts with the page.
   // ----------------------------------------------------
 
   async function enableVoiceAndSound() {
@@ -656,7 +665,7 @@ export default function Lobby({ goGame, back }) {
 
       setSuccessMessage("Voice and sound notifications are enabled.");
       setErrorMessage("");
-    } catch (error) {
+    } catch {
       reportError(
         "Your device could not enable sound. Check your device volume and browser settings."
       );
@@ -692,7 +701,9 @@ export default function Lobby({ goGame, back }) {
 
     const freshWallet = await getFreshWallet(user.$id);
 
-    if (mountedRef.current) setWallet(freshWallet);
+    if (mountedRef.current) {
+      setWallet(freshWallet);
+    }
 
     return freshWallet;
   }, [user, getFreshWallet]);
@@ -715,7 +726,9 @@ export default function Lobby({ goGame, back }) {
     );
 
     if (!response.documents.length) {
-      throw new Error("The configured admin wallet could not be found.");
+      throw new Error(
+        "The configured admin wallet could not be found."
+      );
     }
 
     return response.documents[0];
@@ -723,36 +736,36 @@ export default function Lobby({ goGame, back }) {
 
   // ----------------------------------------------------
   // FIND OR CREATE GAME FOR A CLAIMED MATCH
-  //
-  // This recovery path prevents a player from having to
-  // pay the stake a second time after a partial setup.
-  //
-  // A server-side Appwrite Function is recommended for
-  // fully atomic match claiming and financial operations.
   // ----------------------------------------------------
 
-  const ensureGameForMatch = useCallback(
-    async (matchDoc) => {
-      if (!matchDoc?.$id || !matchDoc.hostId || !matchDoc.opponentId) {
-        throw new Error(
-          "Both players must be assigned before the game can start."
+  const ensureGameForMatch = useCallback(async (matchDoc) => {
+    if (
+      !matchDoc?.$id ||
+      !matchDoc.hostId ||
+      !matchDoc.opponentId
+    ) {
+      throw new Error(
+        "Both players must be assigned before the game can start."
+      );
+    }
+
+    let game = null;
+
+    // First try the game's ID stored on the match.
+    if (matchDoc.gameId) {
+      try {
+        game = await databases.getDocument(
+          DATABASE_ID,
+          GAME_COLLECTION,
+          matchDoc.gameId
         );
+      } catch {
+        // Continue to search games by matchId.
       }
+    }
 
-      if (matchDoc.gameId) {
-        try {
-          const existingGame = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            matchDoc.gameId
-          );
-
-          return existingGame;
-        } catch {
-          // The match points to a missing game. Search by matchId.
-        }
-      }
-
+    // A game may already exist even if the match was never linked.
+    if (!game) {
       const found = await databases.listDocuments(
         DATABASE_ID,
         GAME_COLLECTION,
@@ -762,44 +775,44 @@ export default function Lobby({ goGame, back }) {
         ]
       );
 
-      let game = found.documents[0] || null;
+      game = found.documents[0] || null;
+    }
 
-      if (!game) {
-        game = await databases.createDocument(
-          DATABASE_ID,
-          GAME_COLLECTION,
-          ID.unique(),
-          {
-            matchId: matchDoc.$id,
-            players: `${matchDoc.hostId},${matchDoc.opponentId}`,
-            status: "playing",
-            turn: matchDoc.hostId,
-            payoutDone: false,
-          }
-        );
-      }
+    // Create a game only if no existing game can be found.
+    if (!game) {
+      game = await databases.createDocument(
+        DATABASE_ID,
+        GAME_COLLECTION,
+        ID.unique(),
+        {
+          matchId: matchDoc.$id,
+          players: `${matchDoc.hostId},${matchDoc.opponentId}`,
+          status: "playing",
+          turn: matchDoc.hostId,
+          payoutDone: false,
+        }
+      );
+    }
 
-      // Repair the match if game creation previously succeeded
-      // but linking the game to the match failed.
-      if (
-        matchDoc.gameId !== game.$id ||
-        matchDoc.status !== "playing"
-      ) {
-        await databases.updateDocument(
-          DATABASE_ID,
-          MATCH_COLLECTION,
-          matchDoc.$id,
-          {
-            gameId: game.$id,
-            status: "playing",
-          }
-        );
-      }
+    // Repair the match link even when an existing game was found.
+    // This avoids returning early with a broken match.gameId.
+    if (
+      matchDoc.gameId !== game.$id ||
+      matchDoc.status !== "playing"
+    ) {
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        matchDoc.$id,
+        {
+          gameId: game.$id,
+          status: "playing",
+        }
+      );
+    }
 
-      return game;
-    },
-    []
-  );
+    return game;
+  }, []);
 
   // ----------------------------------------------------
   // OPEN GAME SAFELY
@@ -817,7 +830,10 @@ export default function Lobby({ goGame, back }) {
         return false;
       }
 
-      if (openingGameIdsRef.current.has(gameId)) {
+      if (
+        openedGameIdsRef.current.has(gameId) ||
+        openingGameIdsRef.current.has(gameId)
+      ) {
         return false;
       }
 
@@ -833,7 +849,9 @@ export default function Lobby({ goGame, back }) {
         console.error("Unable to open Whot game:", error);
 
         if (!automatic) {
-          reportError("The Whot game could not be opened. Try again.");
+          reportError(
+            "The Whot game could not be opened. Try again."
+          );
         }
 
         return false;
@@ -863,7 +881,9 @@ export default function Lobby({ goGame, back }) {
         match.hostId !== user?.$id
     );
 
-    if (mountedRef.current) setMatches(available);
+    if (mountedRef.current) {
+      setMatches(available);
+    }
   }, [user]);
 
   // ----------------------------------------------------
@@ -896,10 +916,7 @@ export default function Lobby({ goGame, back }) {
         previous.opponentId !== (match.opponentId || "") &&
         Boolean(match.opponentId);
 
-      if (
-        newOpponentJoined &&
-        match.hostId === user.$id
-      ) {
+      if (newOpponentJoined && match.hostId === user.$id) {
         notify(
           "A player has joined your match. Your game is being prepared.",
           "opponent"
@@ -926,9 +943,6 @@ export default function Lobby({ goGame, back }) {
         }
       }
 
-      // A claimed match without a game is recoverable. We don't
-      // automatically create a game on every polling cycle,
-      // because both devices may be attempting recovery at once.
       if (game) {
         nextGameMap[game.$id] = game;
       }
@@ -941,8 +955,7 @@ export default function Lobby({ goGame, back }) {
         active.push({ ...match, game });
       }
 
-      // Auto-open for the host when a game becomes available.
-      // Only attempt once per game during this page session.
+      // Automatically open the host's game once when it becomes ready.
       if (
         match.status === "playing" &&
         match.gameId &&
@@ -950,7 +963,10 @@ export default function Lobby({ goGame, back }) {
         match.hostId === user.$id &&
         !openedGameIdsRef.current.has(game.$id)
       ) {
-        if (newOpponentJoined || previous?.gameId !== match.gameId) {
+        if (
+          newOpponentJoined ||
+          previous?.gameId !== match.gameId
+        ) {
           notify(
             "Your opponent has joined. Opening the Whot game.",
             "opponent"
@@ -1025,7 +1041,9 @@ export default function Lobby({ goGame, back }) {
           );
         }
       } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
     }
 
@@ -1100,7 +1118,9 @@ export default function Lobby({ goGame, back }) {
         error?.message || "Unable to save your Zangi ID."
       );
     } finally {
-      if (mountedRef.current) setSavingZangi(false);
+      if (mountedRef.current) {
+        setSavingZangi(false);
+      }
     }
   }
 
@@ -1123,7 +1143,9 @@ export default function Lobby({ goGame, back }) {
     const amount = Number(stake);
 
     if (!Number.isSafeInteger(amount) || amount <= 0) {
-      throw new Error("Enter a valid whole-number coin stake.");
+      throw new Error(
+        "Enter a valid whole-number coin stake."
+      );
     }
 
     const roomKey = getRoomForStake(amount);
@@ -1160,7 +1182,9 @@ export default function Lobby({ goGame, back }) {
 
       if (!wallet?.zangiContact) {
         setShowZangiPopup(true);
-        throw new Error("Save your Zangi ID before creating a match.");
+        throw new Error(
+          "Save your Zangi ID before creating a match."
+        );
       }
 
       const freshWallet = await getFreshWallet(user.$id);
@@ -1170,7 +1194,9 @@ export default function Lobby({ goGame, back }) {
         throw new Error(
           `Insufficient coins. Your balance is ${formatCoins(
             freshCoins
-          )}, but this match requires ${formatCoins(amount)} coins.`
+          )}, but this match requires ${formatCoins(
+            amount
+          )} coins.`
         );
       }
 
@@ -1228,7 +1254,10 @@ export default function Lobby({ goGame, back }) {
             }
           );
         } catch (refundError) {
-          console.error("Automatic refund failed:", refundError);
+          console.error(
+            "Automatic refund failed:",
+            refundError
+          );
 
           reportError(
             "Match creation failed and the automatic refund could not be confirmed. Please contact support before retrying."
@@ -1238,13 +1267,14 @@ export default function Lobby({ goGame, back }) {
         }
       }
 
-      reportError(error?.message || "Unable to create the match.");
+      reportError(
+        error?.message || "Unable to create the match."
+      );
     } finally {
       actionLockRef.current = false;
       setCreating(false);
     }
   }
-
   // ----------------------------------------------------
   // JOIN OR RECOVER MATCH
   // ----------------------------------------------------
@@ -1273,7 +1303,9 @@ export default function Lobby({ goGame, back }) {
 
       if (!freshWallet.zangiContact) {
         setShowZangiPopup(true);
-        throw new Error("Save your Zangi ID before joining a match.");
+        throw new Error(
+          "Save your Zangi ID before joining a match."
+        );
       }
 
       const freshMatch = await databases.getDocument(
@@ -1282,15 +1314,19 @@ export default function Lobby({ goGame, back }) {
         match.$id
       );
 
-      // RECOVERY: this player already claimed the match earlier.
-      // Do not deduct the stake again.
+      // RECOVERY:
+      // If this player already claimed the match, never deduct
+      // the stake again.
       if (
         freshMatch.opponentId === user.$id &&
         ["matched", "playing"].includes(freshMatch.status)
       ) {
-        const recoveredGame = await ensureGameForMatch(freshMatch);
+        const recoveredGame =
+          await ensureGameForMatch(freshMatch);
 
-        reportSuccess("Your previous match setup has been repaired.");
+        reportSuccess(
+          "Your previous match setup has been repaired."
+        );
 
         await refresh();
 
@@ -1307,8 +1343,13 @@ export default function Lobby({ goGame, back }) {
 
       const amount = Number(freshMatch.stake);
 
-      if (!Number.isSafeInteger(amount) || amount <= 0) {
-        throw new Error("This match has an invalid stake.");
+      if (
+        !Number.isSafeInteger(amount) ||
+        !getRoomForStake(amount)
+      ) {
+        throw new Error(
+          "This match has an invalid stake or room configuration."
+        );
       }
 
       const freshCoins = getAvailableBalance(freshWallet);
@@ -1317,12 +1358,16 @@ export default function Lobby({ goGame, back }) {
         throw new Error(
           `Insufficient coins to join. You have ${formatCoins(
             freshCoins
-          )} coins, but joining requires ${formatCoins(amount)} coins.`
+          )} coins, but joining requires ${formatCoins(
+            amount
+          )} coins.`
         );
       }
 
-      // NOTE: financial operations should ultimately be moved to
-      // a trusted backend to prevent concurrent client-side updates.
+      // IMPORTANT:
+      // Client-side wallet updates are not atomic. A trusted
+      // server-side transaction is needed to eliminate races
+      // between two devices attempting to join simultaneously.
       await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
@@ -1356,9 +1401,7 @@ export default function Lobby({ goGame, back }) {
       claimed = true;
       deductedAmount = 0;
 
-      // Create and link the game BEFORE attempting the admin wallet.
-      // This prevents an admin-wallet lookup failure from stopping
-      // the players from reaching their game.
+      // Create or recover the game before attempting commission.
       const game = await ensureGameForMatch(claimedMatch);
 
       await refresh();
@@ -1370,8 +1413,8 @@ export default function Lobby({ goGame, back }) {
 
       openGameOnce(game.$id, amount);
 
-      // Credit the admin commission after the match is linked.
-      // Failure is reported separately so it doesn't block the game.
+      // Commission is calculated ONCE from the combined stakes.
+      // The remaining pot is paid to the winner by Whot.jsx.
       try {
         const adminWallet = await getAdminWallet();
         const adminCoins = getAvailableBalance(adminWallet);
@@ -1384,12 +1427,12 @@ export default function Lobby({ goGame, back }) {
         );
       } catch (commissionError) {
         console.error(
-          "Admin commission could not be credited:",
+          "Admin commission could not be confirmed:",
           commissionError
         );
 
         notify(
-          "The game is ready, but the admin commission could not be confirmed. Please check the admin wallet before processing another commission.",
+          "The game is ready, but the admin commission could not be confirmed. Review the admin wallet before making any manual adjustment.",
           "error"
         );
       }
@@ -1397,7 +1440,9 @@ export default function Lobby({ goGame, back }) {
       reportSuccess(
         `Match started. Combined stake: ${formatCoins(
           totalCollected
-        )} coins. Winner's prize: ${formatCoins(prizePot)} coins.`
+        )} coins. Winner's prize: ${formatCoins(
+          prizePot
+        )} coins.`
       );
     } catch (error) {
       if (deductedAmount > 0 && user?.$id && !claimed) {
@@ -1438,7 +1483,9 @@ export default function Lobby({ goGame, back }) {
         return;
       }
 
-      reportError(error?.message || "Unable to join this match.");
+      reportError(
+        error?.message || "Unable to join this match."
+      );
     } finally {
       actionLockRef.current = false;
       setLoadingJoin("");
@@ -1468,11 +1515,15 @@ export default function Lobby({ goGame, back }) {
         freshMatch.hostId !== user?.$id &&
         freshMatch.opponentId !== user?.$id
       ) {
-        throw new Error("You are not a player in this match.");
+        throw new Error(
+          "You are not a player in this match."
+        );
       }
 
       if (!freshMatch.opponentId) {
-        throw new Error("Waiting for an opponent to join this match.");
+        throw new Error(
+          "Waiting for an opponent to join this match."
+        );
       }
 
       const game = await ensureGameForMatch(freshMatch);
@@ -1530,19 +1581,27 @@ export default function Lobby({ goGame, back }) {
       }
 
       if (freshMatch.refundDone) {
-        throw new Error("This match has already been refunded.");
+        throw new Error(
+          "This match has already been refunded."
+        );
       }
 
       const amount = Number(freshMatch.stake);
 
-      if (!Number.isSafeInteger(amount) || amount <= 0) {
+      if (
+        !Number.isSafeInteger(amount) ||
+        amount <= 0
+      ) {
         throw new Error("The match stake is invalid.");
       }
 
       const freshWallet = await getFreshWallet(user.$id);
 
-      // NOTE: For production, perform the status check, refund and
-      // wallet update atomically on a trusted backend.
+      // NOTE:
+      // These two writes are not atomic. If either write fails,
+      // check the match and wallet before manually issuing a refund.
+      // A server-side transaction is needed for a guaranteed
+      // exactly-once refund.
       await databases.updateDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
@@ -1568,7 +1627,9 @@ export default function Lobby({ goGame, back }) {
 
       await refresh();
     } catch (error) {
-      reportError(error?.message || "Unable to cancel this match.");
+      reportError(
+        error?.message || "Unable to cancel this match."
+      );
     } finally {
       actionLockRef.current = false;
     }
@@ -1579,7 +1640,10 @@ export default function Lobby({ goGame, back }) {
   // ----------------------------------------------------
 
   function openZangi(match) {
-    const opponentContact = getOpponentZangi(match, user?.$id);
+    const opponentContact = getOpponentZangi(
+      match,
+      user?.$id
+    );
 
     if (!opponentContact) {
       reportError(
@@ -1588,7 +1652,8 @@ export default function Lobby({ goGame, back }) {
       return;
     }
 
-    const zangiUrl = buildZangiConversationUrl(opponentContact);
+    const zangiUrl =
+      buildZangiConversationUrl(opponentContact);
 
     if (!zangiUrl) {
       reportError("The opponent's Zangi ID is invalid.");
@@ -1631,6 +1696,7 @@ export default function Lobby({ goGame, back }) {
             <h2 style={styles.sectionTitle}>
               Loading Win9ja Life...
             </h2>
+
             <p style={styles.sectionText}>
               Preparing your wallet and game lobby.
             </p>
@@ -1652,11 +1718,17 @@ export default function Lobby({ goGame, back }) {
             <h1 style={styles.brand}>
               Win9ja <span style={styles.brandAccent}>Life</span>
             </h1>
-            <div style={styles.subtitle}>Play. Compete. Win.</div>
+
+            <div style={styles.subtitle}>
+              Play. Compete. Win.
+            </div>
           </div>
 
           <div style={styles.balanceCard}>
-            <div style={styles.balanceLabel}>Available Coins</div>
+            <div style={styles.balanceLabel}>
+              Available Coins
+            </div>
+
             <div style={styles.balanceAmount}>
               🪙 {formatCoins(availableCoins)}
             </div>
@@ -1699,7 +1771,9 @@ export default function Lobby({ goGame, back }) {
                   window.speechSynthesis.cancel();
                 }
 
-                setSuccessMessage("Voice and sound notifications disabled.");
+                setSuccessMessage(
+                  "Voice and sound notifications disabled."
+                );
                 setErrorMessage("");
               }}
               style={{
@@ -1718,13 +1792,21 @@ export default function Lobby({ goGame, back }) {
         </section>
 
         {errorMessage && (
-          <div role="alert" aria-live="assertive" style={styles.error}>
+          <div
+            role="alert"
+            aria-live="assertive"
+            style={styles.error}
+          >
             ⚠️ {errorMessage}
           </div>
         )}
 
         {successMessage && (
-          <div role="status" aria-live="polite" style={styles.success}>
+          <div
+            role="status"
+            aria-live="polite"
+            style={styles.success}
+          >
             ✓ {successMessage}
           </div>
         )}
@@ -1733,7 +1815,10 @@ export default function Lobby({ goGame, back }) {
           <div style={{ marginBottom: 16 }}>
             <button
               type="button"
-              style={{ ...styles.button, ...styles.secondaryButton }}
+              style={{
+                ...styles.button,
+                ...styles.secondaryButton,
+              }}
               onClick={back}
             >
               ← Back
@@ -1744,7 +1829,9 @@ export default function Lobby({ goGame, back }) {
         {/* ROOM SELECTION */}
 
         <section style={styles.panel}>
-          <h2 style={styles.sectionTitle}>Choose Your Room</h2>
+          <h2 style={styles.sectionTitle}>
+            Choose Your Room
+          </h2>
 
           <p style={styles.sectionText}>
             Select a room according to your coin stake.
@@ -1761,13 +1848,20 @@ export default function Lobby({ goGame, back }) {
                   onClick={() => chooseRoom(key)}
                   style={{
                     ...styles.roomCard,
-                    borderColor: selected ? room.color : "#263b59",
+                    borderColor: selected
+                      ? room.color
+                      : "#263b59",
                     boxShadow: selected
                       ? `inset 0 0 0 1px ${room.color}`
                       : "none",
                   }}
                 >
-                  <div style={{ ...styles.roomName, color: room.color }}>
+                  <div
+                    style={{
+                      ...styles.roomName,
+                      color: room.color,
+                    }}
+                  >
                     {room.name} {selected ? "✓" : ""}
                   </div>
 
@@ -1797,7 +1891,9 @@ export default function Lobby({ goGame, back }) {
         {/* CREATE MATCH */}
 
         <section style={styles.panel}>
-          <h2 style={styles.sectionTitle}>Create a Match</h2>
+          <h2 style={styles.sectionTitle}>
+            Create a Match
+          </h2>
 
           <p style={styles.sectionText}>
             Choose your stake and wait for another player. Your stake
@@ -1806,7 +1902,10 @@ export default function Lobby({ goGame, back }) {
 
           <div style={styles.formGrid}>
             <div>
-              <label htmlFor="lobby-stake" style={styles.fieldLabel}>
+              <label
+                htmlFor="lobby-stake"
+                style={styles.fieldLabel}
+              >
                 Stake Amount (Coins)
               </label>
 
@@ -1823,7 +1922,9 @@ export default function Lobby({ goGame, back }) {
 
                   const room = getRoomForStake(Number(value));
 
-                  if (room) setSelectedRoom(room);
+                  if (room) {
+                    setSelectedRoom(room);
+                  }
                 }}
                 style={styles.input}
                 placeholder="Enter coin stake"
@@ -1831,7 +1932,10 @@ export default function Lobby({ goGame, back }) {
             </div>
 
             <div>
-              <label htmlFor="lobby-zangi" style={styles.fieldLabel}>
+              <label
+                htmlFor="lobby-zangi"
+                style={styles.fieldLabel}
+              >
                 Your Zangi ID
               </label>
 
@@ -1839,7 +1943,9 @@ export default function Lobby({ goGame, back }) {
                 id="lobby-zangi"
                 type="text"
                 value={zangiInput}
-                onChange={(event) => setZangiInput(event.target.value)}
+                onChange={(event) =>
+                  setZangiInput(event.target.value)
+                }
                 style={styles.input}
                 placeholder="Enter your Zangi ID or number"
               />
@@ -1893,7 +1999,9 @@ export default function Lobby({ goGame, back }) {
         {/* AVAILABLE MATCHES */}
 
         <section style={styles.panel}>
-          <h2 style={styles.sectionTitle}>Available Matches</h2>
+          <h2 style={styles.sectionTitle}>
+            Available Matches
+          </h2>
 
           <p style={styles.sectionText}>
             Join another player's waiting match using the displayed stake.
@@ -1908,13 +2016,19 @@ export default function Lobby({ goGame, back }) {
           ) : (
             <div style={styles.matchList}>
               {matches.map((match) => (
-                <article key={match.$id} style={styles.matchCard}>
+                <article
+                  key={match.$id}
+                  style={styles.matchCard}
+                >
                   <div style={styles.matchTop}>
-                    <span style={styles.badge}>Waiting</span>
+                    <span style={styles.badge}>
+                      Waiting
+                    </span>
 
                     <span style={styles.muted}>
                       {ROOM_CONFIG[
-                        match.room || getRoomForStake(match.stake)
+                        match.room ||
+                          getRoomForStake(match.stake)
                       ]?.name || "Game Room"}
                     </span>
                   </div>
@@ -1931,7 +2045,9 @@ export default function Lobby({ goGame, back }) {
                     {match.hostId}
                   </div>
 
-                  <div style={styles.muted}>Required Stake</div>
+                  <div style={styles.muted}>
+                    Required Stake
+                  </div>
 
                   <div style={styles.matchAmount}>
                     🪙 {formatCoins(match.stake)}
@@ -1969,7 +2085,9 @@ export default function Lobby({ goGame, back }) {
         {/* ACTIVE MATCHES */}
 
         <section style={styles.panel}>
-          <h2 style={styles.sectionTitle}>Your Active Matches</h2>
+          <h2 style={styles.sectionTitle}>
+            Your Active Matches
+          </h2>
 
           <p style={styles.sectionText}>
             Continue matches that you have created or joined.
@@ -1988,14 +2106,18 @@ export default function Lobby({ goGame, back }) {
                   ? match.opponentId
                   : match.hostId;
 
-                const game = match.game || gameMap[match.gameId];
+                const game =
+                  match.game || gameMap[match.gameId];
 
                 const opponentContact = getOpponentZangi(
                   match,
                   user?.$id
                 );
 
-                const turnInfo = getTurnInfo(game, user?.$id);
+                const turnInfo = getTurnInfo(
+                  game,
+                  user?.$id
+                );
 
                 const turnColor =
                   turnInfo.status === "mine"
@@ -2005,7 +2127,10 @@ export default function Lobby({ goGame, back }) {
                       : "#64748b";
 
                 return (
-                  <article key={match.$id} style={styles.matchCard}>
+                  <article
+                    key={match.$id}
+                    style={styles.matchCard}
+                  >
                     <div style={styles.matchTop}>
                       <span style={styles.badge}>
                         {match.status === "playing"
@@ -2018,7 +2143,9 @@ export default function Lobby({ goGame, back }) {
                       </span>
                     </div>
 
-                    <div style={styles.muted}>Opponent</div>
+                    <div style={styles.muted}>
+                      Opponent
+                    </div>
 
                     <div
                       style={{
@@ -2080,7 +2207,9 @@ export default function Lobby({ goGame, back }) {
                       </div>
                     </div>
 
-                    <div style={styles.muted}>Your Stake</div>
+                    <div style={styles.muted}>
+                      Your Stake
+                    </div>
 
                     <div style={styles.matchAmount}>
                       🪙 {formatCoins(match.stake)}
@@ -2107,13 +2236,17 @@ export default function Lobby({ goGame, back }) {
                     <div style={styles.buttonRow}>
                       <button
                         type="button"
-                        disabled={repairingMatch === match.$id}
+                        disabled={
+                          repairingMatch === match.$id
+                        }
                         onClick={() => resumeGame(match)}
                         style={{
                           ...styles.button,
                           ...styles.primaryButton,
                           opacity:
-                            repairingMatch === match.$id ? 0.6 : 1,
+                            repairingMatch === match.$id
+                              ? 0.6
+                              : 1,
                         }}
                       >
                         {repairingMatch === match.$id
@@ -2158,8 +2291,9 @@ export default function Lobby({ goGame, back }) {
                           fontSize: 12,
                         }}
                       >
-                        The game is finished. Verify the result before
-                        processing a winner payout.
+                        The game is finished. Verify the result
+                        and payout status before making any manual
+                        wallet adjustment.
                       </div>
                     )}
                   </article>
@@ -2177,22 +2311,28 @@ export default function Lobby({ goGame, back }) {
             background: "rgba(10, 23, 40, .8)",
           }}
         >
-          <h2 style={styles.sectionTitle}>Match Prize Information</h2>
+          <h2 style={styles.sectionTitle}>
+            Match Prize Information
+          </h2>
 
           <p style={styles.sectionText}>
-            The current rule calculates a 20% admin commission from the
-            combined stakes, with the remaining 80% reserved for the winner.
+            The current rule calculates a 20% admin commission from
+            the combined stakes, with the remaining 80% reserved for
+            the winner.
           </p>
 
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(130px, 1fr))",
               gap: 12,
             }}
           >
             <div>
-              <div style={styles.muted}>Admin Commission</div>
+              <div style={styles.muted}>
+                Admin Commission
+              </div>
 
               <div
                 style={{
@@ -2207,7 +2347,9 @@ export default function Lobby({ goGame, back }) {
             </div>
 
             <div>
-              <div style={styles.muted}>Winner's Prize</div>
+              <div style={styles.muted}>
+                Winner's Prize
+              </div>
 
               <div
                 style={{
@@ -2225,9 +2367,9 @@ export default function Lobby({ goGame, back }) {
           <hr style={styles.divider} />
 
           <div style={styles.muted}>
-            Example: two players stake 500 coins each. Combined stakes:
-            1,000 coins. Admin commission: 200 coins. Winner's prize:
-            800 coins.
+            Example: two players stake 500 coins each. Combined
+            stakes: 1,000 coins. Admin commission: 200 coins.
+            Winner's prize: 800 coins.
           </div>
         </section>
       </div>
@@ -2256,7 +2398,12 @@ export default function Lobby({ goGame, back }) {
                     : "#38bdf8",
           }}
         >
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>
+          <div
+            style={{
+              fontWeight: 900,
+              marginBottom: 6,
+            }}
+          >
             {notification.type === "error"
               ? "⚠️ Action Failed"
               : notification.type === "success"
@@ -2298,13 +2445,17 @@ export default function Lobby({ goGame, back }) {
             aria-modal="true"
             aria-labelledby="zangi-popup-title"
           >
-            <h2 id="zangi-popup-title" style={styles.popupTitle}>
+            <h2
+              id="zangi-popup-title"
+              style={styles.popupTitle}
+            >
               Set Up Your Zangi Contact
             </h2>
 
             <p style={styles.popupText}>
-              Add your Zangi ID or phone number. Win9ja Life will use the
-              saved contact to build a conversation link for your opponent.
+              Add your Zangi ID or phone number. Win9ja Life will
+              use the saved contact to build a conversation link
+              for your opponent.
             </p>
 
             <label
@@ -2318,7 +2469,9 @@ export default function Lobby({ goGame, back }) {
               id="zangi-popup-input"
               type="text"
               value={zangiInput}
-              onChange={(event) => setZangiInput(event.target.value)}
+              onChange={(event) =>
+                setZangiInput(event.target.value)
+              }
               style={styles.input}
               placeholder="Enter Zangi ID or number"
             />
@@ -2335,7 +2488,9 @@ export default function Lobby({ goGame, back }) {
                   opacity: savingZangi ? 0.6 : 1,
                 }}
               >
-                {savingZangi ? "Saving..." : "Save Contact"}
+                {savingZangi
+                  ? "Saving..."
+                  : "Save Contact"}
               </button>
 
               <button
