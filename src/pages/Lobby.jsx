@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   account,
   databases,
@@ -6,376 +6,692 @@ import {
   MATCH_COLLECTION,
   WALLET_COLLECTION,
   ID,
-  Query
+  Query,
 } from "../lib/appwrite";
+
+// ======================================================
+// CONFIGURATION
+// ======================================================
 
 const GAME_COLLECTION = "games";
 
+// Set this in your Vercel environment variables.
+// It must be the Appwrite userId belonging to the admin wallet.
+const ADMIN_USER_ID = import.meta.env.VITE_ADMIN_USER_ID || "";
+
+const ADMIN_CUT_PERCENT = 20;
+
 const ROOM_CONFIG = {
   beginners: {
-    label: "Beginners",
-    emoji: "🟢",
+    name: "Beginners",
     min: 100,
     max: 350,
-    description: "Start your WHOT journey."
+    color: "#22c55e",
+    description: "Learn and enjoy the game",
   },
   standard: {
-    label: "Standard",
-    emoji: "🔵",
+    name: "Standard",
     min: 400,
     max: 1000,
-    description: "For regular WHOT players."
+    color: "#3b82f6",
+    description: "For experienced players",
   },
   premium: {
-    label: "Premium",
-    emoji: "🟡",
+    name: "Premium",
     min: 1100,
-    max: Infinity,
-    description: "Higher-stake competition."
-  }
+    max: Number.MAX_SAFE_INTEGER,
+    color: "#f59e0b",
+    description: "High-stake matches",
+  },
 };
 
-function getRoomForStake(amount) {
-  if (amount >= 100 && amount <= 350) return "beginners";
-  if (amount >= 400 && amount <= 1000) return "standard";
-  if (amount >= 1100) return "premium";
+// ======================================================
+// HELPERS
+// ======================================================
+
+function formatCoins(value) {
+  return Math.floor(Number(value) || 0).toLocaleString();
+}
+
+function getRoomForStake(stake) {
+  const amount = Number(stake);
+
+  if (
+    amount >= ROOM_CONFIG.beginners.min &&
+    amount <= ROOM_CONFIG.beginners.max
+  ) {
+    return "beginners";
+  }
+
+  if (
+    amount >= ROOM_CONFIG.standard.min &&
+    amount <= ROOM_CONFIG.standard.max
+  ) {
+    return "standard";
+  }
+
+  if (amount >= ROOM_CONFIG.premium.min) {
+    return "premium";
+  }
+
   return null;
 }
 
-function formatCoins(value) {
-  return `${Number(value || 0).toLocaleString()} coins`;
-}
+function getAvailableBalance(wallet) {
+  const coins = Number(wallet?.coins || 0);
 
-function getOpponentZangi(match, userId) {
-  if (!match || !userId) return "";
-
-  if (match.hostId === userId) {
-    return match.opponentZangiContact || "";
+  if (!Number.isFinite(coins) || coins < 0) {
+    return 0;
   }
 
-  if (match.opponentId === userId) {
-    return match.hostZangiContact || "";
-  }
-
-  return "";
+  return Math.floor(coins);
 }
 
 function parsePlayers(players) {
-  if (Array.isArray(players)) return players;
-
-  if (typeof players !== "string" || !players.trim()) {
-    return [];
+  if (Array.isArray(players)) {
+    return players;
   }
 
-  try {
-    const parsed = JSON.parse(players);
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
+  if (typeof players === "string" && players.trim()) {
+    try {
+      const parsed = JSON.parse(players);
 
-  return players.split(",").map(p => p.trim()).filter(Boolean);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return players
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
 }
 
-/* =========================
-   STYLES
-========================= */
+function getOpponentZangi(match, userId) {
+  if (!match || !userId) {
+    return "";
+  }
+
+  return match.hostId === userId
+    ? match.opponentZangiContact || ""
+    : match.hostZangiContact || "";
+}
+
+function normaliseContact(value) {
+  return String(value || "").trim();
+}
+
+function isWaitingMatch(match) {
+  return (
+    match?.status === "waiting" &&
+    !match?.opponentId
+  );
+}
+
+// ======================================================
+// STYLES
+// ======================================================
 
 const styles = {
-  container: {
-    padding: 18,
-    background: "linear-gradient(180deg,#020617,#0f172a)",
-    color: "#fff",
+  page: {
     minHeight: "100vh",
-    fontFamily: "system-ui,sans-serif"
+    background:
+      "radial-gradient(circle at top, #142b50 0%, #081323 48%, #050b14 100%)",
+    color: "#f8fafc",
+    padding: "20px 14px 40px",
+    boxSizing: "border-box",
+    fontFamily:
+      "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
   },
 
-  title: {
-    fontSize: 27,
+  container: {
+    maxWidth: 1000,
+    margin: "0 auto",
+  },
+
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+    marginBottom: 22,
+  },
+
+  brand: {
+    fontSize: 25,
     fontWeight: 900,
-    marginBottom: 5
+    letterSpacing: "-0.8px",
+    margin: 0,
+  },
+
+  brandAccent: {
+    color: "#22c55e",
   },
 
   subtitle: {
     color: "#94a3b8",
     fontSize: 13,
-    marginBottom: 20
+    marginTop: 5,
   },
 
-  balanceBox: {
-    background: "#172554",
-    border: "1px solid #2563eb",
-    padding: 15,
-    borderRadius: 14,
-    marginBottom: 20
+  balanceCard: {
+    background: "linear-gradient(135deg, #153a34, #102d2a)",
+    border: "1px solid #246b54",
+    borderRadius: 16,
+    padding: "14px 18px",
+    minWidth: 150,
   },
 
   balanceLabel: {
-    color: "#bfdbfe",
-    fontSize: 12
+    color: "#a7f3d0",
+    fontSize: 12,
+    fontWeight: 700,
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
 
   balanceAmount: {
     fontSize: 24,
     fontWeight: 900,
-    marginTop: 5
+    marginTop: 5,
+    color: "#4ade80",
   },
 
-  section: {
-    marginTop: 24,
-    marginBottom: 12,
+  panel: {
+    background: "rgba(15, 29, 50, 0.94)",
+    border: "1px solid #263b59",
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 18,
+    boxShadow: "0 12px 35px rgba(0,0,0,.18)",
+  },
+
+  sectionTitle: {
     fontSize: 18,
-    fontWeight: 800
+    fontWeight: 800,
+    margin: "0 0 7px",
+  },
+
+  sectionText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    lineHeight: 1.6,
+    margin: "0 0 16px",
   },
 
   roomGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr",
-    gap: 12
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: 12,
   },
 
   roomCard: {
-    background: "linear-gradient(145deg,#111827,#1e293b)",
-    padding: 17,
-    borderRadius: 16,
-    border: "1px solid #334155"
+    textAlign: "left",
+    borderRadius: 14,
+    padding: 16,
+    cursor: "pointer",
+    color: "#f8fafc",
+    background: "#0b1729",
+    border: "1px solid #263b59",
+    minHeight: 110,
   },
 
   roomName: {
-    fontSize: 19,
-    fontWeight: 900
+    fontWeight: 900,
+    fontSize: 16,
+    marginBottom: 7,
   },
 
   roomDescription: {
-    color: "#94a3b8",
-    fontSize: 13,
-    marginTop: 5
-  },
-
-  roomRange: {
-    color: "#facc15",
-    fontWeight: 800,
-    marginTop: 10
-  },
-
-  card: {
-    background: "#111827",
-    padding: 14,
-    margin: "12px 0",
-    borderRadius: 14,
-    border: "1px solid #334155"
-  },
-
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10
-  },
-
-  stake: {
-    fontSize: 16,
-    fontWeight: 900
-  },
-
-  status: {
     fontSize: 12,
-    color: "#cbd5e1"
+    color: "#94a3b8",
+    lineHeight: 1.5,
   },
 
-  turn: {
-    marginTop: 8,
+  formGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+    gap: 14,
+  },
+
+  fieldLabel: {
+    display: "block",
+    color: "#cbd5e1",
     fontSize: 13,
-    fontWeight: 800,
-    color: "#facc15"
-  },
-
-  btn: {
-    width: "100%",
-    padding: 12,
-    borderRadius: 10,
-    border: "none",
-    cursor: "pointer",
-    fontWeight: 800,
-    marginTop: 9
-  },
-
-  disabledBtn: {
-    opacity: 0.55,
-    cursor: "not-allowed"
-  },
-
-  chatBtn: {
-    background: "#2563eb",
-    color: "#fff"
-  },
-
-  resumeBtn: {
-    background: "#16a34a",
-    color: "#fff"
-  },
-
-  joinBtn: {
-    background: "#facc15",
-    color: "#111827",
-    padding: "10px 15px",
-    borderRadius: 10,
-    border: "none",
-    fontWeight: 900,
-    cursor: "pointer"
+    fontWeight: 700,
+    marginBottom: 8,
   },
 
   input: {
+    width: "100%",
     boxSizing: "border-box",
-    width: "100%",
-    padding: 12,
+    padding: "13px 12px",
     borderRadius: 10,
-    border: "1px solid #475569",
-    background: "#020617",
-    color: "#fff",
-    marginTop: 10,
-    outline: "none"
+    border: "1px solid #334a68",
+    background: "#081323",
+    color: "#f8fafc",
+    outline: "none",
+    fontSize: 15,
   },
 
-  createBtn: {
-    width: "100%",
-    padding: 13,
-    borderRadius: 11,
-    background: "#f59e0b",
-    color: "#111827",
-    border: "none",
-    fontWeight: 900,
-    marginTop: 12,
-    cursor: "pointer"
+  button: {
+    border: 0,
+    borderRadius: 10,
+    padding: "12px 16px",
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: "pointer",
+    transition: "opacity .2s",
   },
 
-  notice: {
-    background: "#422006",
-    border: "1px solid #a16207",
-    padding: 12,
-    borderRadius: 10,
-    color: "#fef3c7",
-    fontSize: 13,
-    marginTop: 12
+  primaryButton: {
+    background: "linear-gradient(135deg, #22c55e, #16a34a)",
+    color: "#04130a",
+  },
+
+  secondaryButton: {
+    background: "#1e3351",
+    color: "#e2e8f0",
+    border: "1px solid #354d6c",
+  },
+
+  dangerButton: {
+    background: "#451b26",
+    color: "#fecaca",
+    border: "1px solid #7f293a",
+  },
+
+  buttonRow: {
+    display: "flex",
+    gap: 9,
+    flexWrap: "wrap",
+    marginTop: 14,
   },
 
   error: {
-    background: "#450a0a",
-    border: "1px solid #991b1b",
     padding: 12,
-    borderRadius: 10,
+    background: "#451b26",
+    border: "1px solid #7f293a",
     color: "#fecaca",
-    marginTop: 12,
-    fontSize: 13
+    borderRadius: 10,
+    marginBottom: 16,
+    fontSize: 13,
+    lineHeight: 1.5,
   },
 
-  overlay: {
+  success: {
+    padding: 12,
+    background: "#123a2b",
+    border: "1px solid #23724c",
+    color: "#bbf7d0",
+    borderRadius: 10,
+    marginBottom: 16,
+    fontSize: 13,
+    lineHeight: 1.5,
+  },
+
+  matchList: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+    gap: 12,
+  },
+
+  matchCard: {
+    background: "#0a1728",
+    border: "1px solid #293e5c",
+    borderRadius: 14,
+    padding: 15,
+  },
+
+  matchTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+
+  badge: {
+    display: "inline-block",
+    fontSize: 10,
+    fontWeight: 900,
+    padding: "5px 8px",
+    borderRadius: 20,
+    background: "#183c2c",
+    color: "#86efac",
+    textTransform: "uppercase",
+  },
+
+  matchAmount: {
+    fontSize: 21,
+    fontWeight: 900,
+    color: "#4ade80",
+    margin: "6px 0",
+  },
+
+  muted: {
+    fontSize: 12,
+    color: "#94a3b8",
+    lineHeight: 1.6,
+  },
+
+  divider: {
+    height: 1,
+    background: "#263b59",
+    border: 0,
+    margin: "18px 0",
+  },
+
+  empty: {
+    padding: "24px 12px",
+    textAlign: "center",
+    borderRadius: 12,
+    border: "1px dashed #334a68",
+    color: "#94a3b8",
+    fontSize: 13,
+    lineHeight: 1.7,
+  },
+
+  popupOverlay: {
     position: "fixed",
     inset: 0,
-    zIndex: 9999,
-    background: "rgba(2,6,23,0.94)",
+    background: "rgba(0,0,0,.75)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    padding: 16,
-    overflowY: "auto"
+    padding: 18,
+    zIndex: 9999,
   },
 
-  modal: {
+  popup: {
     width: "100%",
     maxWidth: 430,
-    background: "linear-gradient(160deg,#111827,#172554)",
-    border: "1px solid #475569",
-    borderRadius: 20,
+    background: "#102039",
+    border: "1px solid #344a69",
+    borderRadius: 18,
     padding: 22,
-    position: "relative",
-    boxShadow: "0 25px 80px rgba(0,0,0,0.55)"
+    boxSizing: "border-box",
+    boxShadow: "0 25px 80px rgba(0,0,0,.5)",
   },
 
-  closeBtn: {
-    position: "absolute",
-    right: 12,
-    top: 12,
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    border: "1px solid #475569",
-    background: "#0f172a",
-    color: "#fff",
-    fontSize: 20,
-    cursor: "pointer"
-  },
-
-  modalTitle: {
-    fontSize: 24,
+  popupTitle: {
+    fontSize: 21,
     fontWeight: 900,
-    margin: "6px 35px 10px 0"
+    margin: "0 0 10px",
   },
 
-  modalText: {
-    color: "#cbd5e1",
-    fontSize: 14,
-    lineHeight: 1.65
-  },
-
-  modalLabel: {
-    display: "block",
+  popupText: {
+    color: "#aabbd0",
     fontSize: 13,
-    fontWeight: 800,
-    marginTop: 18
+    lineHeight: 1.7,
+    margin: "0 0 16px",
   },
-
-  saveBtn: {
-    width: "100%",
-    padding: 13,
-    borderRadius: 11,
-    border: "none",
-    background: "#22c55e",
-    color: "#052e16",
-    fontWeight: 900,
-    cursor: "pointer",
-    marginTop: 12
-  },
-
-  filledBtn: {
-    width: "100%",
-    padding: 12,
-    borderRadius: 11,
-    border: "1px solid #475569",
-    background: "#1e293b",
-    color: "#fff",
-    fontWeight: 800,
-    cursor: "pointer",
-    marginTop: 9
-  }
 };
-/* =========================
-   LOBBY COMPONENT
-========================= */
+
+// ======================================================
+// COMPONENT
+// ======================================================
 
 export default function Lobby({ goGame, back }) {
-  const [matches, setMatches] = useState([]);
-  const [activeMatches, setActiveMatches] = useState([]);
-  const [gameMap, setGameMap] = useState({});
-
-  const [stake, setStake] = useState("");
-  const [selectedRoom, setSelectedRoom] = useState("beginners");
+  const mountedRef = useRef(true);
+  const actionLockRef = useRef(false);
 
   const [user, setUser] = useState(null);
   const [wallet, setWallet] = useState(null);
 
+  const [matches, setMatches] = useState([]);
+  const [activeMatches, setActiveMatches] = useState([]);
+  const [gameMap, setGameMap] = useState({});
+
+  const [stake, setStake] = useState("100");
+  const [selectedRoom, setSelectedRoom] = useState("beginners");
+
   const [loading, setLoading] = useState(true);
-  const [loadingJoin, setLoadingJoin] = useState(null);
+  const [loadingJoin, setLoadingJoin] = useState("");
   const [creating, setCreating] = useState(false);
   const [savingZangi, setSavingZangi] = useState(false);
 
   const [zangiInput, setZangiInput] = useState("");
   const [showZangiPopup, setShowZangiPopup] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
 
-  const mountedRef = useRef(true);
-  const actionLockRef = useRef(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  const availableCoins = getAvailableBalance(wallet);
+
+  // ----------------------------------------------------
+  // WALLET
+  // ----------------------------------------------------
+
+  const getFreshWallet = useCallback(async (userId) => {
+    if (!userId) {
+      throw new Error("You must sign in first.");
+    }
+
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [
+        Query.equal("userId", userId),
+        Query.limit(1),
+      ]
+    );
+
+    if (!response.documents.length) {
+      throw new Error(
+        "Your wallet was not found. Please contact support."
+      );
+    }
+
+    return response.documents[0];
+  }, []);
+
+  const refreshWallet = useCallback(async () => {
+    if (!user?.$id) return;
+
+    const freshWallet = await getFreshWallet(user.$id);
+
+    if (mountedRef.current) {
+      setWallet(freshWallet);
+    }
+
+    return freshWallet;
+  }, [user, getFreshWallet]);
+
+  // ----------------------------------------------------
+  // ADMIN WALLET
+  // ----------------------------------------------------
+
+  const getAdminWallet = useCallback(async () => {
+    if (!ADMIN_USER_ID) {
+      throw new Error(
+        "Admin wallet configuration is missing. Set VITE_ADMIN_USER_ID in your environment variables."
+      );
+    }
+
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      WALLET_COLLECTION,
+      [
+        Query.equal("userId", ADMIN_USER_ID),
+        Query.limit(1),
+      ]
+    );
+
+    if (!response.documents.length) {
+      throw new Error(
+        "The configured admin wallet could not be found."
+      );
+    }
+
+    return response.documents[0];
+  }, []);
+
+  // ----------------------------------------------------
+  // MATCH REFRESH
+  // ----------------------------------------------------
+
+  const loadMatches = useCallback(async () => {
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [
+        Query.equal("status", "waiting"),
+        Query.orderDesc("$createdAt"),
+        Query.limit(100),
+      ]
+    );
+
+    const available = response.documents.filter(
+      (match) =>
+        isWaitingMatch(match) &&
+        match.hostId !== user?.$id
+    );
+
+    if (mountedRef.current) {
+      setMatches(available);
+    }
+  }, [user]);
+
+  const loadActiveMatches = useCallback(async () => {
+    if (!user?.$id) return;
+
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      MATCH_COLLECTION,
+      [
+        Query.orderDesc("$createdAt"),
+        Query.limit(100),
+      ]
+    );
+
+    const relevantMatches = response.documents.filter(
+      (match) =>
+        match.hostId === user.$id ||
+        match.opponentId === user.$id
+    );
+
+    const nextGameMap = {};
+    const active = [];
+
+    for (const match of relevantMatches) {
+      let game = null;
+
+      if (match.gameId) {
+        try {
+          game = await databases.getDocument(
+            DATABASE_ID,
+            GAME_COLLECTION,
+            match.gameId
+          );
+        } catch {
+          game = null;
+        }
+      }
+
+      if (game) {
+        nextGameMap[game.$id] = game;
+      }
+
+      const gameStatus = game?.status;
+
+      if (
+        match.status === "playing" ||
+        match.status === "matched" ||
+        gameStatus === "playing"
+      ) {
+        active.push({
+          ...match,
+          game,
+        });
+      }
+    }
+
+    if (mountedRef.current) {
+      setGameMap(nextGameMap);
+      setActiveMatches(active);
+    }
+  }, [user]);
+
+  const refresh = useCallback(async () => {
+    if (!user?.$id) return;
+
+    try {
+      await Promise.all([
+        refreshWallet(),
+        loadMatches(),
+        loadActiveMatches(),
+      ]);
+    } catch (error) {
+      if (mountedRef.current) {
+        setErrorMessage(
+          error?.message || "Unable to refresh the lobby."
+        );
+      }
+    }
+  }, [
+    user,
+    refreshWallet,
+    loadMatches,
+    loadActiveMatches,
+  ]);
+
+  // ----------------------------------------------------
+  // INITIALISATION
+  // ----------------------------------------------------
 
   useEffect(() => {
     mountedRef.current = true;
+
+    async function init() {
+      try {
+        const currentUser = await account.get();
+
+        if (!mountedRef.current) return;
+
+        setUser(currentUser);
+
+        const response = await databases.listDocuments(
+          DATABASE_ID,
+          WALLET_COLLECTION,
+          [
+            Query.equal("userId", currentUser.$id),
+            Query.limit(1),
+          ]
+        );
+
+        if (!response.documents.length) {
+          throw new Error(
+            "Your wallet was not found. Please contact support."
+          );
+        }
+
+        const currentWallet = response.documents[0];
+
+        if (!mountedRef.current) return;
+
+        setWallet(currentWallet);
+        setZangiInput(currentWallet.zangiContact || "");
+
+        if (!currentWallet.zangiContact) {
+          setShowZangiPopup(true);
+        }
+      } catch (error) {
+        if (mountedRef.current) {
+          setErrorMessage(
+            error?.message || "Unable to load your account."
+          );
+        }
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+        }
+      }
+    }
 
     init();
 
@@ -384,305 +700,155 @@ export default function Lobby({ goGame, back }) {
     };
   }, []);
 
-  /* =========================
-     LOAD USER AND WALLET
-  ========================= */
-
-  async function init() {
-    setLoading(true);
-    setErrorMessage("");
-
-    try {
-      const currentUser = await account.get();
-
-      if (!mountedRef.current) return;
-
-      setUser(currentUser);
-
-      const walletResult = await databases.listDocuments(
-        DATABASE_ID,
-        WALLET_COLLECTION,
-        [
-          Query.equal("userId", currentUser.$id),
-          Query.limit(1)
-        ]
-      );
-
-      if (!mountedRef.current) return;
-
-      const currentWallet = walletResult.documents[0] || null;
-
-      setWallet(currentWallet);
-
-      if (currentWallet?.zangiContact) {
-        setZangiInput(currentWallet.zangiContact);
-        setShowZangiPopup(false);
-      } else {
-        setShowZangiPopup(true);
-      }
-
-      await refresh(currentUser.$id);
-    } catch (err) {
-      console.error("Lobby initialization failed:", err);
-
-      if (mountedRef.current) {
-        setErrorMessage(
-          "Unable to load your account or wallet. Please sign in again and retry."
-        );
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
+  useEffect(() => {
+    if (user?.$id) {
+      refresh();
     }
-  }
+  }, [user?.$id, refresh]);
 
-  async function getFreshWallet(userId) {
-    const result = await databases.listDocuments(
-      DATABASE_ID,
-      WALLET_COLLECTION,
-      [
-        Query.equal("userId", userId),
-        Query.limit(1)
-      ]
-    );
-
-    if (!result.documents.length) {
-      throw new Error("Your wallet was not found. Please contact support.");
-    }
-
-    const freshWallet = result.documents[0];
-
-    if (mountedRef.current) {
-      setWallet(freshWallet);
-    }
-
-    return freshWallet;
-  }
-
-  function getAvailableBalance(currentWallet) {
-    const balance = Number(currentWallet?.balance);
-
-    if (!Number.isFinite(balance) || balance < 0) {
-      return 0;
-    }
-
-    const locked = Number(currentWallet?.lockedBalance || 0);
-
-    if (!Number.isFinite(locked) || locked < 0) {
-      return 0;
-    }
-
-    return Math.max(0, balance - locked);
-  }
-
-  /* =========================
-     ZANGI SETUP POPUP
-  ========================= */
+  // ----------------------------------------------------
+  // SAVE ZANGI CONTACT
+  // ----------------------------------------------------
 
   async function saveZangi() {
-    if (!user || savingZangi) return;
+    setErrorMessage("");
+    setSuccessMessage("");
 
-    const contact = zangiInput.trim();
+    const contact = normaliseContact(zangiInput);
 
     if (!contact) {
-      alert("Please enter your Zangi ID or contact number.");
+      setErrorMessage("Enter your Zangi contact first.");
       return;
     }
 
-    if (contact.length > 100) {
-      alert("Your Zangi ID is too long.");
+    if (!user?.$id || !wallet?.$id) {
+      setErrorMessage("Your wallet is not ready.");
       return;
     }
 
     setSavingZangi(true);
 
     try {
-      const freshWallet = await getFreshWallet(user.$id);
-
       const updated = await databases.updateDocument(
         DATABASE_ID,
         WALLET_COLLECTION,
-        freshWallet.$id,
+        wallet.$id,
         {
-          zangiContact: contact
+          zangiContact: contact,
         }
       );
+
+      if (!mountedRef.current) return;
 
       setWallet(updated);
-      setZangiInput(updated.zangiContact || contact);
+      setZangiInput(contact);
       setShowZangiPopup(false);
 
-      alert("Your Zangi ID has been saved.");
-    } catch (err) {
-      console.error(err);
-      alert(err.message || "Unable to save your Zangi ID.");
-    } finally {
-      setSavingZangi(false);
-    }
-  }
-
-  function closeZangiPopup() {
-    setShowZangiPopup(false);
-  }
-
-  function useSavedZangi() {
-    if (!wallet?.zangiContact) {
-      alert("No saved Zangi ID was found. Please enter and save it first.");
-      return;
-    }
-
-    setZangiInput(wallet.zangiContact);
-    setShowZangiPopup(false);
-  }
-
-  /* =========================
-     LOAD MATCHES
-  ========================= */
-
-  async function refresh(userId) {
-    await Promise.all([
-      loadMatches(userId),
-      loadActiveMatches(userId)
-    ]);
-  }
-
-  async function loadMatches(userId) {
-    const result = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.equal("status", "waiting"),
-        Query.limit(100),
-        Query.orderDesc("$createdAt")
-      ]
-    );
-
-    const available = result.documents.filter(match => {
-      const room = getRoomForStake(Number(match.stake));
-
-      return (
-        match.hostId !== userId &&
-        !match.opponentId &&
-        room !== null &&
-        match.status === "waiting"
+      setSuccessMessage("Your Zangi contact has been saved.");
+    } catch (error) {
+      setErrorMessage(
+        error?.message || "Unable to save your Zangi contact."
       );
-    });
-
-    if (mountedRef.current) {
-      setMatches(available);
+    } finally {
+      if (mountedRef.current) {
+        setSavingZangi(false);
+      }
     }
   }
 
-  async function loadActiveMatches(userId) {
-    const result = await databases.listDocuments(
-      DATABASE_ID,
-      MATCH_COLLECTION,
-      [
-        Query.limit(100),
-        Query.orderDesc("$createdAt")
-      ]
-    );
-
-    const mine = result.documents.filter(match => (
-      match.hostId === userId ||
-      match.opponentId === userId
-    ));
-
-    const map = {};
-
-    await Promise.all(
-      mine.map(async match => {
-        if (!match.gameId) return;
-
-        try {
-          const game = await databases.getDocument(
-            DATABASE_ID,
-            GAME_COLLECTION,
-            match.gameId
-          );
-
-          map[match.gameId] = game;
-        } catch (err) {
-          console.warn("Unable to load game:", match.gameId, err);
-        }
-      })
-    );
-
-    if (mountedRef.current) {
-      setActiveMatches(mine);
-      setGameMap(map);
-    }
-  }
-
-  /* =========================
-     ROOM FILTERING
-  ========================= */
-
-  const roomMatches = matches.filter(match => {
-    return getRoomForStake(Number(match.stake)) === selectedRoom;
-  });
+  // ----------------------------------------------------
+  // SELECT ROOM
+  // ----------------------------------------------------
 
   function chooseRoom(roomKey) {
+    const room = ROOM_CONFIG[roomKey];
+
+    if (!room) return;
+
     setSelectedRoom(roomKey);
-    setStake("");
+    setStake(String(room.min));
     setErrorMessage("");
+    setSuccessMessage("");
   }
 
-  function validateStake(amount) {
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
-      return "Enter a valid whole-number coin stake.";
+  function validateStake() {
+    const amount = Number(stake);
+
+    if (
+      !Number.isSafeInteger(amount) ||
+      amount <= 0
+    ) {
+      throw new Error(
+        "Enter a valid whole-number coin stake."
+      );
     }
 
-    const room = ROOM_CONFIG[selectedRoom];
+    const roomKey = getRoomForStake(amount);
 
-    if (amount < room.min) {
-      return `${room.label} requires at least ${formatCoins(room.min)}.`;
+    if (!roomKey) {
+      throw new Error(
+        "Your stake does not match an available room."
+      );
     }
 
-    if (amount > room.max) {
-      return `${room.label} allows a maximum stake of ${formatCoins(room.max)}.`;
-    }
-
-    return null;
+    return {
+      amount,
+      roomKey,
+    };
   }
 
-  /* =========================
-     CREATE MATCH
-  ========================= */
+  // ----------------------------------------------------
+  // CREATE MATCH
+  // ----------------------------------------------------
 
   async function createMatch() {
-    if (!user || creating || actionLockRef.current) return;
-
-    const amount = Number(stake);
-    const validationError = validateStake(amount);
-
-    if (validationError) {
-      setErrorMessage(validationError);
-      return;
-    }
+    if (actionLockRef.current) return;
 
     actionLockRef.current = true;
     setCreating(true);
     setErrorMessage("");
+    setSuccessMessage("");
+
+    let stakeDeducted = false;
+    let deductedAmount = 0;
 
     try {
-      const freshWallet = await getFreshWallet(user.$id);
-      const availableBalance = getAvailableBalance(freshWallet);
+      if (!user?.$id) {
+        throw new Error("Please sign in first.");
+      }
 
-      if (availableBalance < amount) {
+      if (!wallet?.zangiContact) {
+        setShowZangiPopup(true);
         throw new Error(
-          `Insufficient available coins. You have ${formatCoins(availableBalance)}.`
+          "Save your Zangi contact before creating a match."
         );
       }
 
-      /*
-       * This check improves the user experience.
-       * Production stake reservation must be enforced server-side
-       * to prevent concurrent spending or modified browser requests.
-       */
+      const { amount, roomKey } = validateStake();
 
-      const created = await databases.createDocument(
+      const freshWallet = await getFreshWallet(user.$id);
+      const freshCoins = getAvailableBalance(freshWallet);
+
+      if (freshCoins < amount) {
+        throw new Error(
+          "Insufficient coins. Please purchase more coins."
+        );
+      }
+
+      // Deduct the host's stake.
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        freshWallet.$id,
+        {
+          coins: freshCoins - amount,
+        }
+      );
+
+      stakeDeducted = true;
+      deductedAmount = amount;
+
+      const match = await databases.createDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         ID.unique(),
@@ -694,25 +860,49 @@ export default function Lobby({ goGame, back }) {
           status: "waiting",
           refundDone: false,
           payoutDone: false,
-          hostZangiContact: freshWallet.zangiContact || ""
+          hostZangiContact: wallet.zangiContact || "",
+          room: roomKey,
+          adminCut: 0,
         }
       );
 
-      setStake("");
+      setStake(String(amount));
+      setSelectedRoom(roomKey);
 
-      alert(
-        `Your match was created for ${formatCoins(amount)}. ` +
-        "Wait for another player to join."
+      setSuccessMessage(
+        `Match created. ${formatCoins(amount)} coins have been reserved from your wallet.`
       );
 
-      await refresh(user.$id);
+      await refresh();
 
-      return created;
-    } catch (err) {
-      console.error("Create match failed:", err);
+      return match;
+    } catch (error) {
+      // Best-effort refund if match creation failed after deduction.
+      // This is not an atomic or production-safe financial transaction.
+      if (stakeDeducted && deductedAmount > 0 && user?.$id) {
+        try {
+          const latestWallet = await getFreshWallet(user.$id);
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            latestWallet.$id,
+            {
+              coins:
+                Number(latestWallet.coins || 0) +
+                deductedAmount,
+            }
+          );
+        } catch (refundError) {
+          console.error(
+            "Automatic stake refund failed:",
+            refundError
+          );
+        }
+      }
 
       setErrorMessage(
-        err.message || "Unable to create the match. Please try again."
+        error?.message || "Unable to create the match."
       );
     } finally {
       actionLockRef.current = false;
@@ -720,68 +910,87 @@ export default function Lobby({ goGame, back }) {
     }
   }
 
-  /* =========================
-     JOIN MATCH
-  ========================= */
+  // ----------------------------------------------------
+  // JOIN MATCH
+  // ----------------------------------------------------
 
   async function joinMatch(match) {
-    if (!user || loadingJoin || actionLockRef.current) return;
-
-    if (!match?.$id) {
-      setErrorMessage("This match is invalid.");
-      return;
-    }
+    if (actionLockRef.current) return;
 
     actionLockRef.current = true;
     setLoadingJoin(match.$id);
     setErrorMessage("");
+    setSuccessMessage("");
+
+    let opponentStakeDeducted = false;
+    let deductedAmount = 0;
 
     try {
-      /*
-       * Re-read the match before proceeding.
-       * This reduces stale-data errors, but does not by itself
-       * guarantee atomic matchmaking.
-       */
+      if (!user?.$id) {
+        throw new Error("Please sign in first.");
+      }
 
+      if (match.hostId === user.$id) {
+        throw new Error("You cannot join your own match.");
+      }
+
+      if (!wallet?.zangiContact) {
+        setShowZangiPopup(true);
+        throw new Error(
+          "Save your Zangi contact before joining a match."
+        );
+      }
+
+      // Read the match again to avoid relying only on stale UI state.
       const freshMatch = await databases.getDocument(
         DATABASE_ID,
         MATCH_COLLECTION,
         match.$id
       );
 
-      if (
-        freshMatch.status !== "waiting" ||
-        freshMatch.opponentId ||
-        freshMatch.hostId === user.$id
-      ) {
+      if (!isWaitingMatch(freshMatch)) {
         throw new Error(
-          "This match is no longer available. Refresh and choose another."
+          "This match is no longer available."
         );
       }
 
-      const room = getRoomForStake(Number(freshMatch.stake));
+      const amount = Number(freshMatch.stake);
 
-      if (!room || room !== selectedRoom) {
-        throw new Error("This match does not belong to the selected room.");
+      if (
+        !Number.isSafeInteger(amount) ||
+        amount <= 0
+      ) {
+        throw new Error("This match has an invalid stake.");
       }
 
       const freshWallet = await getFreshWallet(user.$id);
-      const availableBalance = getAvailableBalance(freshWallet);
-      const amount = Number(freshMatch.stake);
+      const freshCoins = getAvailableBalance(freshWallet);
 
-      if (availableBalance < amount) {
+      if (freshCoins < amount) {
         throw new Error(
-          `Insufficient available coins. You need ${formatCoins(amount)} ` +
-          `but have ${formatCoins(availableBalance)} available.`
+          "Insufficient coins to join this match."
         );
       }
 
-      /*
-       * IMPORTANT:
-       * This client-side update is not a guaranteed atomic claim.
-       * Use an Appwrite Function or transaction to prevent two users
-       * from successfully claiming the same waiting match.
-       */
+      // Deduct the opponent's stake.
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        freshWallet.$id,
+        {
+          coins: freshCoins - amount,
+        }
+      );
+
+      opponentStakeDeducted = true;
+      deductedAmount = amount;
+
+      // The match must be updated successfully before a game is created.
+      const totalCollected = amount * 2;
+      const adminCut = Math.floor(
+        (totalCollected * ADMIN_CUT_PERCENT) / 100
+      );
+      const prizePot = totalCollected - adminCut;
 
       const claimedMatch = await databases.updateDocument(
         DATABASE_ID,
@@ -790,15 +999,31 @@ export default function Lobby({ goGame, back }) {
         {
           opponentId: user.$id,
           status: "matched",
-          opponentZangiContact: freshWallet.zangiContact || ""
+          opponentZangiContact: wallet.zangiContact || "",
+          adminCut,
+          pot: prizePot,
         }
       );
 
-      /*
-       * Create the game with the exact two players.
-       */
+      // Credit the admin wallet's `coins` field.
+      // Direct browser-side financial updates are not secure.
+      const adminWallet = await getAdminWallet();
+      const adminCoins = getAvailableBalance(adminWallet);
 
-      const players = [freshMatch.hostId, user.$id];
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        adminWallet.$id,
+        {
+          coins: adminCoins + adminCut,
+        }
+      );
+
+      // Create the game document.
+      const players = [
+        freshMatch.hostId,
+        user.$id,
+      ];
 
       const game = await databases.createDocument(
         DATABASE_ID,
@@ -809,13 +1034,9 @@ export default function Lobby({ goGame, back }) {
           players: players.join(","),
           status: "playing",
           turn: freshMatch.hostId,
-          payoutDone: false
+          payoutDone: false,
         }
       );
-
-      /*
-       * Link the match to the created game.
-       */
 
       await databases.updateDocument(
         DATABASE_ID,
@@ -823,521 +1044,866 @@ export default function Lobby({ goGame, back }) {
         claimedMatch.$id,
         {
           gameId: game.$id,
-          status: "playing"
+          status: "playing",
         }
       );
 
-      await refresh(user.$id);
-
-      if (typeof goGame === "function") {
-        goGame(game.$id, amount);
-      }
-    } catch (err) {
-      console.error("Join match failed:", err);
-
-      setErrorMessage(
-        err.message || "Unable to join this match. Please try again."
+      setSuccessMessage(
+        `You joined successfully. Admin commission: ${formatCoins(adminCut)} coins. Winner's prize: ${formatCoins(prizePot)} coins.`
       );
 
-      try {
-        await refresh(user.$id);
-      } catch {}
+      await refresh();
+    } catch (error) {
+      // Best-effort refund of the joining player's stake.
+      // This cannot safely undo every partial operation above.
+      if (
+        opponentStakeDeducted &&
+        deductedAmount > 0 &&
+        user?.$id
+      ) {
+        try {
+          const latestWallet = await getFreshWallet(user.$id);
+
+          await databases.updateDocument(
+            DATABASE_ID,
+            WALLET_COLLECTION,
+            latestWallet.$id,
+            {
+              coins:
+                Number(latestWallet.coins || 0) +
+                deductedAmount,
+            }
+          );
+        } catch (refundError) {
+          console.error(
+            "Automatic joining-stake refund failed:",
+            refundError
+          );
+        }
+      }
+
+      setErrorMessage(
+        error?.message || "Unable to join this match."
+      );
     } finally {
       actionLockRef.current = false;
-      setLoadingJoin(null);
+      setLoadingJoin("");
+    }
+  }
+  // ----------------------------------------------------
+  // CANCEL WAITING MATCH AND REFUND
+  // ----------------------------------------------------
+
+  async function cancelMatch(match) {
+    if (actionLockRef.current) return;
+
+    actionLockRef.current = true;
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      if (!user?.$id) {
+        throw new Error("Please sign in first.");
+      }
+
+      const freshMatch = await databases.getDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        match.$id
+      );
+
+      if (freshMatch.hostId !== user.$id) {
+        throw new Error(
+          "Only the match creator can cancel this match."
+        );
+      }
+
+      if (!isWaitingMatch(freshMatch)) {
+        throw new Error(
+          "This match cannot be cancelled because another player may have joined."
+        );
+      }
+
+      if (freshMatch.refundDone) {
+        throw new Error("This match has already been refunded.");
+      }
+
+      const amount = Number(freshMatch.stake);
+
+      if (
+        !Number.isSafeInteger(amount) ||
+        amount <= 0
+      ) {
+        throw new Error("The match stake is invalid.");
+      }
+
+      const freshWallet = await getFreshWallet(user.$id);
+
+      // Mark the match cancelled before issuing the refund.
+      await databases.updateDocument(
+        DATABASE_ID,
+        MATCH_COLLECTION,
+        freshMatch.$id,
+        {
+          status: "cancelled",
+          refundDone: true,
+        }
+      );
+
+      await databases.updateDocument(
+        DATABASE_ID,
+        WALLET_COLLECTION,
+        freshWallet.$id,
+        {
+          coins:
+            Number(freshWallet.coins || 0) + amount,
+        }
+      );
+
+      setSuccessMessage(
+        `Match cancelled. ${formatCoins(amount)} coins refunded.`
+      );
+
+      await refresh();
+    } catch (error) {
+      setErrorMessage(
+        error?.message || "Unable to cancel this match."
+      );
+    } finally {
+      actionLockRef.current = false;
     }
   }
 
-  /* =========================
-     ZANGI CHAT / CALL
-  ========================= */
+  // ----------------------------------------------------
+  // OPEN OPPONENT'S ZANGI CONTACT
+  // ----------------------------------------------------
 
   async function openZangi(match) {
-    if (!user) return;
-
-    const contact = getOpponentZangi(match, user.$id);
-
-    if (!contact) {
-      alert("Your opponent has not saved a Zangi ID.");
-      return;
-    }
-
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(contact);
+      const contact = getOpponentZangi(
+        match,
+        user?.$id
+      );
+
+      if (!contact) {
+        setErrorMessage(
+          "The other player has not provided a Zangi contact."
+        );
+        return;
       }
-    } catch (err) {
-      console.warn("Unable to copy Zangi contact:", err);
-    }
 
-    window.location.href =
-      `zangi://chat?number=${encodeURIComponent(contact)}`;
+      const cleanedContact = contact.replace(/\s+/g, "");
 
-    setTimeout(() => {
+      const isPhoneNumber = /^\+?[0-9]+$/.test(
+        cleanedContact
+      );
+
+      if (isPhoneNumber) {
+        const digits = cleanedContact.replace(/\D/g, "");
+
+        window.location.href =
+          `zangi://chat?number=${encodeURIComponent(digits)}`;
+
+        return;
+      }
+
+      const zangiUrl = `https://zangi.com/`;
+
       window.open(
-        "https://services.zangi.com/dl/conversation/",
+        zangiUrl,
         "_blank",
         "noopener,noreferrer"
       );
-    }, 1500);
+
+      setSuccessMessage(
+        `Opponent's Zangi contact: ${contact}. Open Zangi and contact the player.`
+      );
+    } catch (error) {
+      setErrorMessage(
+        error?.message || "Unable to open Zangi."
+      );
+    }
   }
-  /* =========================
-     LOADING STATE
-  ========================= */
+
+  // ----------------------------------------------------
+  // RESUME GAME
+  // ----------------------------------------------------
+
+  function resumeGame(match) {
+    const gameId =
+      match.gameId ||
+      match.game?.$id ||
+      "";
+
+    if (!gameId) {
+      setErrorMessage(
+        "The game has not finished loading. Refresh and try again."
+      );
+      return;
+    }
+
+    if (typeof goGame === "function") {
+      goGame(gameId, match.stake);
+    } else {
+      setErrorMessage(
+        "Game navigation is not configured."
+      );
+    }
+  }
+
+  // ----------------------------------------------------
+  // LOADING STATE
+  // ----------------------------------------------------
 
   if (loading) {
     return (
-      <div style={styles.container}>
-        <h2>Loading Win9ja Life...</h2>
-        <p style={styles.subtitle}>Checking your account and wallet.</p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div style={styles.container}>
-        <h2>Unable to load your account</h2>
-        <p>Please sign in and reopen the lobby.</p>
-
-        {back && (
-          <button
-            style={{ ...styles.btn, background: "#334155", color: "#fff" }}
-            onClick={back}
-          >
-            Back
-          </button>
-        )}
-      </div>
-    );
-  }
-
-  const availableBalance = getAvailableBalance(wallet);
-
-  return (
-    <div style={styles.container}>
-      {/* =========================
-          ZANGI SETUP POPUP
-      ========================= */}
-
-      {showZangiPopup && (
-        <div style={styles.overlay}>
-          <div
-            style={styles.modal}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="zangi-title"
-          >
-            <button
-              type="button"
-              aria-label="Close Zangi setup"
-              style={styles.closeBtn}
-              onClick={closeZangiPopup}
-            >
-              ×
-            </button>
-
-            <div style={{ fontSize: 38, marginBottom: 8 }}>
-              💬
-            </div>
-
-            <h2 id="zangi-title" style={styles.modalTitle}>
-              Welcome to WHOT!
+      <div style={styles.page}>
+        <div style={styles.container}>
+          <div style={styles.panel}>
+            <h2 style={styles.sectionTitle}>
+              Loading Win9ja Life...
             </h2>
 
-            <p style={styles.modalText}>
-              Win9ja Life lets you connect with your WHOT opponent through
-              Zangi chat or calls while you play.
+            <p style={styles.sectionText}>
+              Preparing your wallet and game lobby.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------------------------------------------
+  // MAIN LOBBY
+  // ----------------------------------------------------
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.container}>
+
+        {/* HEADER */}
+
+        <header style={styles.header}>
+          <div>
+            <h1 style={styles.brand}>
+              Win9ja{" "}
+              <span style={styles.brandAccent}>
+                Life
+              </span>
+            </h1>
+
+            <div style={styles.subtitle}>
+              Play. Compete. Win.
+            </div>
+          </div>
+
+          <div style={styles.balanceCard}>
+            <div style={styles.balanceLabel}>
+              Available Coins
+            </div>
+
+            <div style={styles.balanceAmount}>
+              🪙 {formatCoins(availableCoins)}
+            </div>
+          </div>
+        </header>
+
+        {/* MESSAGES */}
+
+        {errorMessage && (
+          <div style={styles.error}>
+            {errorMessage}
+          </div>
+        )}
+
+        {successMessage && (
+          <div style={styles.success}>
+            {successMessage}
+          </div>
+        )}
+
+        {/* NAVIGATION */}
+
+        {typeof back === "function" && (
+          <div style={{ marginBottom: 16 }}>
+            <button
+              type="button"
+              style={{
+                ...styles.button,
+                ...styles.secondaryButton,
+              }}
+              onClick={back}
+            >
+              ← Back
+            </button>
+          </div>
+        )}
+
+        {/* ROOMS */}
+
+        <section style={styles.panel}>
+          <h2 style={styles.sectionTitle}>
+            Choose Your Room
+          </h2>
+
+          <p style={styles.sectionText}>
+            Select a room according to your coin stake.
+          </p>
+
+          <div style={styles.roomGrid}>
+            {Object.entries(ROOM_CONFIG).map(
+              ([key, room]) => {
+                const selected = selectedRoom === key;
+
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => chooseRoom(key)}
+                    style={{
+                      ...styles.roomCard,
+                      borderColor: selected
+                        ? room.color
+                        : "#263b59",
+                      boxShadow: selected
+                        ? `inset 0 0 0 1px ${room.color}`
+                        : "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        ...styles.roomName,
+                        color: room.color,
+                      }}
+                    >
+                      {room.name}
+                      {selected ? " ✓" : ""}
+                    </div>
+
+                    <div style={styles.roomDescription}>
+                      {room.description}
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 10,
+                        fontSize: 12,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {key === "premium"
+                        ? "1,100+ coins"
+                        : `${formatCoins(room.min)}–${formatCoins(room.max)} coins`}
+                    </div>
+                  </button>
+                );
+              }
+            )}
+          </div>
+        </section>
+
+        {/* CREATE MATCH */}
+
+        <section style={styles.panel}>
+          <h2 style={styles.sectionTitle}>
+            Create a Match
+          </h2>
+
+          <p style={styles.sectionText}>
+            Choose your stake and wait for another player
+            to join. Your stake is deducted when you
+            create the match.
+          </p>
+
+          <div style={styles.formGrid}>
+            <div>
+              <label
+                htmlFor="lobby-stake"
+                style={styles.fieldLabel}
+              >
+                Stake Amount (Coins)
+              </label>
+
+              <input
+                id="lobby-stake"
+                type="number"
+                min="100"
+                step="1"
+                value={stake}
+                onChange={(event) => {
+                  const value = event.target.value;
+
+                  setStake(value);
+
+                  const room = getRoomForStake(
+                    Number(value)
+                  );
+
+                  if (room) {
+                    setSelectedRoom(room);
+                  }
+                }}
+                style={styles.input}
+                placeholder="Enter coin stake"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="lobby-zangi"
+                style={styles.fieldLabel}
+              >
+                Your Zangi Contact
+              </label>
+
+              <input
+                id="lobby-zangi"
+                type="text"
+                value={zangiInput}
+                onChange={(event) =>
+                  setZangiInput(event.target.value)
+                }
+                style={styles.input}
+                placeholder="Phone number or contact"
+              />
+            </div>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button
+              type="button"
+              disabled={creating}
+              onClick={createMatch}
+              style={{
+                ...styles.button,
+                ...styles.primaryButton,
+                opacity: creating ? 0.6 : 1,
+              }}
+            >
+              {creating
+                ? "Creating Match..."
+                : `Create Match · ${formatCoins(Number(stake) || 0)} Coins`}
+            </button>
+
+            <button
+              type="button"
+              disabled={savingZangi}
+              onClick={saveZangi}
+              style={{
+                ...styles.button,
+                ...styles.secondaryButton,
+                opacity: savingZangi ? 0.6 : 1,
+              }}
+            >
+              {savingZangi
+                ? "Saving..."
+                : "Save Zangi Contact"}
+            </button>
+
+            <button
+              type="button"
+              onClick={refresh}
+              style={{
+                ...styles.button,
+                ...styles.secondaryButton,
+              }}
+            >
+              ↻ Refresh
+            </button>
+          </div>
+        </section>
+
+        {/* AVAILABLE MATCHES */}
+
+        <section style={styles.panel}>
+          <h2 style={styles.sectionTitle}>
+            Available Matches
+          </h2>
+
+          <p style={styles.sectionText}>
+            Join another player's waiting match using
+            the same stake amount.
+          </p>
+
+          {matches.length === 0 ? (
+            <div style={styles.empty}>
+              No waiting matches at the moment.
+              <br />
+              Create a match and wait for another
+              player to join.
+            </div>
+          ) : (
+            <div style={styles.matchList}>
+              {matches.map((match) => (
+                <article
+                  key={match.$id}
+                  style={styles.matchCard}
+                >
+                  <div style={styles.matchTop}>
+                    <span style={styles.badge}>
+                      Waiting
+                    </span>
+
+                    <span style={styles.muted}>
+                      {ROOM_CONFIG[
+                        match.room ||
+                        getRoomForStake(match.stake)
+                      ]?.name || "Game Room"}
+                    </span>
+                  </div>
+
+                  <div style={styles.muted}>
+                    Host
+                  </div>
+
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      marginBottom: 12,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {match.hostId}
+                  </div>
+
+                  <div style={styles.muted}>
+                    Required Stake
+                  </div>
+
+                  <div style={styles.matchAmount}>
+                    🪙 {formatCoins(match.stake)}
+                  </div>
+
+                  <div style={styles.muted}>
+                    Both players stake the same number
+                    of coins.
+                  </div>
+
+                  <div style={styles.buttonRow}>
+                    <button
+                      type="button"
+                      disabled={
+                        loadingJoin === match.$id
+                      }
+                      onClick={() => joinMatch(match)}
+                      style={{
+                        ...styles.button,
+                        ...styles.primaryButton,
+                        width: "100%",
+                        opacity:
+                          loadingJoin === match.$id
+                            ? 0.6
+                            : 1,
+                      }}
+                    >
+                      {loadingJoin === match.$id
+                        ? "Joining..."
+                        : `Join · ${formatCoins(match.stake)} Coins`}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* YOUR ACTIVE MATCHES */}
+
+        <section style={styles.panel}>
+          <h2 style={styles.sectionTitle}>
+            Your Active Matches
+          </h2>
+
+          <p style={styles.sectionText}>
+            Continue matches that you have created or
+            joined.
+          </p>
+
+          {activeMatches.length === 0 ? (
+            <div style={styles.empty}>
+              You have no active matches.
+            </div>
+          ) : (
+            <div style={styles.matchList}>
+              {activeMatches.map((match) => {
+                const isHost =
+                  match.hostId === user?.$id;
+
+                const opponentId = isHost
+                  ? match.opponentId
+                  : match.hostId;
+
+                const game = match.game ||
+                  gameMap[match.gameId];
+
+                const opponentContact =
+                  getOpponentZangi(match, user?.$id);
+
+                return (
+                  <article
+                    key={match.$id}
+                    style={styles.matchCard}
+                  >
+                    <div style={styles.matchTop}>
+                      <span style={styles.badge}>
+                        {match.status === "playing"
+                          ? "Playing"
+                          : "Matched"}
+                      </span>
+
+                      <span style={styles.muted}>
+                        {isHost ? "Host" : "Opponent"}
+                      </span>
+                    </div>
+
+                    <div style={styles.muted}>
+                      Opponent
+                    </div>
+
+                    <div
+                      style={{
+                        fontWeight: 800,
+                        overflowWrap: "anywhere",
+                        margin: "5px 0 12px",
+                      }}
+                    >
+                      {opponentId || "Waiting for player"}
+                    </div>
+
+                    <div style={styles.muted}>
+                      Your Stake
+                    </div>
+
+                    <div style={styles.matchAmount}>
+                      🪙 {formatCoins(match.stake)}
+                    </div>
+
+                    <div style={styles.muted}>
+                      Winner's potential prize:{" "}
+                      {formatCoins(match.pot)}
+                      {" coins"}
+                    </div>
+
+                    {opponentContact && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          fontSize: 12,
+                          color: "#a7f3d0",
+                          overflowWrap: "anywhere",
+                        }}
+                      >
+                        Opponent contact:{" "}
+                        {opponentContact}
+                      </div>
+                    )}
+
+                    <div style={styles.buttonRow}>
+                      {match.gameId && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            resumeGame(match)
+                          }
+                          style={{
+                            ...styles.button,
+                            ...styles.primaryButton,
+                          }}
+                        >
+                          Resume Game
+                        </button>
+                      )}
+
+                      {opponentId && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openZangi(match)
+                          }
+                          style={{
+                            ...styles.button,
+                            ...styles.secondaryButton,
+                          }}
+                        >
+                          Contact Player
+                        </button>
+                      )}
+
+                      {isHost &&
+                        isWaitingMatch(match) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              cancelMatch(match)
+                            }
+                            style={{
+                              ...styles.button,
+                              ...styles.dangerButton,
+                            }}
+                          >
+                            Cancel & Refund
+                          </button>
+                        )}
+                    </div>
+
+                    {game?.status === "finished" && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          color: "#fcd34d",
+                          fontSize: 12,
+                        }}
+                      >
+                        The game is finished. Confirm
+                        the verified result before
+                        processing a winner payout.
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* COMMISSION INFORMATION */}
+
+        <section
+          style={{
+            ...styles.panel,
+            background: "rgba(10, 23, 40, .8)",
+          }}
+        >
+          <h2 style={styles.sectionTitle}>
+            Match Prize Information
+          </h2>
+
+          <p style={styles.sectionText}>
+            The current rule calculates a 20% admin
+            commission from the combined stakes, with
+            the remaining 80% reserved for the winner.
+          </p>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(130px, 1fr))",
+              gap: 12,
+            }}
+          >
+            <div>
+              <div style={styles.muted}>
+                Admin Commission
+              </div>
+
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 900,
+                  color: "#fbbf24",
+                  marginTop: 6,
+                }}
+              >
+                20%
+              </div>
+            </div>
+
+            <div>
+              <div style={styles.muted}>
+                Winner's Prize
+              </div>
+
+              <div
+                style={{
+                  fontSize: 20,
+                  fontWeight: 900,
+                  color: "#4ade80",
+                  marginTop: 6,
+                }}
+              >
+                80%
+              </div>
+            </div>
+          </div>
+
+          <hr style={styles.divider} />
+
+          <div style={styles.muted}>
+            Example: two players stake 500 coins each.
+            The combined stakes are 1,000 coins, the
+            admin commission is 200 coins, and the
+            winner's prize is 800 coins.
+          </div>
+        </section>
+
+      </div>
+
+      {/* ZANGI SETUP POPUP */}
+
+      {showZangiPopup && (
+        <div style={styles.popupOverlay}>
+          <div style={styles.popup}>
+            <h2 style={styles.popupTitle}>
+              Set Up Your Zangi Contact
+            </h2>
+
+            <p style={styles.popupText}>
+              Add your Zangi phone number or contact
+              so other players can contact you after
+              matching.
             </p>
 
-            <p style={styles.modalText}>
-              Save your Zangi ID below so your opponent can contact you
-              when you enter a match.
-            </p>
-
-            <label style={styles.modalLabel} htmlFor="zangi-id">
-              Your Zangi ID or contact
+            <label
+              htmlFor="zangi-popup-input"
+              style={styles.fieldLabel}
+            >
+              Zangi Contact
             </label>
 
             <input
-              id="zangi-id"
-              style={styles.input}
+              id="zangi-popup-input"
               type="text"
-              autoComplete="off"
               value={zangiInput}
-              onChange={event => setZangiInput(event.target.value)}
-              placeholder="Enter your Zangi ID"
-              maxLength={100}
+              onChange={(event) =>
+                setZangiInput(event.target.value)
+              }
+              style={styles.input}
+              placeholder="Enter Zangi contact"
             />
 
-            <button
-              type="button"
-              style={{
-                ...styles.saveBtn,
-                ...(savingZangi ? styles.disabledBtn : {})
-              }}
-              disabled={savingZangi}
-              onClick={saveZangi}
-            >
-              {savingZangi ? "Saving..." : "💾 Save Zangi ID"}
-            </button>
-
-            <button
-              type="button"
-              style={styles.filledBtn}
-              onClick={useSavedZangi}
-            >
-              Already Filled In
-            </button>
-
-            <button
-              type="button"
-              style={{
-                ...styles.filledBtn,
-                background: "transparent"
-              }}
-              onClick={closeZangiPopup}
-            >
-              Continue Without Saving
-            </button>
-
-            <p
-              style={{
-                color: "#94a3b8",
-                fontSize: 11,
-                lineHeight: 1.5,
-                marginTop: 14
-              }}
-            >
-              You can close this message and continue to the game rooms.
-              Your saved Zangi ID will not be erased when you close it.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* =========================
-          LOBBY HEADER
-      ========================= */}
-
-      <h1 style={styles.title}>🎮 Win9ja Life WHOT</h1>
-
-      <p style={styles.subtitle}>
-        Choose your room, select your stake, and find an opponent.
-      </p>
-
-      <div style={styles.balanceBox}>
-        <div style={styles.balanceLabel}>
-          Available wallet coins
-        </div>
-
-        <div style={styles.balanceAmount}>
-          🪙 {formatCoins(availableBalance)}
-        </div>
-
-        <button
-          type="button"
-          style={{
-            ...styles.btn,
-            background: "#1e40af",
-            color: "#fff"
-          }}
-          onClick={() => init()}
-        >
-          🔄 Refresh Balance
-        </button>
-      </div>
-
-      {errorMessage && (
-        <div style={styles.error} role="alert">
-          {errorMessage}
-        </div>
-      )}
-
-      {/* =========================
-          GAME ROOMS
-      ========================= */}
-
-      <div style={styles.section}>🏆 Choose Your Room</div>
-
-      <div style={styles.roomGrid}>
-        {Object.entries(ROOM_CONFIG).map(([key, room]) => {
-          const selected = selectedRoom === key;
-
-          return (
-            <button
-              type="button"
-              key={key}
-              onClick={() => chooseRoom(key)}
-              style={{
-                ...styles.roomCard,
-                width: "100%",
-                textAlign: "left",
-                cursor: "pointer",
-                border: selected
-                  ? "2px solid #facc15"
-                  : "1px solid #334155",
-                boxShadow: selected
-                  ? "0 0 18px rgba(250,204,21,0.12)"
-                  : "none"
-              }}
-            >
-              <div style={styles.roomName}>
-                {room.emoji} {room.label}
-              </div>
-
-              <div style={styles.roomDescription}>
-                {room.description}
-              </div>
-
-              <div style={styles.roomRange}>
-                {formatCoins(room.min)}
-                {" — "}
-                {Number.isFinite(room.max)
-                  ? formatCoins(room.max)
-                  : "Unlimited"}
-              </div>
-
-              {selected && (
-                <div style={{ marginTop: 10, fontSize: 12 }}>
-                  ✓ Selected
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* =========================
-          CREATE MATCH
-      ========================= */}
-
-      <div style={styles.section}>
-        {ROOM_CONFIG[selectedRoom].emoji} Create a{" "}
-        {ROOM_CONFIG[selectedRoom].label} Match
-      </div>
-
-      <div style={styles.card}>
-        <div style={styles.roomDescription}>
-          Choose a stake between{" "}
-          {formatCoins(ROOM_CONFIG[selectedRoom].min)}
-          {" and "}
-          {Number.isFinite(ROOM_CONFIG[selectedRoom].max)
-            ? formatCoins(ROOM_CONFIG[selectedRoom].max)
-            : "any higher amount"}.
-        </div>
-
-        <input
-          style={styles.input}
-          type="number"
-          inputMode="numeric"
-          min={ROOM_CONFIG[selectedRoom].min}
-          max={
-            Number.isFinite(ROOM_CONFIG[selectedRoom].max)
-              ? ROOM_CONFIG[selectedRoom].max
-              : undefined
-          }
-          step="1"
-          value={stake}
-          onChange={event => {
-            setStake(event.target.value);
-            setErrorMessage("");
-          }}
-          placeholder={`Enter stake in coins`}
-        />
-
-        {stake && Number.isFinite(Number(stake)) && (
-          <div style={{ marginTop: 10, fontSize: 13 }}>
-            Selected stake:{" "}
-            <strong>{formatCoins(Number(stake))}</strong>
-          </div>
-        )}
-
-        <button
-          type="button"
-          style={{
-            ...styles.createBtn,
-            ...(creating ? styles.disabledBtn : {})
-          }}
-          disabled={creating}
-          onClick={createMatch}
-        >
-          {creating ? "Creating Match..." : "➕ Create Match"}
-        </button>
-
-        <div style={styles.notice}>
-          Your available wallet balance is checked before a match is created.
-          Your balance must cover the selected stake.
-        </div>
-      </div>
-
-      {/* =========================
-          AVAILABLE MATCHES
-      ========================= */}
-
-      <div style={styles.section}>
-        🔎 Available {ROOM_CONFIG[selectedRoom].label} Matches
-      </div>
-
-      {roomMatches.length === 0 ? (
-        <div style={styles.card}>
-          <p style={{ margin: 0, fontWeight: 700 }}>
-            No waiting matches in this room yet.
-          </p>
-
-          <p style={styles.roomDescription}>
-            Create a match or check again shortly.
-          </p>
-
-          <button
-            type="button"
-            style={{
-              ...styles.btn,
-              background: "#334155",
-              color: "#fff"
-            }}
-            onClick={() => user && refresh(user.$id)}
-          >
-            🔄 Refresh Matches
-          </button>
-        </div>
-      ) : (
-        roomMatches.map(match => (
-          <div key={match.$id} style={styles.card}>
-            <div style={styles.row}>
-              <div>
-                <div style={styles.stake}>
-                  🪙 {formatCoins(match.stake)}
-                </div>
-
-                <div style={styles.status}>
-                  Waiting for an opponent
-                </div>
-              </div>
+            <div style={styles.buttonRow}>
+              <button
+                type="button"
+                disabled={savingZangi}
+                onClick={saveZangi}
+                style={{
+                  ...styles.button,
+                  ...styles.primaryButton,
+                  flex: 1,
+                  opacity: savingZangi ? 0.6 : 1,
+                }}
+              >
+                {savingZangi
+                  ? "Saving..."
+                  : "Save Contact"}
+              </button>
 
               <button
                 type="button"
+                onClick={() =>
+                  setShowZangiPopup(false)
+                }
                 style={{
-                  ...styles.joinBtn,
-                  ...(loadingJoin ? styles.disabledBtn : {})
+                  ...styles.button,
+                  ...styles.secondaryButton,
                 }}
-                disabled={Boolean(loadingJoin)}
-                onClick={() => joinMatch(match)}
               >
-                {loadingJoin === match.$id ? "Joining..." : "Join"}
+                Later
               </button>
             </div>
           </div>
-        ))
-      )}
-
-      {/* =========================
-          ACTIVE MATCHES
-      ========================= */}
-
-      <div style={styles.section}>🔥 Your Active Matches</div>
-
-      {activeMatches.length === 0 ? (
-        <div style={styles.card}>
-          <p style={{ margin: 0 }}>
-            You have no active matches.
-          </p>
         </div>
-      ) : (
-        activeMatches.map(match => {
-          const game = gameMap[match.gameId];
-
-          const isPlayer = (
-            match.hostId === user.$id ||
-            match.opponentId === user.$id
-          );
-
-          if (!isPlayer) return null;
-
-          const finished = (
-            match.status === "finished" ||
-            game?.status === "finished"
-          );
-
-          const turnLabel = finished
-            ? "Match finished"
-            : game
-              ? game.turn === user.$id
-                ? "🟢 Your turn"
-                : "🔴 Opponent's turn"
-              : match.status === "waiting"
-                ? "Waiting for opponent"
-                : "Preparing game";
-
-          return (
-            <div key={match.$id} style={styles.card}>
-              <div style={styles.row}>
-                <span style={styles.stake}>
-                  🪙 {formatCoins(match.stake)}
-                </span>
-
-                <span style={styles.status}>
-                  {match.status}
-                </span>
-              </div>
-
-              <div style={styles.turn}>
-                {turnLabel}
-              </div>
-
-              {match.opponentId && (
-                <button
-                  type="button"
-                  style={{
-                    ...styles.btn,
-                    ...styles.chatBtn
-                  }}
-                  onClick={() => openZangi(match)}
-                >
-                  💬 Chat / Call Opponent on Zangi
-                </button>
-              )}
-
-              {match.gameId && !finished && (
-                <button
-                  type="button"
-                  style={{
-                    ...styles.btn,
-                    ...styles.resumeBtn
-                  }}
-                  onClick={() => goGame(match.gameId, match.stake)}
-                >
-                  ▶ Resume Game
-                </button>
-              )}
-
-              {finished && (
-                <div style={styles.notice}>
-                  This match has finished.
-                </div>
-              )}
-            </div>
-          );
-        })
-      )}
-
-      {/* =========================
-          BACK BUTTON
-      ========================= */}
-
-      {back && (
-        <button
-          type="button"
-          style={{
-            ...styles.btn,
-            background: "#334155",
-            color: "#fff",
-            marginTop: 25
-          }}
-          onClick={back}
-        >
-          ← Back
-        </button>
       )}
     </div>
   );
