@@ -207,7 +207,7 @@ try {
         userId: currentUser.$id,  
         name: name.trim(),  
         phone: formattedPhone,  
-        balance: 200,  
+        coins: 200,  
         locked: 0,  
         promoUsed,  
         promoCode: savedPromoCode,  
