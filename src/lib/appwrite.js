@@ -1,11 +1,24 @@
-import { Client, Account, Databases, ID, Query } from "appwrite";
+import {
+  Client,
+  Account,
+  Databases,
+  TablesDB,
+  ID,
+  Query
+} from "appwrite";
 
 const client = new Client()
   .setEndpoint("https://nyc.cloud.appwrite.io/v1")
   .setProject("69cb4e5c001651f6cfab");
 
 export const account = new Account(client);
+
+// Existing Collections/Documents API.
+// Keep this for your existing game and wallet code.
 export const databases = new Databases(client);
+
+// TablesDB API for tables and rows.
+export const tablesDB = new TablesDB(client);
 
 export const DATABASE_ID = "69cb505d0015fbe8a669";
 
@@ -24,7 +37,7 @@ export const TRANSACTION_COLLECTION = "transactions";
 export const SNAKE_LOBBY_COLLECTION = "snakelobby";
 export const SNAKE_GAME_COLLECTION = "snakegame";
 
-// Future settings collection for your public TRX receiving address
+// New table for public application settings
 export const APP_SETTINGS_COLLECTION = "app_settings";
 
 export { client, ID, Query };
