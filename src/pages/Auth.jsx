@@ -228,8 +228,8 @@ try {
 }
 
 function openSupport() {
-const message = Hello Win9ja Support, I need help;
-const url = https://wa.me/18622726355?text=${encodeURIComponent(message)};
+const message = "Hello Win9ja Support, I need help";
+const url = `https://wa.me/18622726355?text=${encodeURIComponent(message)}`;
 window.open(url, "_blank");
 }
 
