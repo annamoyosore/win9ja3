@@ -1,49 +1,64 @@
-import { useEffect, useState, useCallback } from "react";
+// =============================================
+// WIN9JA LIFE — TRANSACTIONS
+// SECTION 1: IMPORTS, HELPERS AND DATA BUILDERS
+// File: src/pages/Transactions.jsx
+// =============================================
+
+import { useCallback, useEffect, useState } from "react";
+
 import {
   account,
   databases,
   DATABASE_ID,
   MATCH_COLLECTION,
   CASINO_COLLECTION,
+  DEPOSIT_COLLECTION,
+  WITHDRAW_COLLECTION,
+  TRANSACTION_COLLECTION,
   Query,
 } from "../lib/appwrite";
 
+// Existing game collection
 const GAME_COLLECTION = "games";
-const DEPOSIT_COLLECTION = "deposit_requests";
-const WITHDRAW_COLLECTION = "withdrawal_requests";
 
-const PAGE_SIZE = 100;
+// =============================================
+// GENERAL HELPERS
+// =============================================
 
-function getStatus(record) {
-  return String(record?.status || record?.result || "pending").toLowerCase();
+function getStatus(record = {}) {
+  return String(
+    record.status ||
+      record.paymentStatus ||
+      record.transactionStatus ||
+      record.result ||
+      "completed"
+  ).toLowerCase();
 }
 
-function getDate(record) {
-  const value =
-    record?.$createdAt ||
-    record?.createdAt ||
-    record?.date ||
-    record?.timestamp ||
-    null;
-
-  if (!value) return null;
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime()) ? null : date;
+function getDate(record = {}) {
+  return (
+    record.$createdAt ||
+    record.createdAt ||
+    record.date ||
+    record.timestamp ||
+    record.updatedAt ||
+    ""
+  );
 }
 
 function formatDate(value) {
   if (!value) return "Date unavailable";
 
-  const date = value instanceof Date ? value : new Date(value);
+  const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "Date unavailable";
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
 
-  return date.toLocaleString("en-NG", {
-    day: "numeric",
-    month: "short",
+  return date.toLocaleString(undefined, {
     year: "numeric",
+    month: "short",
+    day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -52,485 +67,669 @@ function formatDate(value) {
 function formatCoins(value) {
   const amount = Number(value || 0);
 
-  return `${amount > 0 ? "+" : ""}${amount.toLocaleString()} coins`;
+  return `${amount.toLocaleString()} coins`;
 }
 
 function formatMoney(value, currency = "NGN") {
   const amount = Number(value || 0);
 
   try {
-    return new Intl.NumberFormat("en-NG", {
+    return new Intl.NumberFormat(undefined, {
       style: "currency",
-      currency,
+      currency: currency || "NGN",
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `${currency} ${amount.toLocaleString()}`;
+    return `${currency || "NGN"} ${amount.toLocaleString()}`;
   }
 }
 
 function normalizeStatus(status) {
-  const value = String(status || "pending").toLowerCase();
+  const value = String(status || "").toLowerCase();
 
   if (
-    ["success", "successful", "completed", "finished", "paid", "approved", "won"].includes(
+    ["approved", "completed", "success", "successful", "paid", "won"].includes(
       value
     )
   ) {
-    return value === "won" ? "won" : "completed";
+    return "success";
   }
 
-  if (["failed", "rejected", "cancelled", "canceled", "lost"].includes(value)) {
-    return value === "lost" ? "lost" : "failed";
+  if (
+    ["pending", "processing", "waiting", "in_progress"].includes(value)
+  ) {
+    return "pending";
   }
 
-  if (["waiting", "pending", "processing", "matched", "running"].includes(value)) {
-    return value;
+  if (
+    ["rejected", "failed", "cancelled", "canceled", "declined", "lost"].includes(
+      value
+    )
+  ) {
+    return "failed";
   }
 
-  return value;
+  return "neutral";
 }
 
 function statusLabel(status) {
-  const normalized = normalizeStatus(status);
+  const value = String(status || "").toLowerCase();
 
   const labels = {
+    approved: "Approved",
     completed: "Completed",
+    success: "Successful",
+    successful: "Successful",
+    paid: "Paid",
+    pending: "Pending",
+    processing: "Processing",
+    rejected: "Rejected",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    canceled: "Cancelled",
+    declined: "Declined",
     won: "Won",
     lost: "Lost",
-    failed: "Failed",
-    pending: "Pending",
-    waiting: "Waiting",
-    matched: "Matched",
-    running: "In progress",
-    processing: "Processing",
+    refunded: "Refunded",
   };
 
-  return labels[normalized] || normalized.replace(/_/g, " ");
+  return labels[value] || value.replace(/_/g, " ") || "Completed";
 }
 
 function getErrorMessage(error) {
   return (
     error?.message ||
-    "Unable to load your transactions. Please try again."
+    error?.response?.message ||
+    "Unable to load this transaction data."
   );
 }
 
-async function fetchAllDocuments(collectionId, userId, userFields = ["userId"]) {
-  const allDocuments = [];
-  let offset = 0;
+function getFirstValue(record, fields, fallback = "") {
+  for (const field of fields) {
+    const value = record?.[field];
 
-  while (true) {
-    const queries = [
-      Query.limit(PAGE_SIZE),
-      Query.offset(offset),
-    ];
-
-    if (userId && userFields.length > 0) {
-      queries.push(
-        Query.or(
-          userFields.map((field) => Query.equal(field, userId))
-        )
-      );
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
     }
-
-    const response = await databases.listDocuments(
-      DATABASE_ID,
-      collectionId,
-      queries
-    );
-
-    allDocuments.push(...(response.documents || []));
-
-    if (
-      !response.documents ||
-      response.documents.length < PAGE_SIZE ||
-      allDocuments.length >= response.total
-    ) {
-      break;
-    }
-
-    offset += PAGE_SIZE;
   }
 
-  return allDocuments;
+  return fallback;
 }
 
-async function fetchUserRecords(collectionId, userId, userFields = ["userId"]) {
-  try {
-    return await fetchAllDocuments(collectionId, userId, userFields);
-  } catch (error) {
-    // Some Appwrite setups may not support Query.or.
-    // Retry each user field separately and merge the results.
-    if (userFields.length <= 1) throw error;
+function getCoinAmount(record = {}) {
+  return Number(
+    getFirstValue(
+      record,
+      [
+        "coins",
+        "coinAmount",
+        "amountCoins",
+        "stake",
+        "entryFee",
+        "betAmount",
+      ],
+      0
+    )
+  );
+}
 
-    const results = await Promise.all(
-      userFields.map(async (field) => {
-        try {
-          return await fetchAllDocuments(collectionId, userId, [field]);
-        } catch {
-          return [];
-        }
-      })
-    );
+function getMoneyAmount(record = {}) {
+  return Number(
+    getFirstValue(
+      record,
+      ["amount", "moneyAmount", "paymentAmount", "totalAmount"],
+      0
+    )
+  );
+}
 
-    const unique = new Map();
+function getReference(record = {}) {
+  return String(
+    getFirstValue(
+      record,
+      [
+        "paymentReference",
+        "transactionReference",
+        "reference",
+        "transactionId",
+        "paymentId",
+        "$id",
+      ],
+      ""
+    )
+  );
+}
 
-    results.flat().forEach((record) => {
-      unique.set(record.$id, record);
-    });
+// =============================================
+// FETCH ALL DOCUMENTS FOR A USER
+// Tries known user ID fields separately.
+// =============================================
 
-    return Array.from(unique.values());
+async function fetchUserRecords(
+  collectionId,
+  userId,
+  userFields = ["userId"]
+) {
+  if (!userId) return [];
+
+  let lastError = null;
+
+  for (const field of userFields) {
+    try {
+      const allDocuments = [];
+      let offset = 0;
+      const pageSize = 100;
+
+      while (true) {
+        const response = await databases.listDocuments(
+          DATABASE_ID,
+          collectionId,
+          [
+            Query.equal(field, userId),
+            Query.limit(pageSize),
+            Query.offset(offset),
+          ]
+        );
+
+        const documents = response.documents || [];
+
+        allDocuments.push(...documents);
+
+        if (documents.length < pageSize) break;
+
+        offset += documents.length;
+      }
+
+      // Remove duplicate documents if the collection is queried
+      // through multiple fields by the calling code.
+      return allDocuments;
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  if (lastError) {
+    console.warn(
+      `Could not read collection "${collectionId}" for this user:`,
+      lastError
+    );
+  }
+
+  return [];
 }
+
+// =============================================
+// CREATE A STANDARD TRANSACTION ITEM
+// =============================================
 
 function makeTransaction({
   id,
   type,
   title,
-  description,
+  description = "",
   amount = 0,
-  unit = "money",
-  currency = "NGN",
-  status = "pending",
-  date = null,
-  original = null,
+  unit = "coins",
+  direction = "neutral",
+  status = "completed",
+  date = "",
+  reference = "",
+  source = "",
 }) {
   return {
-    id: String(id || `${type}-${Date.now()}-${Math.random()}`),
+    id: String(id || `${type}-${reference}-${date}`),
     type,
     title,
     description,
     amount: Number(amount || 0),
     unit,
-    currency,
-    status: normalizeStatus(status),
+    direction,
+    status: String(status || "completed").toLowerCase(),
     date,
-    original,
+    reference,
+    source,
   };
 }
 
-function buildMatchTransactions(matches, games, userId) {
-  const gameMap = new Map(
-    games.map((game) => [game.$id, game])
-  );
+// =============================================
+// BUILD TRANSACTION RECORDS ALREADY SAVED
+// IN THE TRANSACTIONS COLLECTION
+// =============================================
 
-  return matches.map((match) => {
-    const game = match.gameId ? gameMap.get(match.gameId) : null;
+function buildSavedTransactions(records = []) {
+  return records.map((record) => {
+    const rawType = String(
+      getFirstValue(
+        record,
+        ["type", "transactionType", "category", "action"],
+        "transaction"
+      )
+    ).toLowerCase();
 
-    const status = getStatus(match);
-    const stake = Number(match.stake ?? match.entryFee ?? 0);
+    const amount = Number(
+      getFirstValue(
+        record,
+        ["amount", "coins", "coinAmount", "value"],
+        0
+      )
+    );
 
-    const winnerId =
-      match.winnerId ||
-      match.winner ||
-      game?.winnerId ||
-      game?.winner ||
-      "";
+    const currency = getFirstValue(record, ["currency"], "NGN");
 
-    const isFinished = [
-      "completed",
-      "finished",
-      "success",
-      "successful",
-    ].includes(status);
+    const isMoney =
+      rawType.includes("deposit") ||
+      rawType.includes("payment") ||
+      rawType.includes("purchase") ||
+      rawType.includes("withdraw");
 
-    const isWaiting = [
-      "waiting",
-      "pending",
-      "matched",
-      "running",
-      "playing",
-      "active",
-    ].includes(status);
+    const isWithdrawal = rawType.includes("withdraw");
 
-    let amount = 0;
-    let title = "Whot Game";
-    let description = "Whot match transaction";
-    let transactionStatus = status;
+    const isCredit =
+      rawType.includes("award") ||
+      rawType.includes("win") ||
+      rawType.includes("refund") ||
+      rawType.includes("credit") ||
+      rawType.includes("deposit") ||
+      rawType.includes("purchase");
 
-    if (isFinished) {
-      if (winnerId && winnerId === userId) {
-        // payoutAmount should be saved by the game payout logic.
-        // Older records may not contain it.
-        const payout = Number(
-          match.payoutAmount ??
-          match.winnerPayout ??
-          game?.payoutAmount ??
-          game?.winnerPayout ??
-          match.pot ??
-          game?.pot ??
-          0
-        );
+    let title = String(
+      getFirstValue(record, ["title", "description", "name"], "")
+    );
 
-        amount = payout;
-        title = "Whot Game Win";
-        description =
-          payout > 0
-            ? `Winning payout: ${formatCoins(payout)}`
-            : "You won this match. Payout details are unavailable.";
-        transactionStatus = "won";
-      } else if (winnerId) {
-        amount = -stake;
-        title = "Whot Game Loss";
-        description = `Entry stake: ${formatCoins(stake)}`;
-        transactionStatus = "lost";
+    if (!title) {
+      if (rawType.includes("withdraw")) {
+        title = "Coin withdrawal";
+      } else if (rawType.includes("deposit")) {
+        title = "Deposit";
+      } else if (rawType.includes("purchase")) {
+        title = "Coin purchase";
+      } else if (rawType.includes("refund")) {
+        title = "Coin refund";
+      } else if (rawType.includes("win") || rawType.includes("award")) {
+        title = "Winning reward";
+      } else if (rawType.includes("stake") || rawType.includes("spend")) {
+        title = "Game stake";
       } else {
-        title = "Whot Game";
-        description = "Match finished; winner information unavailable.";
-        transactionStatus = "completed";
+        title = "Wallet transaction";
       }
-    } else if (isWaiting) {
-      amount = -stake;
-      title = "Whot Game Stake";
-      description = `Entry stake: ${formatCoins(stake)}`;
     }
 
+    const status = getStatus(record);
+
     return makeTransaction({
-      id: `match-${match.$id}`,
-      type: "game",
+      id: record.$id,
+      type: rawType,
       title,
-      description,
+      description: String(
+        getFirstValue(
+          record,
+          ["note", "details", "message", "paymentProvider"],
+          ""
+        )
+      ),
       amount,
-      unit: "coins",
-      status: transactionStatus,
-      date: getDate(match) || getDate(game),
-      original: match,
+      unit: isMoney ? currency : "coins",
+      direction: isWithdrawal
+        ? "debit"
+        : isCredit
+          ? "credit"
+          : "neutral",
+      status,
+      date: getDate(record),
+      reference: getReference(record),
+      source: TRANSACTION_COLLECTION,
     });
   });
 }
 
-function buildCasinoTransactions(records) {
+// =============================================
+// BUILD WHOT / GAME MATCH TRANSACTIONS
+// =============================================
+
+function buildMatchTransactions(matches = [], games = [], userId) {
+  const gameById = new Map(
+    games.map((game) => [String(game.$id), game])
+  );
+
+  return matches
+    .filter((match) => {
+      const hostId = String(
+        getFirstValue(match, ["hostId", "creatorId", "player1Id"], "")
+      );
+
+      const opponentId = String(
+        getFirstValue(match, ["opponentId", "player2Id"], "")
+      );
+
+      const matchUserId = String(
+        getFirstValue(match, ["userId", "playerId"], "")
+      );
+
+      return (
+        hostId === userId ||
+        opponentId === userId ||
+        matchUserId === userId
+      );
+    })
+    .map((match) => {
+      const gameId = getFirstValue(match, ["gameId", "game"], "");
+      const game = gameById.get(String(gameId));
+
+      const gameName = String(
+        getFirstValue(
+          match,
+          ["gameName", "gameType", "name"],
+          getFirstValue(game, ["name", "title", "gameName"], "Game")
+        )
+      );
+
+      const status = getStatus(match);
+
+      const stake = Number(
+        getFirstValue(
+          match,
+          ["stake", "entryFee", "betAmount", "coins", "amount"],
+          0
+        )
+      );
+
+      const winnerId = String(
+        getFirstValue(match, ["winnerId", "winner", "winnerUserId"], "")
+      );
+
+      const isWinner = winnerId === userId;
+
+      const isCancelled = [
+        "cancelled",
+        "canceled",
+        "rejected",
+        "refunded",
+      ].includes(status);
+
+      const payout = Number(
+        getFirstValue(
+          match,
+          ["payoutAmount", "winnerPayout", "reward", "winnings"],
+          0
+        )
+      );
+
+      let title = `${gameName} match`;
+      let direction = "neutral";
+      let amount = stake;
+
+      if (isCancelled) {
+        title = `${gameName} match refund`;
+        direction = "credit";
+      } else if (isWinner) {
+        title = `${gameName} match won`;
+        direction = "credit";
+        amount = payout || 0;
+      } else if (winnerId && winnerId !== userId) {
+        title = `${gameName} match stake`;
+        direction = "debit";
+      } else if (["completed", "finished", "draw"].includes(status)) {
+        title = `${gameName} match completed`;
+      } else {
+        title = `${gameName} match`;
+      }
+
+      return makeTransaction({
+        id: `match-${match.$id}`,
+        type: "game",
+        title,
+        description: isWinner
+          ? "Winning result recorded"
+          : "Game match activity",
+        amount,
+        unit: "coins",
+        direction,
+        status,
+        date: getDate(match),
+        reference: match.$id,
+        source: MATCH_COLLECTION,
+      });
+    });
+}
+
+// =============================================
+// BUILD CASINO TRANSACTIONS
+// =============================================
+
+function buildCasinoTransactions(records = []) {
   return records.map((record) => {
     const status = getStatus(record);
-    const stake = Number(record.stake ?? record.amount ?? 0);
-    const win = Number(record.win ?? record.payout ?? 0);
 
-    let amount = 0;
-    let title = "Casino Game";
-    let description = "Casino transaction";
+    const stake = Number(
+      getFirstValue(
+        record,
+        ["stake", "betAmount", "coinsBet", "bet", "amount"],
+        0
+      )
+    );
 
-    if (["won", "win", "completed", "success", "successful"].includes(status)) {
-      amount = win - stake;
-      title = amount > 0 ? "Casino Win" : "Casino Game";
-      description =
-        amount > 0
-          ? `Net profit: ${formatCoins(amount)}`
-          : "Casino round completed.";
-    } else if (["lost", "loss", "failed"].includes(status)) {
-      amount = -stake;
-      title = "Casino Loss";
-      description = `Stake lost: ${formatCoins(stake)}`;
-    } else if (status === "free" || status === "almost") {
-      title = "Casino Game";
-      description = status === "free" ? "Free round" : "Almost won";
-    } else {
-      title = "Casino Stake";
-      description = `Stake: ${formatCoins(stake)}`;
-    }
+    const payout = Number(
+      getFirstValue(
+        record,
+        ["payout", "winAmount", "winnings", "reward", "win"],
+        0
+      )
+    );
+
+    const won =
+      record.won === true ||
+      record.isWinner === true ||
+      payout > 0 ||
+      status === "won";
+
+    const title = won ? "Casino winnings" : "Casino game";
 
     return makeTransaction({
       id: `casino-${record.$id}`,
       type: "casino",
       title,
-      description,
-      amount,
+      description: String(
+        getFirstValue(record, ["gameName", "gameType", "game"], "Casino")
+      ),
+      amount: won ? payout : stake,
       unit: "coins",
+      direction: won ? "credit" : "debit",
       status,
       date: getDate(record),
-      original: record,
+      reference: getReference(record),
+      source: CASINO_COLLECTION,
     });
   });
 }
 
-function buildDepositTransactions(records) {
+// =============================================
+// BUILD COIN PURCHASE / DEPOSIT TRANSACTIONS
+// =============================================
+
+function buildDepositTransactions(records = []) {
   return records.map((record) => {
     const status = getStatus(record);
-    const coins = Number(record.coins || 0);
-    const money = Number(record.amount || 0);
-    const currency = record.currency || "NGN";
-    const isCoinPurchase = coins > 0;
+    const approved = [
+      "approved",
+      "completed",
+      "success",
+      "successful",
+      "paid",
+    ].includes(status);
 
-    let amount = 0;
-    let unit = "money";
-    let title = "Deposit";
-    let description = formatMoney(money, currency);
-
-    if (isCoinPurchase) {
-      title = "Coin Purchase";
-      description = `Purchase of ${formatCoins(coins)} · Payment: ${formatMoney(
-        money,
-        currency
-      )}`;
-
-      // Only approved purchases are shown as credited coins.
-      if (status === "approved" || status === "completed" || status === "success") {
-        amount = coins;
-        unit = "coins";
-      } else {
-        amount = money;
-        unit = "money";
-      }
-    } else {
-      title = "Wallet Deposit";
-      amount = money;
-      unit = "money";
-      description = formatMoney(money, currency);
-    }
+    const coins = getCoinAmount(record);
+    const amount = getMoneyAmount(record);
+    const currency = getFirstValue(record, ["currency"], "NGN");
 
     return makeTransaction({
       id: `deposit-${record.$id}`,
-      type: "deposit",
-      title,
-      description,
-      amount,
-      unit,
-      currency,
+      type: approved ? "coin_purchase" : "deposit",
+      title: approved ? "Coin purchase successful" : "Coin purchase request",
+      description: [
+        record.paymentProvider,
+        record.packageId ? `Package: ${record.packageId}` : "",
+        record.paymentNote || "",
+      ]
+        .filter(Boolean)
+        .join(" • "),
+      amount: approved ? coins : amount,
+      unit: approved ? "coins" : currency,
+      direction: approved ? "credit" : "neutral",
       status,
       date: getDate(record),
-      original: record,
+      reference: getReference(record),
+      source: DEPOSIT_COLLECTION,
     });
   });
 }
 
-function buildWithdrawalTransactions(records) {
+// =============================================
+// BUILD WITHDRAWAL TRANSACTIONS
+// =============================================
+
+function buildWithdrawalTransactions(records = []) {
   return records.map((record) => {
     const status = getStatus(record);
-    const coins = Number(record.coins ?? record.amount ?? 0);
-    const currency = record.currency || "NGN";
 
-    let amount = 0;
-    let title = "Withdrawal";
-    let description = `Requested withdrawal: ${formatCoins(coins)}`;
+    const paid = [
+      "paid",
+      "completed",
+      "success",
+      "successful",
+    ].includes(status);
 
-    if (status === "paid" || status === "completed" || status === "success") {
-      amount = -coins;
-      title = "Withdrawal Paid";
-      description = `Withdrawn: ${formatCoins(coins)}`;
-    } else if (status === "rejected" || status === "failed") {
-      title = "Withdrawal Rejected";
-      description = "The withdrawal was rejected. Coins should not be deducted.";
-    } else {
-      title = "Withdrawal Request";
-      description = `Requested: ${formatCoins(coins)} · Awaiting payment`;
-    }
+    const coins = Number(
+      getFirstValue(record, ["coins", "coinAmount", "amountCoins"], 0)
+    );
+
+    const money = getMoneyAmount(record);
+
+    // Prefer the explicit coin field. If the request only has
+    // "amount", do not assume that amount is coins.
+    const hasCoinAmount =
+      record.coins !== undefined ||
+      record.coinAmount !== undefined ||
+      record.amountCoins !== undefined;
 
     return makeTransaction({
       id: `withdrawal-${record.$id}`,
       type: "withdrawal",
-      title,
-      description,
-      amount,
-      unit: "coins",
-      currency,
+      title: paid
+        ? "Withdrawal completed"
+        : "Withdrawal request",
+      description: String(
+        getFirstValue(
+          record,
+          ["paymentMethod", "withdrawalMethod", "walletAddress", "note"],
+          ""
+        )
+      ),
+      amount: hasCoinAmount ? coins : money,
+      unit: hasCoinAmount ? "coins" : getFirstValue(record, ["currency"], "NGN"),
+      direction: paid ? "debit" : "neutral",
       status,
       date: getDate(record),
-      original: record,
+      reference: getReference(record),
+      source: WITHDRAW_COLLECTION,
     });
   });
-}export default function Transactions() {
+}
+export default function Transactions() {
   const [user, setUser] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [activeFilter, setActiveFilter] = useState("all");
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
 
-  const loadTransactions = useCallback(async (showRefresh = false) => {
-    if (showRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
+  // ===========================================
+  // LOAD USER TRANSACTION HISTORY
+  // ===========================================
 
-    setError("");
+  const loadTransactions = useCallback(async () => {
+    setErrorMessage("");
 
     try {
+      setLoading(true);
+
       const currentUser = await account.get();
       setUser(currentUser);
 
       const userId = currentUser.$id;
 
       const [
+        savedRecords,
         matches,
         casinoRecords,
         deposits,
         withdrawals,
+        games,
       ] = await Promise.all([
-        fetchUserRecords(
-          MATCH_COLLECTION,
-          userId,
-          ["hostId", "opponentId", "userId", "playerId"]
-        ).catch(() => []),
+        fetchUserRecords(TRANSACTION_COLLECTION, userId, [
+          "userId",
+        ]),
 
-        fetchUserRecords(
-          CASINO_COLLECTION,
-          userId,
-          ["userId"]
-        ).catch(() => []),
+        fetchUserRecords(MATCH_COLLECTION, userId, [
+          "hostId",
+          "opponentId",
+          "userId",
+          "playerId",
+        ]),
 
-        fetchUserRecords(
-          DEPOSIT_COLLECTION,
-          userId,
-          ["userId"]
-        ).catch(() => []),
+        fetchUserRecords(CASINO_COLLECTION, userId, [
+          "userId",
+        ]),
 
-        fetchUserRecords(
-          WITHDRAW_COLLECTION,
-          userId,
-          ["userId"]
-        ).catch(() => []),
+        fetchUserRecords(DEPOSIT_COLLECTION, userId, [
+          "userId",
+        ]),
+
+        fetchUserRecords(WITHDRAW_COLLECTION, userId, [
+          "userId",
+        ]),
+
+        fetchUserRecords(GAME_COLLECTION, userId, [
+          "hostId",
+          "opponentId",
+          "userId",
+          "playerId",
+        ]),
       ]);
 
-      // Only show matches where this user is a participant.
-      const uniqueMatches = new Map();
-
-      matches.forEach((match) => {
-        const isParticipant =
-          match.hostId === userId ||
-          match.opponentId === userId ||
-          match.userId === userId ||
-          match.playerId === userId;
-
-        if (isParticipant) {
-          uniqueMatches.set(match.$id, match);
-        }
-      });
-
-      let games = [];
-
-      try {
-        games = await fetchUserRecords(
-          GAME_COLLECTION,
-          userId,
-          ["hostId", "opponentId", "userId", "playerId"]
-        );
-      } catch {
-        // Some projects do not use a separate games collection.
-        games = [];
-      }
-
-      const allTransactions = [
-        ...buildMatchTransactions(
-          Array.from(uniqueMatches.values()),
-          games,
-          userId
-        ),
+      const builtTransactions = [
+        ...buildSavedTransactions(savedRecords),
+        ...buildMatchTransactions(matches, games, userId),
         ...buildCasinoTransactions(casinoRecords),
         ...buildDepositTransactions(deposits),
         ...buildWithdrawalTransactions(withdrawals),
       ];
 
-      allTransactions.sort((a, b) => {
-        const dateA = a.date ? a.date.getTime() : 0;
-        const dateB = b.date ? b.date.getTime() : 0;
+      // Remove duplicate records that may appear from multiple
+      // sources. A source and document reference form the key.
+      const unique = new Map();
+
+      builtTransactions.forEach((item) => {
+        const key = `${item.source}-${item.reference || item.id}`;
+
+        if (!unique.has(key)) {
+          unique.set(key, item);
+        }
+      });
+
+      const sorted = Array.from(unique.values()).sort((a, b) => {
+        const dateA = new Date(a.date || 0).getTime() || 0;
+        const dateB = new Date(b.date || 0).getTime() || 0;
 
         return dateB - dateA;
       });
 
-      setTransactions(allTransactions);
-    } catch (loadError) {
-      setError(getErrorMessage(loadError));
+      setTransactions(sorted);
+    } catch (error) {
+      console.error("Win9ja Life transaction loading error:", error);
+
+      setErrorMessage(
+        getErrorMessage(error) ||
+          "We could not load your transaction history."
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -541,614 +740,785 @@ function buildWithdrawalTransactions(records) {
     loadTransactions();
   }, [loadTransactions]);
 
+  // ===========================================
+  // FILTER TRANSACTIONS
+  // ===========================================
+
   const filters = [
     { id: "all", label: "All" },
     { id: "game", label: "Whot Games" },
     { id: "casino", label: "Casino" },
-    { id: "coinPurchase", label: "Coin Purchases" },
+    { id: "coin_purchase", label: "Coin Purchases" },
     { id: "withdrawal", label: "Withdrawals" },
     { id: "deposit", label: "Deposits" },
   ];
 
-  const filteredTransactions = transactions.filter((transaction) => {
-    if (activeFilter === "all") return true;
+  const filteredTransactions =
+    activeFilter === "all"
+      ? transactions
+      : transactions.filter((item) => {
+          if (activeFilter === "game") {
+            return (
+              item.type === "game" ||
+              item.type.includes("match") ||
+              item.source === MATCH_COLLECTION
+            );
+          }
 
-    if (activeFilter === "coinPurchase") {
-      return (
-        transaction.type === "deposit" &&
-        transaction.title === "Coin Purchase"
-      );
-    }
+          if (activeFilter === "coin_purchase") {
+            return (
+              item.type === "coin_purchase" ||
+              item.type.includes("purchase")
+            );
+          }
 
-    return transaction.type === activeFilter;
-  });
+          if (activeFilter === "deposit") {
+            return (
+              item.type === "deposit" ||
+              item.source === DEPOSIT_COLLECTION
+            );
+          }
 
-  const totalWins = transactions
+          if (activeFilter === "withdrawal") {
+            return (
+              item.type === "withdrawal" ||
+              item.source === WITHDRAW_COLLECTION
+            );
+          }
+
+          return item.type === activeFilter;
+        });
+
+  // ===========================================
+  // SUMMARY TOTALS
+  // These totals are summaries of displayed records,
+  // not a substitute for the authoritative wallet balance.
+  // ===========================================
+
+  const completedCredits = transactions
     .filter(
-      (transaction) =>
-        (transaction.type === "game" ||
-          transaction.type === "casino") &&
-        transaction.amount > 0 &&
-        transaction.unit === "coins"
+      (item) =>
+        item.direction === "credit" &&
+        ["approved", "completed", "success", "successful", "paid", "won"].includes(
+          item.status
+        )
     )
-    .reduce((total, transaction) => total + transaction.amount, 0);
+    .reduce((sum, item) => sum + item.amount, 0);
 
-  const purchasedCoins = transactions
+  const completedDebits = transactions
     .filter(
-      (transaction) =>
-        transaction.type === "deposit" &&
-        transaction.title === "Coin Purchase" &&
-        transaction.unit === "coins"
+      (item) =>
+        item.direction === "debit" &&
+        ["completed", "success", "successful", "paid", "won"].includes(
+          item.status
+        )
     )
-    .reduce((total, transaction) => total + transaction.amount, 0);
+    .reduce((sum, item) => sum + item.amount, 0);
 
-  const completedWithdrawals = transactions
-    .filter(
-      (transaction) =>
-        transaction.type === "withdrawal" &&
-        transaction.status === "completed"
-    )
-    .reduce((total, transaction) => total + Math.abs(transaction.amount), 0);
-
-  const getAmountColor = (transaction) => {
-    if (transaction.amount > 0) return "#16a34a";
-    if (transaction.amount < 0) return "#dc2626";
-    return "#64748b";
-  };
-
-  const getAmountText = (transaction) => {
-    if (transaction.unit === "coins") {
-      return formatCoins(transaction.amount);
-    }
-
-    return formatMoney(transaction.amount, transaction.currency);
-  };
-
-  const getTypeIcon = (transaction) => {
-    if (transaction.type === "game") return "🎮";
-    if (transaction.type === "casino") return "🎰";
-    if (transaction.type === "withdrawal") return "💸";
-    if (transaction.type === "deposit") {
-      return transaction.title === "Coin Purchase" ? "🪙" : "💰";
-    }
-
-    return "📄";
-  };
-
-  const getStatusColor = (status) => {
-    if (["completed", "won"].includes(status)) return "#15803d";
-    if (status === "lost") return "#b91c1c";
-    if (["failed", "rejected"].includes(status)) return "#dc2626";
-    if (["pending", "waiting", "processing", "matched", "running"].includes(status)) {
-      return "#b45309";
-    }
-
-    return "#475569";
-  };
-
-  if (loading) {
-    return (
-      <div style={styles.page}>
-        <div style={styles.loadingCard}>
-          <div style={styles.spinner} />
-          <p>Loading your transactions...</p>
-        </div>
-      </div>
-    );
+  function handleRefresh() {
+    setRefreshing(true);
+    loadTransactions();
   }
+
+  // ===========================================
+  // RENDER
+  // ===========================================
 
   return (
     <div style={styles.page}>
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <div>
-            <h1 style={styles.heading}>Transactions</h1>
-            <p style={styles.subheading}>
-              Track your games, coin purchases, winnings and withdrawals.
-            </p>
-            {user?.email && (
-              <p style={styles.email}>{user.email}</p>
-            )}
-          </div>
+      <style>{`
+        @keyframes win9ja-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
 
-          <button
-            type="button"
-            onClick={() => loadTransactions(true)}
-            disabled={refreshing}
+        @keyframes win9ja-fade-in {
+          from { opacity: 0; transform: translateY(5px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .win9ja-transaction-row {
+          animation: win9ja-fade-in 0.25s ease-out;
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .win9ja-transaction-row:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 5px 16px rgba(0,0,0,0.06);
+        }
+
+        .win9ja-filter-button {
+          transition: all 0.18s ease;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .win9ja-filter-button:focus-visible,
+        .win9ja-refresh-button:focus-visible {
+          outline: 2px solid #16a34a;
+          outline-offset: 3px;
+        }
+
+        .win9ja-refresh-button {
+          cursor: pointer;
+        }
+
+        @media (max-width: 480px) {
+          .win9ja-summary-grid {
+            grid-template-columns: 1fr 1fr !important;
+          }
+
+          .win9ja-transaction-row {
+            padding: 12px !important;
+          }
+
+          .win9ja-transaction-description {
+            max-width: 190px;
+            overflow-wrap: anywhere;
+          }
+        }
+      `}</style>
+
+      {/* HEADER */}
+      <div style={styles.header}>
+        <div>
+          <div style={styles.eyebrow}>WIN9JA LIFE WALLET</div>
+
+          <h1 style={styles.heading}>Transactions</h1>
+
+          <p style={styles.subtitle}>
+            Your coin activity, purchases and withdrawals in one place.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="win9ja-refresh-button"
+          onClick={handleRefresh}
+          disabled={loading || refreshing}
+          style={{
+            ...styles.refreshButton,
+            opacity: loading || refreshing ? 0.65 : 1,
+          }}
+          aria-label="Refresh transaction history"
+        >
+          <span
             style={{
-              ...styles.refreshButton,
-              opacity: refreshing ? 0.65 : 1,
+              display: "inline-block",
+              animation:
+                refreshing || loading
+                  ? "win9ja-spin 1s linear infinite"
+                  : "none",
             }}
           >
-            {refreshing ? "Refreshing..." : "↻ Refresh"}
-          </button>
+            ↻
+          </span>{" "}
+          Refresh
+        </button>
+      </div>
+
+      {/* SUMMARY CARDS */}
+      <div className="win9ja-summary-grid" style={styles.summaryGrid}>
+        <div style={styles.summaryCard}>
+          <div style={styles.summaryIcon}>🪙</div>
+
+          <div style={styles.summaryLabel}>Transactions</div>
+
+          <div style={styles.summaryValue}>
+            {transactions.length.toLocaleString()}
+          </div>
+
+          <div style={styles.summaryHint}>All recorded activities</div>
         </div>
 
-        {error && (
-          <div style={styles.errorBox}>
-            <strong>Unable to refresh transactions.</strong>
-            <p style={{ margin: "6px 0 12px" }}>{error}</p>
-            <button
-              type="button"
-              onClick={() => loadTransactions()}
-              style={styles.retryButton}
-            >
-              Try again
-            </button>
-          </div>
-        )}
+        <div style={styles.summaryCard}>
+          <div style={styles.summaryIcon}>↗️</div>
 
-        <div style={styles.summaryGrid}>
-          <div style={styles.summaryCard}>
-            <span style={styles.summaryIcon}>📋</span>
-            <p style={styles.summaryLabel}>Total Records</p>
-            <h2 style={styles.summaryValue}>
-              {transactions.length.toLocaleString()}
-            </h2>
+          <div style={styles.summaryLabel}>Credits recorded</div>
+
+          <div style={styles.summaryValue}>
+            {completedCredits.toLocaleString()}
           </div>
 
-          <div style={styles.summaryCard}>
-            <span style={styles.summaryIcon}>🏆</span>
-            <p style={styles.summaryLabel}>Recorded Wins</p>
-            <h2 style={{ ...styles.summaryValue, color: "#16a34a" }}>
-              {formatCoins(totalWins)}
-            </h2>
-          </div>
-
-          <div style={styles.summaryCard}>
-            <span style={styles.summaryIcon}>🪙</span>
-            <p style={styles.summaryLabel}>Coins Purchased</p>
-            <h2 style={styles.summaryValue}>
-              {purchasedCoins.toLocaleString()}
-            </h2>
-          </div>
-
-          <div style={styles.summaryCard}>
-            <span style={styles.summaryIcon}>💸</span>
-            <p style={styles.summaryLabel}>Withdrawn Coins</p>
-            <h2 style={styles.summaryValue}>
-              {completedWithdrawals.toLocaleString()}
-            </h2>
-          </div>
+          <div style={styles.summaryHint}>Recorded credit amounts</div>
         </div>
 
-        <div style={styles.filterSection}>
-          <h2 style={styles.sectionHeading}>Transaction History</h2>
+        <div style={styles.summaryCard}>
+          <div style={styles.summaryIcon}>↘️</div>
 
-          <div style={styles.filterList}>
-            {filters.map((filter) => (
+          <div style={styles.summaryLabel}>Debits recorded</div>
+
+          <div style={styles.summaryValue}>
+            {completedDebits.toLocaleString()}
+          </div>
+
+          <div style={styles.summaryHint}>Recorded debit amounts</div>
+        </div>
+      </div>
+
+      {/* FILTER BAR */}
+      <div style={styles.filterSection}>
+        <h2 style={styles.sectionHeading}>Transaction history</h2>
+
+        <div style={styles.filterList}>
+          {filters.map((filter) => {
+            const active = activeFilter === filter.id;
+
+            return (
               <button
-                key={filter.id}
                 type="button"
+                key={filter.id}
+                className="win9ja-filter-button"
                 onClick={() => setActiveFilter(filter.id)}
                 style={{
                   ...styles.filterButton,
-                  ...(activeFilter === filter.id
-                    ? styles.activeFilterButton
-                    : {}),
+                  ...(active ? styles.activeFilterButton : {}),
                 }}
+                aria-pressed={active}
               >
                 {filter.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
+      </div>
 
-        {filteredTransactions.length === 0 ? (
-          <div style={styles.emptyState}>
+      {/* LOADING */}
+      {loading && (
+        <div style={styles.stateCard}>
+          <div style={styles.spinner} />
+
+          <p style={styles.stateTitle}>Loading transactions...</p>
+
+          <p style={styles.stateText}>
+            Please wait while we retrieve your activity.
+          </p>
+        </div>
+      )}
+
+      {/* ERROR */}
+      {!loading && errorMessage && (
+        <div style={styles.errorCard}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+
+          <h3 style={styles.stateTitle}>Unable to load history</h3>
+
+          <p style={styles.stateText}>{errorMessage}</p>
+
+          <button
+            type="button"
+            onClick={handleRefresh}
+            style={styles.primaryButton}
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      {/* EMPTY STATE */}
+      {!loading &&
+        !errorMessage &&
+        filteredTransactions.length === 0 && (
+          <div style={styles.stateCard}>
             <div style={styles.emptyIcon}>🧾</div>
-            <h3 style={styles.emptyTitle}>No transactions found</h3>
-            <p style={styles.emptyText}>
-              Your transactions will appear here when you purchase coins,
-              play games, win rewards or make a withdrawal.
+
+            <h3 style={styles.stateTitle}>No transactions found</h3>
+
+            <p style={styles.stateText}>
+              {activeFilter === "all"
+                ? "Your recorded transactions will appear here when available."
+                : "There are no records in this category yet."}
             </p>
 
             {activeFilter !== "all" && (
               <button
                 type="button"
                 onClick={() => setActiveFilter("all")}
-                style={styles.showAllButton}
+                style={styles.primaryButton}
               >
                 View all transactions
               </button>
             )}
           </div>
-        ) : (
-          <div style={styles.transactionList}>
-            {filteredTransactions.map((transaction) => (
+        )}
+
+      {/* TRANSACTION LIST */}
+      {!loading && !errorMessage && filteredTransactions.length > 0 && (
+        <div style={styles.transactionList}>
+          {filteredTransactions.map((item) => {
+            const statusStyle =
+              styles.status[normalizeStatus(item.status)] ||
+              styles.status.neutral;
+
+            const sign =
+              item.direction === "credit"
+                ? "+"
+                : item.direction === "debit"
+                  ? "−"
+                  : "";
+
+            const amountColor =
+              item.direction === "credit"
+                ? "#15803d"
+                : item.direction === "debit"
+                  ? "#dc2626"
+                  : "#64748b";
+
+            const icon =
+              item.type === "casino"
+                ? "🎰"
+                : item.type === "withdrawal"
+                  ? "💸"
+                  : item.type === "deposit" ||
+                      item.type === "coin_purchase"
+                    ? "🪙"
+                    : item.direction === "credit"
+                      ? "🏆"
+                      : item.direction === "debit"
+                        ? "🎮"
+                        : "📄";
+
+            return (
               <div
-                key={transaction.id}
+                key={item.id}
+                className="win9ja-transaction-row"
                 style={styles.transactionCard}
               >
-                <div style={styles.transactionIcon}>
-                  {getTypeIcon(transaction)}
-                </div>
+                <div style={styles.transactionIcon}>{icon}</div>
 
-                <div style={styles.transactionInfo}>
+                <div style={styles.transactionMain}>
                   <div style={styles.transactionTitleRow}>
-                    <h3 style={styles.transactionTitle}>
-                      {transaction.title}
-                    </h3>
+                    <h3 style={styles.transactionTitle}>{item.title}</h3>
 
-                    <span
-                      style={{
-                        ...styles.statusBadge,
-                        color: getStatusColor(transaction.status),
-                        backgroundColor:
-                          getStatusColor(transaction.status) + "18",
-                      }}
-                    >
-                      {statusLabel(transaction.status)}
+                    <span style={statusStyle}>
+                      {statusLabel(item.status)}
                     </span>
                   </div>
 
-                  <p style={styles.transactionDescription}>
-                    {transaction.description}
-                  </p>
+                  {item.description && (
+                    <div
+                      className="win9ja-transaction-description"
+                      style={styles.transactionDescription}
+                    >
+                      {item.description}
+                    </div>
+                  )}
 
-                  <p style={styles.transactionDate}>
-                    {formatDate(transaction.date)}
-                  </p>
+                  <div style={styles.transactionMeta}>
+                    <span>{formatDate(item.date)}</span>
+
+                    {item.reference && (
+                      <span style={styles.reference}>
+                        Ref: {item.reference}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div style={styles.amountContainer}>
-                  <strong
+                <div style={styles.transactionAmount}>
+                  <div
                     style={{
-                      ...styles.transactionAmount,
-                      color: getAmountColor(transaction),
+                      ...styles.amountValue,
+                      color: amountColor,
                     }}
                   >
-                    {getAmountText(transaction)}
-                  </strong>
+                    {sign}
+                    {Number(item.amount || 0).toLocaleString()}
+                  </div>
 
-                  <span style={styles.amountUnit}>
-                    {transaction.unit === "coins"
-                      ? "W Coins"
-                      : transaction.currency}
-                  </span>
+                  <div style={styles.amountUnit}>
+                    {item.unit === "coins"
+                      ? "coins"
+                      : item.unit}
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
+      )}
 
-        <p style={styles.footerNote}>
-          Transaction history reflects the records currently stored in your
-          Win9ja Life account. Pending transactions are not confirmed payments
-          or credited rewards.
-        </p>
+      {/* FOOTER NOTE */}
+      <div style={styles.footerNote}>
+        <span style={{ fontSize: 16 }}>🔒</span>
+
+        <span>
+          This page displays available transaction records. Some older
+          game activities may not appear if they were never saved as
+          transaction records.
+        </span>
+      </div>
+
+      <div style={styles.footer}>
+        © {new Date().getFullYear()} Win9ja Life
       </div>
     </div>
   );
 }
 
+// =============================================
+// INLINE STYLES
+// =============================================
+
 const styles = {
   page: {
-    minHeight: "100vh",
     width: "100%",
-    boxSizing: "border-box",
-    background: "#f1f5f9",
-    padding: "20px 12px 40px",
-    color: "#0f172a",
-    fontFamily:
-      'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  },
-
-  container: {
-    width: "100%",
-    maxWidth: "1100px",
+    maxWidth: 1100,
     margin: "0 auto",
+    padding: "22px 16px 35px",
+    boxSizing: "border-box",
+    color: "#172033",
+    fontFamily:
+      "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    background: "#f8fafc",
+    minHeight: "100vh",
   },
 
   header: {
     display: "flex",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    gap: "12px",
+    gap: 14,
     flexWrap: "wrap",
-    marginBottom: "24px",
+    marginBottom: 24,
+  },
+
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: 1.5,
+    color: "#16a34a",
+    marginBottom: 7,
   },
 
   heading: {
-    fontSize: "clamp(25px, 5vw, 34px)",
-    lineHeight: 1.2,
-    margin: "0 0 8px",
-    fontWeight: 800,
-    color: "#0f172a",
-  },
-
-  subheading: {
-    margin: "0 0 5px",
-    color: "#64748b",
-    fontSize: "14px",
-    lineHeight: 1.6,
-  },
-
-  email: {
+    fontSize: "clamp(26px, 5vw, 34px)",
+    lineHeight: 1.15,
+    fontWeight: 850,
     margin: 0,
-    fontSize: "12px",
-    color: "#94a3b8",
-    overflowWrap: "anywhere",
+    letterSpacing: -0.8,
+    color: "#111827",
+  },
+
+  subtitle: {
+    color: "#64748b",
+    fontSize: 14,
+    lineHeight: 1.6,
+    margin: "9px 0 0",
+    maxWidth: 500,
   },
 
   refreshButton: {
-    border: "none",
-    borderRadius: "10px",
-    padding: "11px 15px",
-    background: "#16a34a",
-    color: "#ffffff",
-    fontWeight: 700,
-    fontSize: "13px",
-    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    border: "1px solid #dbe4e0",
+    borderRadius: 12,
+    background: "#ffffff",
+    color: "#166534",
+    fontSize: 13,
+    fontWeight: 750,
+    padding: "10px 14px",
   },
 
   summaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
-    gap: "12px",
-    marginBottom: "28px",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: 12,
+    marginBottom: 30,
   },
 
   summaryCard: {
-    background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "16px",
-    padding: "18px 15px",
     minWidth: 0,
-    boxShadow: "0 2px 8px rgba(15, 23, 42, 0.03)",
+    border: "1px solid #e5e7eb",
+    background: "#ffffff",
+    borderRadius: 18,
+    padding: "17px 15px",
+    boxShadow: "0 4px 18px rgba(15,23,42,0.035)",
   },
 
   summaryIcon: {
-    fontSize: "23px",
+    fontSize: 23,
+    marginBottom: 11,
   },
 
   summaryLabel: {
-    margin: "12px 0 7px",
-    fontSize: "12px",
+    fontSize: 12,
+    fontWeight: 650,
     color: "#64748b",
-    fontWeight: 600,
+    marginBottom: 7,
   },
 
   summaryValue: {
-    margin: 0,
-    fontSize: "clamp(17px, 3vw, 22px)",
-    lineHeight: 1.4,
-    fontWeight: 800,
-    color: "#0f172a",
+    fontSize: "clamp(18px, 3vw, 25px)",
+    fontWeight: 850,
+    letterSpacing: -0.4,
     overflowWrap: "anywhere",
+    color: "#111827",
+  },
+
+  summaryHint: {
+    fontSize: 10,
+    color: "#94a3b8",
+    marginTop: 7,
+    lineHeight: 1.4,
   },
 
   filterSection: {
-    marginBottom: "16px",
+    marginBottom: 17,
   },
 
   sectionHeading: {
-    margin: "0 0 14px",
-    fontSize: "20px",
+    fontSize: 18,
     fontWeight: 800,
-    color: "#0f172a",
+    margin: "0 0 15px",
+    color: "#172033",
   },
 
   filterList: {
     display: "flex",
-    gap: "8px",
+    gap: 8,
     overflowX: "auto",
-    paddingBottom: "8px",
-    WebkitOverflowScrolling: "touch",
+    padding: "2px 1px 8px",
+    scrollbarWidth: "thin",
   },
 
   filterButton: {
-    flex: "0 0 auto",
-    border: "1px solid #cbd5e1",
-    borderRadius: "999px",
+    border: "1px solid #e2e8f0",
     background: "#ffffff",
-    color: "#475569",
+    color: "#64748b",
+    borderRadius: 999,
     padding: "9px 14px",
-    fontSize: "12px",
-    fontWeight: 700,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
+    fontSize: 12,
+    fontWeight: 750,
+    flexShrink: 0,
   },
 
   activeFilterButton: {
     background: "#16a34a",
     color: "#ffffff",
     borderColor: "#16a34a",
+    boxShadow: "0 4px 10px rgba(22,163,74,0.18)",
   },
 
   transactionList: {
     display: "flex",
     flexDirection: "column",
-    gap: "10px",
+    gap: 10,
   },
 
   transactionCard: {
     display: "flex",
-    alignItems: "flex-start",
-    gap: "12px",
-    padding: "16px 13px",
+    alignItems: "center",
+    gap: 12,
+    padding: 15,
+    border: "1px solid #e5e7eb",
     background: "#ffffff",
-    border: "1px solid #e2e8f0",
-    borderRadius: "14px",
-    boxShadow: "0 2px 8px rgba(15, 23, 42, 0.025)",
+    borderRadius: 16,
+    boxShadow: "0 3px 12px rgba(15,23,42,0.025)",
     minWidth: 0,
   },
 
   transactionIcon: {
-    flex: "0 0 42px",
-    width: "42px",
-    height: "42px",
-    borderRadius: "12px",
-    background: "#f0fdf4",
+    width: 43,
+    height: 43,
+    flexShrink: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "21px",
+    background: "#f0fdf4",
+    border: "1px solid #dcfce7",
+    borderRadius: 14,
+    fontSize: 20,
   },
 
-  transactionInfo: {
-    flex: "1 1 auto",
+  transactionMain: {
+    flex: 1,
     minWidth: 0,
   },
 
   transactionTitleRow: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
     flexWrap: "wrap",
-    gap: "7px",
+    gap: 7,
+    marginBottom: 5,
   },
 
   transactionTitle: {
+    fontSize: 13,
+    fontWeight: 800,
+    lineHeight: 1.4,
+    color: "#1e293b",
     margin: 0,
-    fontSize: "14px",
-    fontWeight: 800,
-    color: "#0f172a",
     overflowWrap: "anywhere",
-  },
-
-  statusBadge: {
-    display: "inline-block",
-    borderRadius: "999px",
-    padding: "4px 8px",
-    fontSize: "10px",
-    fontWeight: 800,
-    whiteSpace: "nowrap",
   },
 
   transactionDescription: {
-    margin: "7px 0",
-    fontSize: "12px",
-    lineHeight: 1.6,
     color: "#64748b",
-    overflowWrap: "anywhere",
+    fontSize: 11,
+    lineHeight: 1.5,
+    marginBottom: 7,
   },
 
-  transactionDate: {
-    margin: 0,
-    fontSize: "11px",
-    color: "#94a3b8",
-  },
-
-  amountContainer: {
-    flex: "0 0 auto",
-    maxWidth: "42%",
+  transactionMeta: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-end",
-    gap: "5px",
-    textAlign: "right",
+    gap: 4,
+    color: "#94a3b8",
+    fontSize: 10,
+    lineHeight: 1.5,
+  },
+
+  reference: {
     overflowWrap: "anywhere",
+    color: "#64748b",
   },
 
   transactionAmount: {
-    fontSize: "12px",
-    lineHeight: 1.5,
-    fontWeight: 800,
+    flexShrink: 0,
+    textAlign: "right",
+    maxWidth: "34%",
+  },
+
+  amountValue: {
+    fontSize: 14,
+    fontWeight: 850,
     overflowWrap: "anywhere",
   },
 
   amountUnit: {
-    fontSize: "10px",
     color: "#94a3b8",
+    fontSize: 10,
+    marginTop: 5,
   },
 
-  emptyState: {
-    background: "#ffffff",
-    border: "1px dashed #cbd5e1",
-    borderRadius: "16px",
-    padding: "38px 20px",
+  status: {
+    success: {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "4px 8px",
+      background: "#dcfce7",
+      color: "#166534",
+      fontSize: 9,
+      fontWeight: 850,
+      textTransform: "capitalize",
+    },
+
+    pending: {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "4px 8px",
+      background: "#fef3c7",
+      color: "#92400e",
+      fontSize: 9,
+      fontWeight: 850,
+      textTransform: "capitalize",
+    },
+
+    failed: {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "4px 8px",
+      background: "#fee2e2",
+      color: "#991b1b",
+      fontSize: 9,
+      fontWeight: 850,
+      textTransform: "capitalize",
+    },
+
+    neutral: {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "4px 8px",
+      background: "#f1f5f9",
+      color: "#475569",
+      fontSize: 9,
+      fontWeight: 850,
+      textTransform: "capitalize",
+    },
+  },
+
+  stateCard: {
     textAlign: "center",
-  },
-
-  emptyIcon: {
-    fontSize: "40px",
-    marginBottom: "12px",
-  },
-
-  emptyTitle: {
-    margin: "0 0 8px",
-    fontSize: "18px",
-    color: "#0f172a",
-  },
-
-  emptyText: {
-    maxWidth: "430px",
-    margin: "0 auto 18px",
-    fontSize: "13px",
-    lineHeight: 1.7,
-    color: "#64748b",
-  },
-
-  showAllButton: {
-    border: "none",
-    borderRadius: "9px",
-    padding: "10px 15px",
-    background: "#16a34a",
-    color: "#ffffff",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-
-  loadingCard: {
-    maxWidth: "400px",
-    margin: "80px auto",
-    padding: "30px 20px",
-    textAlign: "center",
+    padding: "42px 20px",
+    border: "1px solid #e5e7eb",
     background: "#ffffff",
-    borderRadius: "16px",
-    color: "#64748b",
+    borderRadius: 18,
+  },
+
+  errorCard: {
+    textAlign: "center",
+    padding: "32px 20px",
+    border: "1px solid #fecaca",
+    background: "#fffafa",
+    borderRadius: 18,
   },
 
   spinner: {
-    width: "30px",
-    height: "30px",
+    width: 31,
+    height: 31,
+    borderRadius: "50%",
     border: "3px solid #dcfce7",
     borderTopColor: "#16a34a",
-    borderRadius: "50%",
-    margin: "0 auto 15px",
     animation: "win9ja-spin 0.8s linear infinite",
+    margin: "0 auto 16px",
   },
 
-  errorBox: {
-    marginBottom: "20px",
-    padding: "15px",
-    border: "1px solid #fecaca",
-    borderRadius: "12px",
-    background: "#fef2f2",
-    color: "#991b1b",
-    fontSize: "13px",
-    lineHeight: 1.6,
-    overflowWrap: "anywhere",
+  emptyIcon: {
+    fontSize: 35,
+    marginBottom: 12,
   },
 
-  retryButton: {
+  stateTitle: {
+    fontSize: 16,
+    fontWeight: 800,
+    margin: "0 0 8px",
+    color: "#1e293b",
+  },
+
+  stateText: {
+    fontSize: 12,
+    lineHeight: 1.7,
+    color: "#64748b",
+    margin: "0 auto 14px",
+    maxWidth: 420,
+  },
+
+  primaryButton: {
     border: "none",
-    borderRadius: "8px",
-    padding: "9px 13px",
-    background: "#b91c1c",
+    borderRadius: 10,
+    background: "#16a34a",
     color: "#ffffff",
-    fontWeight: 700,
+    padding: "11px 17px",
+    fontSize: 12,
+    fontWeight: 800,
     cursor: "pointer",
   },
 
   footerNote: {
-    margin: "22px 0 0",
-    color: "#94a3b8",
-    fontSize: "11px",
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 9,
+    padding: "13px 14px",
+    marginTop: 23,
+    border: "1px solid #e2e8f0",
+    background: "#f1f5f9",
+    borderRadius: 13,
+    color: "#64748b",
+    fontSize: 11,
     lineHeight: 1.7,
+  },
+
+  footer: {
     textAlign: "center",
+    color: "#94a3b8",
+    fontSize: 10,
+    paddingTop: 23,
   },
 };
-
-if (typeof document !== "undefined" && !document.getElementById("win9ja-transactions-animation")) {
-  const styleElement = document.createElement("style");
-  styleElement.id = "win9ja-transactions-animation";
-  styleElement.textContent = `
-    @keyframes win9ja-spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-  `;
-  document.head.appendChild(styleElement);
-}
