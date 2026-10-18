@@ -1,8 +1,8 @@
 import { Client, Account, Databases, ID, Query } from "appwrite";
 
 const client = new Client()
-.setEndpoint("https://nyc.cloud.appwrite.io/v1")
-.setProject("69cb4e5c001651f6cfab");
+  .setEndpoint("https://nyc.cloud.appwrite.io/v1")
+  .setProject("69cb4e5c001651f6cfab");
 
 export const account = new Account(client);
 export const databases = new Databases(client);
@@ -25,7 +25,7 @@ export const TRANSACTION_COLLECTION = "transactions";
 export const SNAKE_LOBBY_COLLECTION = "snakelobby";
 export const SNAKE_GAME_COLLECTION = "snakegame";
 
-// App settings collection — inside the same existing database
+// Settings collection in the SAME database
 export const APP_SETTINGS_COLLECTION = "app_settings";
 
 export { client, ID, Query };
