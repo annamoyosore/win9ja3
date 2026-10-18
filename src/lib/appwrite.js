@@ -24,7 +24,7 @@ export const TRANSACTION_COLLECTION = "transactions";
 export const SNAKE_LOBBY_COLLECTION = "snakelobby";
 export const SNAKE_GAME_COLLECTION = "snakegame";
 
-// Future settings collection for your public TRX receiving address
+// New settings collection in the existing database
 export const APP_SETTINGS_COLLECTION = "app_settings";
 
 export { client, ID, Query };
