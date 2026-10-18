@@ -7,10 +7,16 @@ import {
   DATABASE_ID,
   WALLET_COLLECTION,
   DEPOSIT_COLLECTION,
-  APP_SETTINGS_COLLECTION,
   ID,
   Query
 } from "../lib/appwrite";
+
+// ==========================================
+// TRX PAYMENT CONFIGURATION
+// ==========================================
+
+const TRX_RECEIVING_ADDRESS =
+  "TWpZiDpjejjyUaxDUwnSGbw1dH1JQvzaAy";
 
 // ==========================================
 // PAYMENT CONFIGURATION
@@ -154,7 +160,10 @@ export default function CoinsStore() {
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState("flutterwave");
 
-  const [trxAddress, setTrxAddress] = useState("");
+  const [trxAddress, setTrxAddress] = useState(
+    TRX_RECEIVING_ADDRESS
+  );
+
   const [trxLoading, setTrxLoading] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
@@ -163,6 +172,7 @@ export default function CoinsStore() {
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+
   const [notice, setNotice] = useState({
     type: "",
     message: ""
@@ -201,7 +211,7 @@ export default function CoinsStore() {
           }, 180);
         }
       } catch {
-        // The text notification still works if audio is unavailable.
+        // Text notification remains available.
       }
     }
   }
@@ -247,9 +257,6 @@ export default function CoinsStore() {
 
           setWallet(userWallet);
 
-          // FIX: Purchased/earned W Coins use the "coins" attribute.
-          // Do not read wallet.balance for the coin balance.
-
           const savedCountry = userWallet.country;
 
           if (
@@ -260,6 +267,7 @@ export default function CoinsStore() {
           }
         } else {
           setWallet(null);
+
           notify(
             "Your wallet was not found. Please contact support.",
             "error"
@@ -285,64 +293,24 @@ export default function CoinsStore() {
   }, []);
 
   // ==========================================
-  // LOAD TRX ADDRESS USING DOCUMENT ID
+  // LOAD TRX ADDRESS DIRECTLY FROM THIS FILE
   // ==========================================
 
   useEffect(() => {
-    let cancelled = false;
+    if (paymentMethod !== "trx") return;
 
-    async function loadTrxAddress() {
-      if (paymentMethod !== "trx") return;
+    const address = TRX_RECEIVING_ADDRESS.trim();
 
-      setTrxLoading(true);
-      setTrxAddress("");
+    setTrxAddress(address);
+    setCopySuccess(false);
+    setTrxLoading(false);
 
-      try {
-        // FIX: Fetch the exact app_settings document by ID.
-        const response = await databases.getDocument(
-          DATABASE_ID,
-          APP_SETTINGS_COLLECTION,
-          "6ad4a535003691fb09cf"
-        );
-
-        // Assumes the address is stored in settingValue.
-        const address = String(
-          response.settingValue || ""
-        ).trim();
-
-        if (!cancelled) {
-          setTrxAddress(address);
-
-          if (!address) {
-            notify(
-              "The TRX receiving address has not been configured.",
-              "error"
-            );
-          }
-        }
-      } catch (error) {
-        console.error("Failed to load TRX address:", error);
-
-        if (!cancelled) {
-          setTrxAddress("");
-
-          notify(
-            "Unable to load the TRX address. Check the Appwrite document and permissions.",
-            "error"
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setTrxLoading(false);
-        }
-      }
+    if (!address) {
+      notify(
+        "The TRX receiving address is missing.",
+        "error"
+      );
     }
-
-    loadTrxAddress();
-
-    return () => {
-      cancelled = true;
-    };
   }, [paymentMethod]);
 
   // ==========================================
@@ -382,9 +350,15 @@ export default function CoinsStore() {
       }
 
       setCopySuccess(true);
-      notify("TRX address copied successfully.", "success");
 
-      setTimeout(() => setCopySuccess(false), 2500);
+      notify(
+        "TRX address copied successfully.",
+        "success"
+      );
+
+      setTimeout(() => {
+        setCopySuccess(false);
+      }, 2500);
     } catch (error) {
       console.error("Copy address failed:", error);
 
@@ -1168,7 +1142,6 @@ export default function CoinsStore() {
             <div>
               <small>Your W Coin balance</small>
 
-              {/* FIX: Read ONLY the coins attribute. */}
               <strong>
                 {Number(wallet?.coins ?? 0).toLocaleString()} W Coins
               </strong>
