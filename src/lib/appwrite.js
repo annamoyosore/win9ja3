@@ -1,13 +1,12 @@
 import { Client, Account, Databases, ID, Query } from "appwrite";
 
 const client = new Client()
-  .setEndpoint("https://nyc.cloud.appwrite.io/v1")
-  .setProject("69cb4e5c001651f6cfab");
+.setEndpoint("https://nyc.cloud.appwrite.io/v1")
+.setProject("69cb4e5c001651f6cfab");
 
 export const account = new Account(client);
 export const databases = new Databases(client);
 
-// Existing database
 export const DATABASE_ID = "69cb505d0015fbe8a669";
 
 // Existing collections
@@ -21,11 +20,11 @@ export const DEPOSIT_COLLECTION = "deposit_requests";
 export const WITHDRAW_COLLECTION = "withdrawal_requests";
 export const TRANSACTION_COLLECTION = "transactions";
 
-// Game collections
+// Other existing collections
 export const SNAKE_LOBBY_COLLECTION = "snakelobby";
 export const SNAKE_GAME_COLLECTION = "snakegame";
 
-// Settings collection in the SAME database
+// Future settings collection for your public TRX receiving address
 export const APP_SETTINGS_COLLECTION = "app_settings";
 
 export { client, ID, Query };
