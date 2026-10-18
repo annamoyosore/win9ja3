@@ -11,6 +11,7 @@ import {
 import InstallButton from "../components/InstallButton";
 
 const PROMO_COLLECTION = "promocodes";
+const WELCOME_COINS = 200;
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -22,12 +23,19 @@ export default function Auth({ onLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  function generatePromoCode(name) {
-    const clean = name.replace(/\s+/g, "").toUpperCase().slice(0, 5);
+  // ================= GENERATE PROMO CODE =================
+  function generatePromoCode(inputName) {
+    const clean = inputName
+      .replace(/\s+/g, "")
+      .toUpperCase()
+      .slice(0, 5);
+
     const rand = Math.floor(1000 + Math.random() * 9000);
+
     return clean + rand;
   }
 
+  // ================= CHECK SESSION =================
   async function hasActiveSession() {
     try {
       await account.get();
@@ -37,12 +45,14 @@ export default function Auth({ onLogin }) {
     }
   }
 
+  // ================= CLEAR SESSION =================
   async function clearSession() {
     try {
       await account.deleteSession("current");
     } catch {}
   }
 
+  // ================= NORMALIZE PHONE =================
   function normalizePhone(input) {
     let p = input.replace(/\D/g, "");
 
@@ -57,8 +67,13 @@ export default function Auth({ onLogin }) {
     return p;
   }
 
+  // ================= LOGIN / REGISTER =================
   async function handle() {
-    if (!email || !password || (!isLogin && (!name || !phone))) {
+    if (
+      !email.trim() ||
+      !password ||
+      (!isLogin && (!name.trim() || !phone.trim()))
+    ) {
       alert("Fill all fields");
       return;
     }
@@ -66,74 +81,100 @@ export default function Auth({ onLogin }) {
     try {
       setLoading(true);
 
-      // ================= LOGIN =================
+      // ==================================================
+      // LOGIN
+      // ==================================================
       if (isLogin) {
         const alreadyLoggedIn = await hasActiveSession();
 
         if (!alreadyLoggedIn) {
           try {
-            await account.createEmailSession(email, password);
+            await account.createEmailSession(
+              email.trim(),
+              password
+            );
           } catch (err) {
-            if (err.message?.includes("session")) {
+            if (err.message?.toLowerCase().includes("session")) {
               await clearSession();
-              await account.createEmailSession(email, password);
+
+              await account.createEmailSession(
+                email.trim(),
+                password
+              );
             } else {
               throw err;
             }
           }
         }
+      }
 
-      } else {
-        // ================= REGISTER =================
-
+      // ==================================================
+      // REGISTER
+      // ==================================================
+      else {
+        const cleanName = name.trim();
         const formattedPhone = normalizePhone(phone);
 
         if (!formattedPhone) {
-          alert("Enter valid phone number");
-          setLoading(false);
+          alert(
+            "Enter a valid Nigerian phone number, e.g. 08012345678"
+          );
           return;
         }
 
-        // 🔐 UNIQUE NAME CHECK
+        // ================= UNIQUE NAME CHECK =================
         const existingName = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
-          [Query.equal("name", name.trim())]
+          [
+            Query.equal("name", cleanName),
+            Query.limit(1)
+          ]
         );
 
         if (existingName.documents.length > 0) {
-          alert("This name is already taken. Please choose another.");
-          setLoading(false);
+          alert(
+            "This name is already taken. Please choose another."
+          );
           return;
         }
 
-        // 🔐 PHONE CHECK
+        // ================= PHONE CHECK =================
         const existingPhone = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
-          [Query.equal("phone", formattedPhone)]
+          [
+            Query.equal("phone", formattedPhone),
+            Query.limit(1)
+          ]
         );
 
         if (existingPhone.documents.length > 0) {
-          alert("This phone number is already registered");
-          setLoading(false);
+          alert("This phone number is already registered.");
           return;
         }
 
+        // ================= CREATE ACCOUNT =================
         await clearSession();
 
         await account.create(
           ID.unique(),
-          email,
+          email.trim(),
           password,
-          name.trim()
+          cleanName
         );
 
-        await account.createEmailSession(email, password);
+        // ================= LOGIN NEW ACCOUNT =================
+        await account.createEmailSession(
+          email.trim(),
+          password
+        );
 
         const currentUser = await account.get();
 
-        // ================= PROMO =================
+        // ==================================================
+        // VALIDATE OPTIONAL PROMO CODE
+        // ==================================================
         let promoUsed = false;
         let savedPromoCode = null;
 
@@ -141,18 +182,24 @@ export default function Auth({ onLogin }) {
           try {
             const code = promoCode.trim().toUpperCase();
 
-            const res = await databases.listDocuments(
+            const result = await databases.listDocuments(
               DATABASE_ID,
               PROMO_COLLECTION,
-              [Query.equal("code", code)]
+              [
+                Query.equal("code", code),
+                Query.limit(1)
+              ]
             );
 
-            const promo = res.documents[0];
+            const promo = result.documents[0];
 
             if (
               promo &&
               promo.isActive &&
-              (!promo.maxUses || promo.usedCount < promo.maxUses)
+              (
+                !promo.maxUses ||
+                promo.usedCount < promo.maxUses
+              )
             ) {
               promoUsed = true;
               savedPromoCode = code;
@@ -166,21 +213,23 @@ export default function Auth({ onLogin }) {
                 }
               );
 
-              alert("Promo code accepted ✅");
+              alert("Promo code accepted!");
             } else {
-              alert("Invalid promo code. Continuing without it.");
+              alert(
+                "Invalid or expired promo code. Continuing without it."
+              );
             }
           } catch (err) {
-            console.log("Promo error:", err.message);
+            console.error("Promo validation error:", err);
           }
         }
 
-        // ================= USER PROMO =================
-        let userPromo = null;
+        // ==================================================
+        // CREATE USER'S OWN PROMO CODE
+        // ==================================================
+        let userPromo = generatePromoCode(cleanName);
 
         try {
-          userPromo = generatePromoCode(name);
-
           await databases.createDocument(
             DATABASE_ID,
             PROMO_COLLECTION,
@@ -193,53 +242,77 @@ export default function Auth({ onLogin }) {
             }
           );
         } catch (err) {
-          console.log("Promo create failed, retrying...");
-          userPromo = generatePromoCode(name + Date.now());
+          console.error(
+            "Could not create user's promo code:",
+            err
+          );
+
+          // Generate a different fallback code.
+          userPromo = generatePromoCode(
+            cleanName + Date.now().toString()
+          ).slice(0, 20);
         }
 
-        // ================= WALLET =================
+        // ==================================================
+        // CREATE WALLET WITH 200 WELCOME COINS
+        // ==================================================
         await databases.createDocument(
           DATABASE_ID,
           WALLET_COLLECTION,
           ID.unique(),
           {
             userId: currentUser.$id,
-            name: name.trim(),
+            name: cleanName,
             phone: formattedPhone,
-            balance: 200,
+
+            // Welcome coins are stored here.
+            coins: WELCOME_COINS,
+
+            // Locked coins start at zero.
             locked: 0,
-            promoUsed,
+
+            promoUsed: promoUsed,
             promoCode: savedPromoCode,
             promoOwned: userPromo
           }
         );
+
+        alert(
+          `Welcome to Win9ja Life! You have received ${WELCOME_COINS} welcome coins.`
+        );
       }
 
-      onLogin();
-
+      // ================= CONTINUE TO APP =================
+      if (typeof onLogin === "function") {
+        await onLogin();
+      }
     } catch (e) {
-      console.error(e);
-      alert(e.message || "Something went wrong");
+      console.error("Authentication error:", e);
+
+      alert(
+        e.message || "Something went wrong. Please try again."
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  // ================= SUPPORT =================
   function openSupport() {
-    const message = `Hello Win9ja Support, I need help`;
-    const url = `https://wa.me/18622726355?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
+    const message = "Hello Win9ja Support, I need help.";
+
+    const url =
+      `https://wa.me/18622726355?text=${encodeURIComponent(message)}`;
+
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
+  // ================= UI =================
   return (
     <div style={styles.container}>
-
-      {/* 📲 INSTALL BUTTON ALWAYS AVAILABLE */}
       <InstallButton />
 
       <div style={styles.box}>
-
-        {/* 🔥 LOGO */}
         <h1 style={styles.logo}>🎮 Win9ja</h1>
 
         <h2>{isLogin ? "Login" : "Register"}</h2>
@@ -251,13 +324,16 @@ export default function Auth({ onLogin }) {
               placeholder="Full Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              autoComplete="name"
             />
 
             <input
               style={styles.input}
               placeholder="Phone Number"
+              type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
+              autoComplete="tel"
             />
 
             <input
@@ -265,15 +341,24 @@ export default function Auth({ onLogin }) {
               placeholder="Promo Code (optional)"
               value={promoCode}
               onChange={(e) => setPromoCode(e.target.value)}
+              autoCapitalize="characters"
             />
+
+            <div style={styles.welcomeBox}>
+              🎁 New users receive{" "}
+              <strong>{WELCOME_COINS} Gold Coins</strong>
+              {" "}when they register!
+            </div>
           </>
         )}
 
         <input
           style={styles.input}
           placeholder="Email"
+          type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value.trim())}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
         />
 
         <div style={styles.passwordWrapper}>
@@ -283,18 +368,34 @@ export default function Auth({ onLogin }) {
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete={
+              isLogin ? "current-password" : "new-password"
+            }
           />
 
           <span
             style={styles.eye}
-            onClick={() => setShowPassword(!showPassword)}
+            onClick={() => setShowPassword((prev) => !prev)}
+            role="button"
+            tabIndex={0}
+            aria-label={
+              showPassword ? "Hide password" : "Show password"
+            }
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                setShowPassword((prev) => !prev);
+              }
+            }}
           >
             {showPassword ? "🙈" : "👁️"}
           </span>
         </div>
 
         <button
-          style={styles.button}
+          style={{
+            ...styles.button,
+            opacity: loading ? 0.7 : 1
+          }}
           onClick={handle}
           disabled={loading}
         >
@@ -307,117 +408,14 @@ export default function Auth({ onLogin }) {
 
         <p
           style={styles.switch}
-          onClick={() => setIsLogin(!isLogin)}
+          onClick={() => setIsLogin((prev) => !prev)}
         >
-          {isLogin ? "Create account" : "Login instead"}
+          {isLogin
+            ? "Don't have an account? Create account"
+            : "Already have an account? Login"}
         </p>
 
         <button
           style={styles.supportBtn}
           onClick={openSupport}
         >
-          💬 Contact Support
-        </button>
-
-        <p style={styles.license}>
-          © {new Date().getFullYear()} Win9ja. All rights reserved.
-        </p>
-
-      </div>
-    </div>
-  );
-}
-
-// ===================== STYLES =====================
-const styles = {
-  container: {
-    minHeight: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    background: "#0f172a",
-    color: "#fff",
-    position: "relative"
-  },
-
-  box: {
-    padding: 20,
-    background: "#111827",
-    borderRadius: 10,
-    width: 300,
-    textAlign: "center"
-  },
-
-  logo: {
-    color: "gold",
-    marginBottom: 10
-  },
-
-  input: {
-    width: "100%",
-    padding: 10,
-    margin: "10px 0",
-    borderRadius: 6,
-    border: "none",
-    outline: "none",
-    boxSizing: "border-box"
-  },
-
-  passwordWrapper: {
-    position: "relative"
-  },
-
-  passwordInput: {
-    width: "100%",
-    padding: 10,
-    paddingRight: 40,
-    borderRadius: 6,
-    border: "none",
-    outline: "none",
-    boxSizing: "border-box"
-  },
-
-  eye: {
-    position: "absolute",
-    right: 10,
-    top: "50%",
-    transform: "translateY(-50%)",
-    cursor: "pointer",
-    userSelect: "none"
-  },
-
-  button: {
-    width: "100%",
-    padding: 12,
-    background: "gold",
-    border: "none",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontWeight: "bold",
-    marginTop: 10
-  },
-
-  switch: {
-    marginTop: 12,
-    cursor: "pointer",
-    color: "lightblue"
-  },
-
-  supportBtn: {
-    marginTop: 15,
-    width: "100%",
-    padding: 10,
-    background: "#25D366",
-    border: "none",
-    borderRadius: 8,
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: "bold"
-  },
-
-  license: {
-    marginTop: 12,
-    fontSize: 12,
-    opacity: 0.8
-  }
-};
