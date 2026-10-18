@@ -1,25 +1,13 @@
-import {
-  Client,
-  Account,
-  Databases,
-  TablesDB,
-  ID,
-  Query
-} from "appwrite";
+import { Client, Account, Databases, ID, Query } from "appwrite";
 
 const client = new Client()
-  .setEndpoint("https://nyc.cloud.appwrite.io/v1")
-  .setProject("69cb4e5c001651f6cfab");
+.setEndpoint("https://nyc.cloud.appwrite.io/v1")
+.setProject("69cb4e5c001651f6cfab");
 
 export const account = new Account(client);
-
-// Existing Collections/Documents API.
-// Keep this for your existing game and wallet code.
 export const databases = new Databases(client);
 
-// TablesDB API for tables and rows.
-export const tablesDB = new TablesDB(client);
-
+// Existing database
 export const DATABASE_ID = "69cb505d0015fbe8a669";
 
 // Existing collections
@@ -33,11 +21,11 @@ export const DEPOSIT_COLLECTION = "deposit_requests";
 export const WITHDRAW_COLLECTION = "withdrawal_requests";
 export const TRANSACTION_COLLECTION = "transactions";
 
-// Other existing collections
+// Game collections
 export const SNAKE_LOBBY_COLLECTION = "snakelobby";
 export const SNAKE_GAME_COLLECTION = "snakegame";
 
-// New table for public application settings
+// App settings collection — inside the same existing database
 export const APP_SETTINGS_COLLECTION = "app_settings";
 
 export { client, ID, Query };
