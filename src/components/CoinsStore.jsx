@@ -20,43 +20,36 @@ const PAYMENT_CONFIG = {
   NG: {
     name: "Nigeria",
     currency: "NGN",
-    symbol: "₦",
     flutterwave: "https://flutterwave.com/pay/qiattof2hy2w"
   },
   US: {
     name: "United States",
     currency: "USD",
-    symbol: "$",
     flutterwave: "https://flutterwave.com/pay/qiattof2hy2w"
   },
   GB: {
     name: "United Kingdom",
     currency: "GBP",
-    symbol: "£",
     flutterwave: ""
   },
   GH: {
     name: "Ghana",
     currency: "GHS",
-    symbol: "GH₵",
     flutterwave: ""
   },
   KE: {
     name: "Kenya",
     currency: "KES",
-    symbol: "KSh",
     flutterwave: ""
   },
   ZA: {
     name: "South Africa",
     currency: "ZAR",
-    symbol: "R",
     flutterwave: ""
   },
   CA: {
     name: "Canada",
     currency: "CAD",
-    symbol: "C$",
     flutterwave: ""
   }
 };
@@ -129,7 +122,7 @@ const COIN_PACKAGES = [
 ];
 
 // ==========================================
-// HELPERS
+// HELPER FUNCTIONS
 // ==========================================
 
 function formatMoney(amount, currency) {
@@ -147,15 +140,8 @@ function formatMoney(amount, currency) {
   }
 }
 
-function makeReference() {
-  return `W9L-${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2, 8)
-    .toUpperCase()}`;
-}
-
 // ==========================================
-// COMPONENT
+// MAIN COMPONENT
 // ==========================================
 
 export default function CoinsStore() {
@@ -170,19 +156,17 @@ export default function CoinsStore() {
 
   const [trxAddress, setTrxAddress] = useState("");
   const [trxLoading, setTrxLoading] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-
   const [notice, setNotice] = useState({
     type: "",
     message: ""
   });
-
-  const [copySuccess, setCopySuccess] = useState(false);
 
   const config = PAYMENT_CONFIG[country] || PAYMENT_CONFIG.NG;
 
@@ -217,7 +201,7 @@ export default function CoinsStore() {
           }, 180);
         }
       } catch {
-        // Notifications must still work if sound is unavailable.
+        // The text notification still works if audio is unavailable.
       }
     }
   }
@@ -239,7 +223,7 @@ export default function CoinsStore() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadUser() {
+    async function loadUserAndWallet() {
       try {
         const currentUser = await account.get();
 
@@ -247,7 +231,7 @@ export default function CoinsStore() {
 
         setUser(currentUser);
 
-        const result = await databases.listDocuments(
+        const response = await databases.listDocuments(
           DATABASE_ID,
           WALLET_COLLECTION,
           [
@@ -258,10 +242,15 @@ export default function CoinsStore() {
 
         if (cancelled) return;
 
-        if (result.documents.length > 0) {
-          setWallet(result.documents[0]);
+        if (response.documents.length > 0) {
+          const userWallet = response.documents[0];
 
-          const savedCountry = result.documents[0].country;
+          setWallet(userWallet);
+
+          // FIX: Purchased/earned W Coins use the "coins" attribute.
+          // Do not read wallet.balance for the coin balance.
+
+          const savedCountry = userWallet.country;
 
           if (
             savedCountry &&
@@ -269,20 +258,26 @@ export default function CoinsStore() {
           ) {
             setCountry(savedCountry);
           }
+        } else {
+          setWallet(null);
+          notify(
+            "Your wallet was not found. Please contact support.",
+            "error"
+          );
         }
       } catch (error) {
-        console.error("Could not load user or wallet:", error);
+        console.error("Failed to load wallet:", error);
 
         if (!cancelled) {
           notify(
-            "Unable to load your account. Please sign in again.",
+            "Unable to load your account or wallet. Please sign in again.",
             "error"
           );
         }
       }
     }
 
-    loadUser();
+    loadUserAndWallet();
 
     return () => {
       cancelled = true;
@@ -290,7 +285,7 @@ export default function CoinsStore() {
   }, []);
 
   // ==========================================
-  // LOAD TRX RECEIVING ADDRESS
+  // LOAD TRX ADDRESS USING DOCUMENT ID
   // ==========================================
 
   useEffect(() => {
@@ -303,17 +298,16 @@ export default function CoinsStore() {
       setTrxAddress("");
 
       try {
-        const response = await databases.listDocuments(
+        // FIX: Fetch the exact app_settings document by ID.
+        const response = await databases.getDocument(
           DATABASE_ID,
           APP_SETTINGS_COLLECTION,
-          [
-            Query.equal("settingKey", "trx_address"),
-            Query.limit(1)
-          ]
+          "6ad4a535003691fb09cf"
         );
 
+        // Assumes the address is stored in settingValue.
         const address = String(
-          response.documents[0]?.settingValue || ""
+          response.settingValue || ""
         ).trim();
 
         if (!cancelled) {
@@ -321,17 +315,19 @@ export default function CoinsStore() {
 
           if (!address) {
             notify(
-              "TRX payments are not configured yet. Please try another payment method.",
+              "The TRX receiving address has not been configured.",
               "error"
             );
           }
         }
       } catch (error) {
-        console.error("Could not load TRX address:", error);
+        console.error("Failed to load TRX address:", error);
 
         if (!cancelled) {
+          setTrxAddress("");
+
           notify(
-            "Unable to load the TRX address. Please try again.",
+            "Unable to load the TRX address. Check the Appwrite document and permissions.",
             "error"
           );
         }
@@ -360,24 +356,25 @@ export default function CoinsStore() {
     }
 
     try {
-      if (navigator.clipboard && window.isSecureContext) {
+      if (
+        navigator.clipboard &&
+        window.isSecureContext
+      ) {
         await navigator.clipboard.writeText(trxAddress);
       } else {
-        const input = document.createElement("textarea");
+        const textarea = document.createElement("textarea");
 
-        input.value = trxAddress;
-        input.readOnly = true;
+        textarea.value = trxAddress;
+        textarea.readOnly = true;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
 
-        input.style.position = "fixed";
-        input.style.left = "-9999px";
-
-        document.body.appendChild(input);
-
-        input.select();
+        document.body.appendChild(textarea);
+        textarea.select();
 
         const copied = document.execCommand("copy");
 
-        document.body.removeChild(input);
+        document.body.removeChild(textarea);
 
         if (!copied) {
           throw new Error("Clipboard copy failed.");
@@ -389,7 +386,7 @@ export default function CoinsStore() {
 
       setTimeout(() => setCopySuccess(false), 2500);
     } catch (error) {
-      console.error("Copy failed:", error);
+      console.error("Copy address failed:", error);
 
       notify(
         "Copy failed. Press and hold the address to copy it manually.",
@@ -438,7 +435,7 @@ export default function CoinsStore() {
       !config.flutterwave
     ) {
       notify(
-        "Flutterwave checkout is not configured for this country. Please choose TRX or contact support.",
+        "Flutterwave is not configured for this country.",
         "error"
       );
       return;
@@ -449,7 +446,7 @@ export default function CoinsStore() {
       !trxAddress
     ) {
       notify(
-        "The TRX receiving address is not available yet.",
+        "The TRX receiving address is not available.",
         "error"
       );
       return;
@@ -463,10 +460,13 @@ export default function CoinsStore() {
   // ==========================================
 
   async function submitPurchase(event) {
-    event?.preventDefault();
+    event.preventDefault();
 
     if (!user) {
-      notify("Please sign in before purchasing coins.", "error");
+      notify(
+        "Please sign in before purchasing coins.",
+        "error"
+      );
       return;
     }
 
@@ -475,23 +475,19 @@ export default function CoinsStore() {
       return;
     }
 
-    if (
-      paymentMethod === "trx" &&
-      !paymentReference.trim()
-    ) {
+    if (!wallet) {
       notify(
-        "Enter your TRX transaction ID after sending payment.",
+        "Your wallet was not found. Please contact support.",
         "error"
       );
       return;
     }
 
-    if (
-      paymentMethod === "flutterwave" &&
-      !paymentReference.trim()
-    ) {
+    if (!paymentReference.trim()) {
       notify(
-        "Enter your Flutterwave payment reference after paying.",
+        paymentMethod === "trx"
+          ? "Enter your TRX transaction ID."
+          : "Enter your Flutterwave payment reference.",
         "error"
       );
       return;
@@ -510,8 +506,6 @@ export default function CoinsStore() {
     setLoading(true);
 
     try {
-      const reference = paymentReference.trim();
-
       await databases.createDocument(
         DATABASE_ID,
         DEPOSIT_COLLECTION,
@@ -519,38 +513,40 @@ export default function CoinsStore() {
         {
           userId: user.$id,
           userEmail: user.email || "",
-          userPhone: wallet?.phone || "",
+          userPhone: wallet.phone || "",
           packageId: selectedPackage.id,
           coins: selectedPackage.coins,
           amount,
           currency: config.currency,
           country,
           paymentProvider: paymentMethod,
-          paymentReference: reference,
+          paymentReference: paymentReference.trim(),
           paymentNote: paymentNote.trim(),
           status: "pending"
         }
       );
 
       notify(
-        "Payment submission received. Your request is pending verification.",
+        "Payment request submitted for verification.",
         "success"
       );
 
       setStep(4);
     } catch (error) {
-      console.error("Purchase submission failed:", error);
+      console.error("Payment submission failed:", error);
 
       notify(
         error?.message ||
-          "Unable to submit your payment. Check your connection and try again.",
+          "Unable to submit your payment request. Please try again.",
         "error"
       );
     } finally {
       setLoading(false);
     }
-  }// ==========================================
-  // STYLES
+  }
+
+  // ==========================================
+  // STYLING
   // ==========================================
 
   const styles = `
@@ -748,7 +744,6 @@ export default function CoinsStore() {
     }
 
     .w9-package {
-      position: relative;
       text-align: left;
       padding: 17px 14px;
       background: linear-gradient(145deg, #fffdf5, #fff);
@@ -760,16 +755,15 @@ export default function CoinsStore() {
       min-width: 0;
     }
 
-    .w9-package:hover {
+    .w9-package:hover:not(:disabled) {
       transform: translateY(-3px);
       border-color: #eab308;
       box-shadow: 0 12px 24px #ca8a0417;
     }
 
-    .w9-package:focus-visible,
-    .w9-button:focus-visible {
-      outline: 3px solid #86efac;
-      outline-offset: 3px;
+    .w9-package:disabled {
+      opacity: .45;
+      cursor: not-allowed;
     }
 
     .w9-package-top {
@@ -807,7 +801,7 @@ export default function CoinsStore() {
       margin: 0;
     }
 
-    .w9-package .w9-coin-label {
+    .w9-coin-label {
       font-size: 11px;
       color: #64748b;
       margin: 3px 0 13px;
@@ -836,7 +830,7 @@ export default function CoinsStore() {
       align-items: center;
       gap: 13px;
       border: 1px solid #dbe2ea;
-      background: #fff;
+      background: white;
       border-radius: 16px;
       padding: 15px;
       cursor: pointer;
@@ -897,14 +891,13 @@ export default function CoinsStore() {
       transition: opacity .2s, transform .2s;
     }
 
-    .w9-button:hover {
+    .w9-button:hover:not(:disabled) {
       transform: translateY(-1px);
     }
 
     .w9-button:disabled {
       opacity: .55;
       cursor: not-allowed;
-      transform: none;
     }
 
     .w9-primary {
@@ -954,24 +947,23 @@ export default function CoinsStore() {
       -webkit-user-select: text;
     }
 
-    .w9-info {
+    .w9-info,
+    .w9-warning {
       padding: 13px 15px;
       border-radius: 12px;
-      background: #eff6ff;
-      color: #1e40af;
       font-size: 12px;
       line-height: 1.7;
       margin: 15px 0;
     }
 
+    .w9-info {
+      background: #eff6ff;
+      color: #1e40af;
+    }
+
     .w9-warning {
-      padding: 13px 15px;
-      border-radius: 12px;
       background: #fffbeb;
       color: #92400e;
-      font-size: 12px;
-      line-height: 1.7;
-      margin: 15px 0;
     }
 
     .w9-notice {
@@ -1118,7 +1110,7 @@ export default function CoinsStore() {
   `;
 
   // ==========================================
-  // PAGE UI
+  // RENDER
   // ==========================================
 
   return (
@@ -1156,34 +1148,38 @@ export default function CoinsStore() {
           </button>
         </header>
 
+        {/* HERO AND WALLET BALANCE */}
+
         <section className="w9-hero">
-          <div className="w9-eyebrow">Win9ja Life Store</div>
+          <div className="w9-eyebrow">
+            Win9ja Life Store
+          </div>
 
           <h1>Power up with W Coins</h1>
 
           <p>
             Get more coins for your Win9ja Life experience.
-            Choose a package and follow the secure payment steps.
+            Choose a package and follow the payment steps.
           </p>
 
           <div className="w9-balance">
             <span style={{ fontSize: 30 }}>🪙</span>
+
             <div>
-              <small>Your wallet balance</small>
+              <small>Your W Coin balance</small>
+
+              {/* FIX: Read ONLY the coins attribute. */}
               <strong>
-                {Number(
-                  wallet?.balance ??
-                  wallet?.coins ??
-                  0
-                ).toLocaleString()} W Coins
+                {Number(wallet?.coins ?? 0).toLocaleString()} W Coins
               </strong>
             </div>
           </div>
         </section>
 
-        {/* STEP INDICATOR */}
-
-        <div className="w9-steps" aria-label={`Step ${step} of 4`}>
+        <div
+          className="w9-steps"
+          aria-label={`Step ${step} of 4`}
+        >
           {[1, 2, 3, 4].map((number) => (
             <div
               key={number}
@@ -1194,7 +1190,9 @@ export default function CoinsStore() {
           ))}
         </div>
 
-        {/* STEP 1: SELECT PACKAGE */}
+        {/* ======================================
+            STEP 1: SELECT PACKAGE
+        ====================================== */}
 
         {step === 1 && (
           <section className="w9-panel">
@@ -1203,12 +1201,14 @@ export default function CoinsStore() {
             </h2>
 
             <p className="w9-subtitle">
-              Select your country to see the available currency
-              and package prices.
+              Select your country to see available package prices.
             </p>
 
             <div className="w9-country">
-              <label className="w9-field-label" htmlFor="w9-country">
+              <label
+                className="w9-field-label"
+                htmlFor="w9-country"
+              >
                 Country / Currency
               </label>
 
@@ -1243,11 +1243,6 @@ export default function CoinsStore() {
                     className="w9-package"
                     disabled={restricted}
                     onClick={() => choosePackage(pack)}
-                    style={
-                      restricted
-                        ? { opacity: 0.45, cursor: "not-allowed" }
-                        : undefined
-                    }
                   >
                     <div className="w9-package-top">
                       <div className="w9-coin-art">
@@ -1287,14 +1282,16 @@ export default function CoinsStore() {
             </div>
 
             <div className="w9-info">
-              ℹ️ Coin purchases remain pending until the payment
-              is verified. Do not send payment to an address you
-              cannot confirm belongs to Win9ja Life.
+              Coin purchases remain pending until payment is
+              verified. Only send funds to a receiving address
+              you have confirmed belongs to Win9ja Life.
             </div>
           </section>
         )}
 
-        {/* STEP 2: SELECT PAYMENT METHOD */}
+        {/* ======================================
+            STEP 2: PAYMENT METHOD
+        ====================================== */}
 
         {step === 2 && selectedPackage && (
           <section className="w9-panel">
@@ -1367,7 +1364,6 @@ export default function CoinsStore() {
                   <strong>TRX / Tron network</strong>
                   <small>
                     Send crypto to the displayed receiving address.
-                    Check the network before sending.
                   </small>
                 </div>
 
@@ -1403,7 +1399,9 @@ export default function CoinsStore() {
           </section>
         )}
 
-        {/* STEP 3: MAKE PAYMENT AND SUBMIT REFERENCE */}
+        {/* ======================================
+            STEP 3: PAYMENT
+        ====================================== */}
 
         {step === 3 && selectedPackage && (
           <section className="w9-panel">
@@ -1412,8 +1410,8 @@ export default function CoinsStore() {
             </h2>
 
             <p className="w9-subtitle">
-              Follow the instructions below. Then enter your
-              payment reference to submit your request.
+              Follow the instructions and submit your transaction
+              reference for verification.
             </p>
 
             <div className="w9-summary">
@@ -1448,7 +1446,7 @@ export default function CoinsStore() {
               <>
                 <div className="w9-address-box">
                   <label className="w9-field-label">
-                    Official TRX receiving address
+                    TRX receiving address
                   </label>
 
                   {trxLoading ? (
@@ -1488,19 +1486,16 @@ export default function CoinsStore() {
                 </div>
 
                 <div className="w9-warning">
-                  <strong>Important:</strong> Confirm that the
-                  receiving address and supported network are
-                  correct before sending funds. Cryptocurrency
-                  transfers may be irreversible. The displayed
-                  address should be verified by the site operator.
+                  <strong>Important:</strong> Confirm the receiving
+                  address and network before sending funds.
+                  Cryptocurrency transfers may be irreversible.
                 </div>
               </>
             ) : (
               <>
                 <div className="w9-info">
-                  Select the button below to open the configured
-                  Flutterwave checkout. Confirm the amount and
-                  currency on the checkout page before paying.
+                  Open the configured Flutterwave checkout. Confirm
+                  the amount and currency before paying.
                 </div>
 
                 <button
@@ -1509,7 +1504,7 @@ export default function CoinsStore() {
                   onClick={() => {
                     if (!config.flutterwave) {
                       notify(
-                        "Flutterwave is not configured for your country.",
+                        "Flutterwave is not configured for this country.",
                         "error"
                       );
                       return;
@@ -1526,8 +1521,8 @@ export default function CoinsStore() {
                 </button>
 
                 <p className="w9-muted">
-                  After completing payment, return here and enter
-                  the payment reference provided by Flutterwave.
+                  After paying, return here and enter your payment
+                  reference.
                 </p>
               </>
             )}
@@ -1577,14 +1572,14 @@ export default function CoinsStore() {
                   onChange={(event) =>
                     setPaymentNote(event.target.value)
                   }
-                  placeholder="Add any relevant payment details"
+                  placeholder="Add relevant payment details"
                 />
               </div>
 
               <div className="w9-info">
                 Submitting this form records your payment claim.
-                It does not automatically verify your payment or
-                credit coins to your wallet.
+                It does not automatically verify payment or credit
+                coins to your wallet.
               </div>
 
               <div className="w9-actions">
@@ -1605,16 +1600,16 @@ export default function CoinsStore() {
                     (paymentMethod === "trx" && !trxAddress)
                   }
                 >
-                  {loading
-                    ? "Submitting..."
-                    : "Submit Payment"}
+                  {loading ? "Submitting..." : "Submit Payment"}
                 </button>
               </div>
             </form>
           </section>
         )}
 
-        {/* STEP 4: PAYMENT SUBMISSION CONFIRMATION */}
+        {/* ======================================
+            STEP 4: CONFIRMATION
+        ====================================== */}
 
         {step === 4 && (
           <section className="w9-panel">
@@ -1628,7 +1623,7 @@ export default function CoinsStore() {
               <p className="w9-muted">
                 Your payment details have been submitted for
                 verification. Your coins will remain uncredited
-                until the payment is confirmed.
+                until payment is confirmed.
               </p>
             </div>
 
@@ -1670,9 +1665,9 @@ export default function CoinsStore() {
             </div>
 
             <div className="w9-info">
-              Keep your transaction details. If your payment is
-              confirmed but your coins are not credited, contact
-              Win9ja Life support with your payment reference.
+              Keep your payment reference. If payment is confirmed
+              but your coins are not credited, contact Win9ja Life
+              support.
             </div>
 
             <button
