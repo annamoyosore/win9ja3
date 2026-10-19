@@ -1,8 +1,6 @@
-// src/pages/CasinoWheel.jsx
-
 import { useEffect, useRef, useState } from "react";
 import {
-  databases,
+  ,
   DATABASE_ID,
   WALLET_COLLECTION,
   CASINO_COLLECTION,
